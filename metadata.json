@@ -1,0 +1,6 @@
+{
+  "name": "Abedin Growth AI",
+  "description": "Autonomous AI Growth & Sales Platform for Abedin Voice AI to discover leads, research investors, coordinate partners, draft personalized outreach, and automate meetings.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
