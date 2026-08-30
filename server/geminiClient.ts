@@ -22,13 +22,13 @@ export type ModelCategory = "FAST" | "SMART" | "DEEP";
 export function getModelForCategory(category: ModelCategory = "FAST"): string {
   switch (category) {
     case "FAST":
-      return "gemini-flash-latest";
+      return "gemini-3.1-pro-preview";
     case "SMART":
-      return "gemini-flash-latest";
+      return "gemini-3.1-pro-preview";
     case "DEEP":
       return "gemini-3.1-pro-preview";
     default:
-      return "gemini-flash-latest";
+      return "gemini-3.1-pro-preview";
   }
 }
 
@@ -113,9 +113,10 @@ export async function safeGenerateJSON<T = any>(options: {
   const candidateModels = Array.from(
     new Set([
       primaryModel,
-      "gemini-flash-latest",
-      "gemini-3.1-flash-lite",
+      "gemini-3.1-pro-preview",
       "gemini-3.7-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest",
     ])
   );
 

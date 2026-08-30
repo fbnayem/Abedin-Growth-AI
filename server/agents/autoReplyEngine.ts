@@ -273,7 +273,29 @@ export async function autoReplyAllPendingInbounds(): Promise<{
 
   for (const conv of pendingConvs) {
     try {
-      const res = await autoReplyToConversation(conv.id);
+      
+      // Route to Pipeline
+      const { pipelineService } = await import('../services/pipeline.service.ts');
+      const lastMessage = conv.thread[conv.thread.length - 1];
+      await pipelineService.processInboundMessage({
+        fromEmail: conv.contactEmail,
+        fromName: conv.contactName,
+        subject: lastMessage?.subject || "No Subject",
+        textBody: lastMessage?.bodyText || "",
+        providerMessageId: lastMessage?.id || `msg_${Date.now()}`,
+        threadId: conv.id,
+        orgId: "default_org"
+      });
+      
+      const res = {
+        success: true,
+        conversationId: conv.id,
+        recipientEmail: conv.contactEmail,
+        subject: "Processing",
+        bodyText: "Routed to Pipeline",
+        sentAt: new Date().toISOString()
+      };
+
       results.push(res);
       // Small pacing delay
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -756,73 +778,18 @@ export async function simulateInboundProspectReply(
   const pickedScenario = replyScenarios[Math.floor(Math.random() * replyScenarios.length)];
   const msgId = `msg_client_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
-  const newProspectMsg: EmailMessage = {
-    id: msgId,
-    conversationId: conv.id,
-    sender: "PROSPECT",
-    senderName: conv.contactName,
-    senderEmail: conv.contactEmail,
-    recipientEmail: globalStore.senderIdentity.senderEmail,
+  // PHASE 87: Route Simulated Reply through the Multi-Agent Pipeline
+  const { pipelineService } = await import('../services/pipeline.service.ts');
+  
+  await pipelineService.processInboundMessage({
+    fromEmail: conv.contactEmail,
+    fromName: conv.contactName,
     subject: pickedScenario.subject,
-    bodyHtml: `<p>${pickedScenario.bodyText.replace(/\n/g, "<br/>")}</p>`,
-    bodyText: pickedScenario.bodyText,
-    sentAt: nowIso,
-    status: "SENT",
-    qcScore: 100,
-    qcDecision: "PASS",
-  };
-
-  conv.thread.push(newProspectMsg);
-  conv.status = "ACTIVE";
-  conv.unread = true;
-  conv.lastReplyIntent = pickedScenario.intent;
-  conv.intentConfidence = 0.98;
-  conv.aiSummary = pickedScenario.summary;
-  conv.aiRecommendedAction = pickedScenario.recommendedAction;
-  conv.updatedAt = nowIso;
-
-  // Prepare proposed AI draft response
-  conv.proposedAiDraft = {
-    subject: `Re: ${conv.subject.replace(/^Re:\s*/i, "")}`,
-    body: `Hi ${firstName},\n\nThank you for getting back to me! Yes, absolutely—Abedin Voice AI operates with native 2-way real-time synchronization with Google Calendar and clinic practice systems, with sub-500ms voice response so patient triage is completely seamless.\n\nWould Thursday at 2:00 PM BST or Friday at 11:00 AM BST work for a quick 10-minute live demonstration on Google Meet (https://meet.google.com/abn-vce-demo)?\n\nAlternatively, you can choose any time directly on my booking calendar: https://calendar.app.google/abedin-voice-ai-demo\n\nLooking forward to speaking!\n\nBest regards,\n${globalStore.senderIdentity.senderName}\nFounder & CEO, ${globalStore.senderIdentity.companyName}\nhttps://abedintech.com/voice-ai/`,
-    rationale: "Addresses technical inquiry directly and offers calendar booking link alongside Google Meet live demo room.",
-    policyStatus: { actionName: "SEND_REPLY", decision: "ALLOW", reason: "Within autonomous scope" },
-  };
-
-  // Move conversation to the front of the list
-  const convIndex = globalStore.conversations.findIndex((c) => c.id === conv!.id);
-  if (convIndex > 0) {
-    globalStore.conversations.splice(convIndex, 1);
-    globalStore.conversations.unshift(conv);
-  }
-
-  // Update lead status if applicable
-  if (lead) {
-    lead.status = "ENGAGED";
-    lead.lastActivityAt = nowIso;
-    lead.nextAction = `Inbound Client Reply: "${pickedScenario.bodyText.substring(0, 60)}..." — Auto-respond with demo slots.`;
-  }
-
-  // Add AI run log
-  globalStore.aiRunLogs.unshift({
-    id: `run_reply_sim_${Date.now()}`,
-    workspaceId: "default",
-    agentType: "InboundReplySimulator",
-    actionType: "CLIENT_REPLY_RECEIVED",
-    modelCategory: "SMART",
-    status: "SUCCESS",
-    confidence: 0.98,
-    summary: `📩 Inbound client reply received from ${conv.contactName} (${conv.companyName}): "${pickedScenario.subject}". Intent: ${pickedScenario.intent}`,
-    durationMs: 180,
-    createdAt: nowIso,
+    textBody: pickedScenario.bodyText,
+    providerMessageId: msgId,
+    threadId: conv.id,
+    orgId: 'default_org'
   });
 
-  globalStore.saveToDisk();
-
-  return {
-    success: true,
-    conversation: conv,
-    message: newProspectMsg,
-  };
+  return { success: true, conversation: conv, message: null as any };
 }
-

@@ -35,7 +35,7 @@ export async function processConversationThread(
     recommendedAction: "Answer integration capabilities and suggest demo.",
     suggestedDraft: {
       subject: `Re: ${lastMessage?.subject || "Abedin Voice AI"}`,
-      body: `Hi ${conversation.contactName.split(" ")[0]},\n\nThank you for reaching out. Yes, Abedin Voice AI connects directly with Google Calendar and scheduling software for automatic 2-way booking with zero manual entry.\n\nWould you be open to a quick 10-minute live demonstration on Google Meet this week?\n\nDirect walkthrough link: https://meet.google.com/abn-vce-demo\n\nBest,\nNayem`,
+      body: `Hi ${conversation.contactName.split(" ")[0]},\n\nThank you for reaching out. Yes, Abedin Voice AI connects directly with Google Calendar and scheduling software for automatic 2-way booking with zero manual entry.\n\nWould you be open to a quick 10-minute live demonstration on Google Meet this week?\n\nDirect walkthrough link: https://meet.google.com/pending-calendar-creation\n\nBest,\nNayem`,
       rationale: "Addresses interest promptly and advances towards meeting booking.",
       policyStatus: "ALLOW",
     },
@@ -65,10 +65,11 @@ Analyze the latest reply from the prospect:
 4. Create a 1-2 sentence executive Summary of what they are saying
 5. Extract explicit Questions Asked
 6. Formulate clear Recommended Action
-7. Draft a high-conversion, polite, concise Response Draft that strictly relies on approved knowledge:
-   - If they ask for a demo or meeting: Suggest booking a demo on Google Meet (https://meet.google.com/abn-vce-demo) or offer two concrete time slots.
-   - If they ask about custom enterprise pricing or valuation: State the starting model or escalate for founder review (DO NOT fabricate valuation or unverified pricing).
-   - STRICT PROHIBITION: DO NOT share any phone numbers, telephone digits, or mobile call invitations in the email.
+7. Draft a short, human-like, concise Response Draft (40-70 words):
+   - HUMAN TONE: Direct, warm, crisp, no corporate fluff or robotic preamble.
+   - SPECIFIC ANSWERS: Answer questions directly in 1-2 specific sentences.
+   - CALENDAR / DEMO: Offer a 10-minute demo on Google Meet (https://meet.google.com/pending-calendar-creation) or calendar booking (https://calendar.app.google/abedin-voice-ai-demo).
+   - STRICT PROHIBITION: DO NOT share any phone numbers or mobile call invitations.
    - Policy Status: ALLOW, REQUIRE_APPROVAL, ESCALATE, or BLOCK.
 
 Return ONLY valid JSON matching this exact structure:
@@ -76,16 +77,15 @@ Return ONLY valid JSON matching this exact structure:
   "intent": "QUESTION",
   "confidence": 0.94,
   "sentiment": "POSITIVE",
-  "summary": "Prospect is interested in Voice AI for their appointment bookings and asked whether it integrates with Google Calendar and practice software.",
+  "summary": "Prospect is asking about Google Calendar integration.",
   "questionsAsked": [
-    "Does Abedin Voice AI sync directly with our Google Calendar?",
-    "What is the setup timeframe?"
+    "Does Abedin Voice AI sync directly with Google Calendar?"
   ],
-  "recommendedAction": "Confirm real-time calendar synchronization and propose a 15-minute live Google Meet voice demonstration.",
+  "recommendedAction": "Confirm real-time calendar synchronization and propose a 10-minute Google Meet voice demonstration.",
   "suggestedDraft": {
     "subject": "Re: ${lastMessage?.subject || "Quick question"}",
-    "body": "Hi ${conversation.contactName.split(" ")[0]},\n\nThanks for getting back to me! Yes, absolutely—Abedin Voice AI features native 2-way synchronization with Google Calendar and major scheduling systems in real time, so double-bookings are impossible.\n\nSetup typically takes under 15 minutes.\n\nWould you be open to a quick 10-minute live demonstration on Google Meet this Thursday at 2:00 PM or Friday at 10:30 AM?\n\nDirect walkthrough link: https://meet.google.com/abn-vce-demo\n\nBest regards,\nNayem",
-    "rationale": "Directly resolves calendar compatibility question with approved knowledge and provides clear call-to-action.",
+    "body": "Hi ${conversation.contactName.split(" ")[0]},\n\nYes, absolutely—Abedin Voice AI syncs 2-way with Google Calendar in real time, so appointments lock instantly with zero double-booking.\n\nWould you be open for a quick 10-minute demo on Google Meet this Thursday at 2:00 PM BST? (Meet link: https://meet.google.com/pending-calendar-creation)\n\nAlternatively, grab any slot here: https://calendar.app.google/abedin-voice-ai-demo\n\nBest,\nNayem\n\nNayem Abedin · Abedin Tech\nhttps://abedintech.com/voice-ai/",
+    "rationale": "Directly resolves calendar compatibility question concisely with approved knowledge.",
     "policyStatus": "ALLOW"
   }
 }

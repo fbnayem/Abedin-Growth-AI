@@ -11,15 +11,31 @@ import {
 } from "lucide-react";
 
 export const AnalyticsView: React.FC = () => {
-  const funnelSteps = [
-    { label: "1. Discovered", count: 240, dropoff: "100%", color: "bg-slate-700" },
-    { label: "2. AI Qualified (Score > 80)", count: 184, dropoff: "76.6%", color: "bg-blue-600" },
-    { label: "3. Outreach Sent", count: 120, dropoff: "50.0%", color: "bg-indigo-600" },
-    { label: "4. Opened", count: 88, dropoff: "73.3% Open Rate", color: "bg-purple-600" },
-    { label: "5. Replied", count: 34, dropoff: "28.3% Reply Rate", color: "bg-amber-600" },
-    { label: "6. Positive Intent", count: 19, dropoff: "55.8% Positivity", color: "bg-emerald-600" },
-    { label: "7. Demo Booked", count: 8, dropoff: "42.1% Conversion", color: "bg-emerald-500" },
-  ];
+    const [funnelSteps, setFunnelSteps] = React.useState<any[]>([
+    { label: "1. Discovered", count: 0, dropoff: "100%", color: "bg-slate-700" },
+    { label: "2. AI Qualified (Score > 80)", count: 0, dropoff: "0%", color: "bg-blue-600" },
+    { label: "3. Outreach Sent", count: 0, dropoff: "0%", color: "bg-indigo-600" },
+    { label: "4. Opened", count: 0, dropoff: "0% Open Rate", color: "bg-purple-600" },
+    { label: "5. Replied", count: 0, dropoff: "0% Reply Rate", color: "bg-amber-600" },
+    { label: "6. Positive Intent", count: 0, dropoff: "0% Positivity", color: "bg-emerald-600" },
+    { label: "7. Demo Booked", count: 0, dropoff: "0% Conversion", color: "bg-emerald-500" },
+  ]);
+
+  React.useEffect(() => {
+    fetch('/api/analytics/funnel')
+      .then(res => {
+        if (!res.headers.get("content-type")?.includes("application/json")) {
+          throw new Error("Invalid content-type");
+        }
+        return res.json();
+      })
+      .then(data => {
+        if (data.funnel) {
+          setFunnelSteps(data.funnel);
+        }
+      })
+      .catch(e => console.error("Failed to load analytics", e));
+  }, []);
 
   return (
     <div className="space-y-6">

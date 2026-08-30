@@ -105,12 +105,17 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
     workspaceGmailService.disconnect();
     setGmailState(workspaceGmailService.getState());
   };
-  const [activeTab, setActiveTab] = useState<"ALL" | "EMAIL" | "LINKEDIN" | "CALENDAR" | "VOICE">("ALL");
+  const [activeTab, setActiveTab] = useState<"ALL" | "EMAIL" | "LINKEDIN" | "CALENDAR" | "VOICE" | "DATABASE" | "QUEUE" | "PAYMENTS">("ALL");
   const [isSavingSender, setIsSavingSender] = useState(false);
   const [isSavingLinkedIn, setIsSavingLinkedIn] = useState(false);
   const [senderSavedSuccess, setSenderSavedSuccess] = useState(false);
   const [linkedInSavedSuccess, setLinkedInSavedSuccess] = useState(false);
   const [testSendSuccess, setTestSendSuccess] = useState(false);
+  const [dbConfig, setDbConfig] = useState({ url: "" });
+  const [redisConfig, setRedisConfig] = useState({ url: "" });
+  const [stripeConfig, setStripeConfig] = useState({ secretKey: "", webhookSecret: "" });
+  const [gmailOauth, setGmailOauth] = useState({ clientId: "", clientSecret: "", redirectUri: "" });
+  const [calendarConfig, setCalendarConfig] = useState({ enabled: false });
 
   // Load from API if available
   useEffect(() => {
@@ -203,6 +208,9 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
             { id: "EMAIL", label: "Email Sending" },
             { id: "LINKEDIN", label: "LinkedIn" },
             { id: "CALENDAR", label: "Calendar & Voice" },
+            { id: "DATABASE", label: "Database" },
+            { id: "QUEUE", label: "Background Queue" },
+            { id: "PAYMENTS", label: "Payments" },
           ].map((t) => (
             <button
               key={t.id}
@@ -595,6 +603,43 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
               <ShieldCheck className="w-4 h-4 text-emerald-600" />
               <span>SPF, DKIM, DMARC 100% compliant on abedintech.com</span>
             </div>
+            {/* GMAIL OAUTH FIELDS ADDED */}
+            <div className="pt-4 border-t border-slate-100 mt-6">
+              <h3 className="text-sm font-bold text-slate-800 mb-4">Google Cloud OAuth Credentials</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Gmail Client ID (GMAIL_CLIENT_ID)</label>
+                  <input
+                    type="text"
+                    value={gmailOauth.clientId}
+                    onChange={(e) => setGmailOauth({ ...gmailOauth, clientId: e.target.value })}
+                    placeholder="xxxxxxxx.apps.googleusercontent.com"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Gmail Client Secret (GMAIL_CLIENT_SECRET)</label>
+                  <input
+                    type="password"
+                    value={gmailOauth.clientSecret}
+                    onChange={(e) => setGmailOauth({ ...gmailOauth, clientSecret: e.target.value })}
+                    placeholder="GOCSPX-xxxxxxx"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium font-mono"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Redirect URI (GMAIL_REDIRECT_URI)</label>
+                  <input
+                    type="text"
+                    value={gmailOauth.redirectUri}
+                    onChange={(e) => setGmailOauth({ ...gmailOauth, redirectUri: e.target.value })}
+                    placeholder="https://yourdomain.com/auth/google/callback"
+                    className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
 
             <button
               onClick={handleSaveSender}
@@ -640,6 +685,21 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
               <span className="text-slate-400">Timezone: Europe/London (GMT+0)</span>
               <span className="font-bold text-blue-600">Auto-Booking Active</span>
             </div>
+            <div className="pt-4 border-t border-slate-100 mt-4 space-y-3">
+               <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Enable Real-Time Calendar API Sync</label>
+                  <div className="flex items-center gap-2 mt-1 text-xs">
+                    <input 
+                      type="checkbox" 
+                      checked={calendarConfig.enabled}
+                      onChange={(e) => setCalendarConfig({ ...calendarConfig, enabled: e.target.checked })}
+                      className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" 
+                    />
+                    <span className="text-slate-600">Share availability logic with Google Workspace credentials</span>
+                  </div>
+               </div>
+            </div>
+
           </div>
 
           {/* Voice AI */}
@@ -668,6 +728,111 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* DATABASE INTEGRATION */}
+      {(activeTab === "ALL" || activeTab === "DATABASE") && (
+        <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-5">
+          <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+            <div className="p-3 rounded-2xl bg-emerald-100 text-emerald-600">
+              <Database className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">PostgreSQL Database (Cloud SQL)</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Primary durable store for contacts, conversations, and outbox.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-3 col-span-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Database Connection String (DATABASE_URL)</label>
+                <input
+                  type="password"
+                  value={dbConfig.url}
+                  onChange={(e) => setDbConfig({ ...dbConfig, url: e.target.value })}
+                  placeholder="postgresql://user:password@host:port/dbname"
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium font-mono"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+            <button className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors">Save Database Config</button>
+          </div>
+        </div>
+      )}
+
+      {/* QUEUE INTEGRATION */}
+      {(activeTab === "ALL" || activeTab === "QUEUE") && (
+        <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-5">
+          <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+            <div className="p-3 rounded-2xl bg-rose-100 text-rose-600">
+              <Sliders className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Background Job Queue (Redis)</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Manages the transactional outbox and delay sequences.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-3 col-span-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Redis URL (REDIS_URL)</label>
+                <input
+                  type="password"
+                  value={redisConfig.url}
+                  onChange={(e) => setRedisConfig({ ...redisConfig, url: e.target.value })}
+                  placeholder="redis://:password@host:port"
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium font-mono"
+                />
+              </div>
+            </div>
+          </div>
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+            <button className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors">Save Queue Config</button>
+          </div>
+        </div>
+      )}
+
+      {/* PAYMENTS INTEGRATION */}
+      {(activeTab === "ALL" || activeTab === "PAYMENTS") && (
+        <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-5">
+          <div className="flex items-center gap-3 pb-4 border-b border-slate-100">
+            <div className="p-3 rounded-2xl bg-indigo-100 text-indigo-600">
+              <Tag className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Stripe Payments</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Secure checkout sessions and billing sync.</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Stripe Secret Key (STRIPE_SECRET_KEY)</label>
+              <input
+                type="password"
+                value={stripeConfig.secretKey}
+                onChange={(e) => setStripeConfig({ ...stripeConfig, secretKey: e.target.value })}
+                placeholder="sk_test_..."
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium font-mono"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">Stripe Webhook Secret (STRIPE_WEBHOOK_SECRET)</label>
+              <input
+                type="password"
+                value={stripeConfig.webhookSecret}
+                onChange={(e) => setStripeConfig({ ...stripeConfig, webhookSecret: e.target.value })}
+                placeholder="whsec_..."
+                className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-hidden font-medium font-mono"
+              />
+            </div>
+          </div>
+          <div className="pt-4 border-t border-slate-100 flex items-center justify-end">
+            <button className="px-4 py-2 rounded-lg text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors">Save Payments Config</button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

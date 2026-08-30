@@ -1,4 +1,8 @@
 import React, { useState, useEffect } from "react";
+
+import { initAuth, googleSignIn, logout as firebaseLogout, getAccessToken } from "./lib/firebase";
+import { User } from "firebase/auth";
+
 import { Sidebar, NavTab } from "./components/Sidebar";
 import { Header } from "./components/Header";
 import { CommandBar } from "./components/CommandBar";
@@ -27,6 +31,7 @@ import { PartnersView } from "./pages/PartnersView";
 import { CampaignsView } from "./pages/CampaignsView";
 import { CampaignWizardModal } from "./pages/CampaignWizardModal";
 import { InboxView } from "./pages/InboxView";
+import { OutboxView } from "./pages/OutboxView";
 import { PipelineView } from "./pages/PipelineView";
 import { MeetingsView } from "./pages/MeetingsView";
 import { GrowthAgentView } from "./pages/GrowthAgentView";
@@ -55,6 +60,38 @@ import { AICommandResult } from "../server/agents/growthCommandAgent";
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>("home");
+
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setCurrentUser(user);
+        setIsAuthLoading(false);
+        // Send token to backend so it can be used for autonomous background tasks
+        fetch('/api/settings/token', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        }).catch(err => console.error("Failed to sync token to backend:", err));
+      },
+      () => {
+        setCurrentUser(null);
+        setIsAuthLoading(false);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
+  const handleGoogleLogin = async () => {
+    try {
+      await googleSignIn();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Modals state
@@ -168,34 +205,43 @@ export function App() {
         fetch("/api/inbox"),
         fetch("/api/logs"),
       ]);
-      if (autoRes.ok) {
+
+      const isJson = (res: Response) => res.headers.get("content-type")?.includes("application/json");
+
+      if (autoRes.ok && isJson(autoRes)) {
         const data: AutopilotStatusState = await autoRes.json();
         setAutopilotStatus(data);
       }
-      if (dashRes.ok) {
+      if (dashRes.ok && isJson(dashRes)) {
         const d = await dashRes.json();
         setKpis(d.kpis);
         if (d.dailyBrief) setDailyBrief(d.dailyBrief);
         if (d.attentionItems) setAttentionItems(d.attentionItems);
       }
-      if (leadsRes.ok) {
+      if (leadsRes.ok && isJson(leadsRes)) {
         const freshLeads = await leadsRes.json();
         setLeads(freshLeads);
       }
-      if (invRes.ok) {
+      if (invRes.ok && isJson(invRes)) {
         const freshInv = await invRes.json();
         setInvestors(freshInv);
       }
-      if (inboxRes.ok) {
+      if (inboxRes.ok && isJson(inboxRes)) {
         const freshInbox = await inboxRes.json();
         setConversations(freshInbox);
       }
-      if (logsRes.ok) {
+      if (logsRes.ok && isJson(logsRes)) {
         const freshLogs = await logsRes.json();
         setAiLogs(freshLogs);
       }
     } catch (e) {
-      console.error("Live data sync error:", e);
+      if (e instanceof TypeError && e.message === 'Failed to fetch') {
+        // Ignore dev server restart disconnect
+      } else if (e instanceof SyntaxError && e.message.includes('json')) {
+        // Ignore benign HTML response during dev server restart
+      } else {
+        console.error("Live data sync error:", e);
+      }
     }
   };
 
@@ -259,29 +305,37 @@ export function App() {
           fetch("/api/autopilot/status"),
         ]);
 
-        if (dashRes.ok) {
+        const isJson = (r: Response) => r.headers.get("content-type")?.includes("application/json");
+
+        if (dashRes.ok && isJson(dashRes)) {
           const d = await dashRes.json();
           setKpis(d.kpis);
           setAttentionItems(d.attentionItems || []);
           if (d.dailyBrief) setDailyBrief(d.dailyBrief);
         }
-        if (brainRes.ok) setCompanyBrain(await brainRes.json());
-        if (leadsRes.ok) setLeads(await leadsRes.json());
-        if (invRes.ok) setInvestors(await invRes.json());
-        if (partRes.ok) setPartners(await partRes.json());
-        if (campRes.ok) setCampaigns(await campRes.json());
-        if (inboxRes.ok) setConversations(await inboxRes.json());
-        if (pipeRes.ok) setOpportunities(await pipeRes.json());
-        if (meetRes.ok) setMeetings(await meetRes.json());
-        if (knoRes.ok) setKnowledgeItems(await knoRes.json());
-        if (setRes.ok) {
+        if (brainRes.ok && isJson(brainRes)) setCompanyBrain(await brainRes.json());
+        if (leadsRes.ok && isJson(leadsRes)) setLeads(await leadsRes.json());
+        if (invRes.ok && isJson(invRes)) setInvestors(await invRes.json());
+        if (partRes.ok && isJson(partRes)) setPartners(await partRes.json());
+        if (campRes.ok && isJson(campRes)) setCampaigns(await campRes.json());
+        if (inboxRes.ok && isJson(inboxRes)) setConversations(await inboxRes.json());
+        if (pipeRes.ok && isJson(pipeRes)) setOpportunities(await pipeRes.json());
+        if (meetRes.ok && isJson(meetRes)) setMeetings(await meetRes.json());
+        if (knoRes.ok && isJson(knoRes)) setKnowledgeItems(await knoRes.json());
+        if (setRes.ok && isJson(setRes)) {
           const s = await setRes.json();
-          if (s.autopilot) setAutopilotSettings(s.autopilot);
+          
         }
-        if (logsRes.ok) setAiLogs(await logsRes.json());
-        if (autoRes.ok) setAutopilotStatus(await autoRes.json());
+        if (logsRes.ok && isJson(logsRes)) setAiLogs(await logsRes.json());
+        if (autoRes.ok && isJson(autoRes)) setAutopilotStatus(await autoRes.json());
       } catch (e) {
-        console.error("Initial fetch error:", e);
+        if (e instanceof TypeError && e.message === 'Failed to fetch') {
+          // Ignore
+        } else if (e instanceof SyntaxError && e.message.includes('json')) {
+          // Ignore
+        } else {
+          console.error("Initial fetch error:", e);
+        }
       }
     };
 
@@ -589,7 +643,7 @@ export function App() {
   return (
     <div className="min-h-screen bg-slate-100/70 text-slate-800 font-sans flex antialiased">
       {/* Navigation Sidebar */}
-      <Sidebar
+      <Sidebar currentUser={currentUser} onLogin={handleGoogleLogin} onLogout={firebaseLogout}
         currentTab={currentTab}
         onSelectTab={(tab) => setCurrentTab(tab)}
         unreadInboxCount={conversations.filter((c) => c.unread).length}
@@ -707,6 +761,7 @@ export function App() {
               onRefreshConversations={syncLiveEngineData}
             />
           )}
+          {currentTab === "outbox" && <OutboxView />}
 
           {currentTab === "pipeline" && (
             <PipelineView

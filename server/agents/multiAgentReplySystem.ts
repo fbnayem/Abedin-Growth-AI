@@ -57,7 +57,7 @@ export interface PhoneValidationResult {
 }
 
 export const CALENDAR_BOOKING_URL = "https://calendar.app.google/abedin-voice-ai-demo";
-export const GOOGLE_MEET_URL = "https://meet.google.com/abn-vce-demo";
+export const GOOGLE_MEET_URL = "https://meet.google.com/pending-calendar-creation";
 
 export interface LinkSemanticValidationResult {
   sanitized: string;
@@ -408,40 +408,32 @@ Return strictly JSON:
   // -------------------------------------------------------------
   const composerPrompt = `
 You are Nayem Abedin, Founder & CEO of Abedin Tech (creators of Abedin Voice AI).
-Draft an email reply to ${conversation.contactName} (${firstName}) at ${conversation.companyName}.
+Draft a concise, human-like email reply to ${conversation.contactName} (${firstName}) at ${conversation.companyName}.
 
-STRICT MANDATE:
-1. YOU MUST ANSWER EVERY SINGLE ONE OF THESE EXTRACTED QUESTIONS/POINTS POINT-BY-POINT:
+CORE DIRECTIVE:
+1. BREVITY & HUMAN TONE (40-80 WORDS): Keep the reply short, natural, and direct. Avoid generic corporate fluff, walls of text, and robotic preamble. Write like a real founder writing a fast, clear email from a laptop.
+2. SPECIFIC & CONCISE ANSWERS: Directly answer every question the prospect asked in 1-2 specific sentences:
 ${agentAnalysis.extractedQuestionsAndInquiries.map((q: string, i: number) => `   ${i + 1}. ${q}`).join("\n")}
 
-2. TAILOR THE VALUE PROPOSITION TO THE EXACT PERSONA:
-   - IF PARTNER / MARKETING AGENCY (e.g. Liam at Apex Dental Growth):
-     * Directly address why their clients' Google Ads converting calls at 7 PM is the exact problem we solve (recovering 100% of evening ad spend).
-     * Outline our Agency Partner Framework for onboarding the 5 pilot clinics (30% recurring monthly rev-share margin, dedicated agency partner dashboard, turnkey 15-min setup per clinic).
-     * Confirm next steps to review the 5-clinic pilot setup over a 15-minute Google Meet walkthrough.
-   - IF CLINIC CUSTOMER (e.g. Dr. Marcus Vance, Elena Rostova, Jonathan Thorne):
-     * Answer their clinical/operational questions directly (e.g. 2-way Google Calendar direct sync, emergency pain triage protocols vs routine cleaning, multi-clinic £599/mo Growth pricing).
-     * Offer a live Google Meet screen and voice demo walkthrough.
-   - IF VC / INVESTOR (e.g. Carlos Espinal, Nathan Benaich):
-     * Answer technical and traction questions (Seed round deck, sub-500ms streaming STT + LLM + TTS pipeline over WebRTC).
-     * Confirm intro partner call time.
+3. TAILOR BY CATEGORY:
+   - PARTNER / AGENCY: Confirm solving after-hours ad lead drop-offs, note the 30% recurring margin and 15-min setup for their pilot clinics.
+   - CLINIC CUSTOMER: Confirm 2-way Google Calendar / CRM sync and emergency triage vs routine booking in 1-2 sentences. Pricing is £499/mo per clinic (2,500 mins included, no setup fee).
+   - INVESTOR: Share sub-500ms streaming benchmarks and 10-slide Seed deck concisely.
 
-3. STRICT PROHIBITION ON PHONE NUMBERS & LINK SEMANTICS:
-   * DO NOT share ANY phone number. Do not say "call my mobile", do not share "+44 20 7946 0192" or any other digits.
-   * Do NOT include phone numbers in your signature.
-   * CRITICAL DISTINCTION BETWEEN CALENDAR BOOKING vs. GOOGLE MEET VIDEO ROOM:
-     - For choosing a date/time on your schedule, use Google Calendar Booking: https://calendar.app.google/abedin-voice-ai-demo
-     - For the live video meeting walkthrough itself, use Google Meet: https://meet.google.com/abn-vce-demo
-     - NEVER say "on my calendar" followed by a meet.google.com link.
+4. STRICT PROHIBITION ON PHONE NUMBERS & LINK ACCURACY:
+   - NO phone numbers anywhere. Do not invite phone/mobile calls.
+   - For choosing a date/time: Google Calendar Booking: https://calendar.app.google/abedin-voice-ai-demo
+   - For live video demo walkthrough: Google Meet: https://meet.google.com/pending-calendar-creation
+   - Never call a Google Meet link a "calendar".
 
-4. PROPOSE OR CONFIRM MEETING:
-   * If prospect proposed a time (e.g. "${agentAnalysis.proposedTime || ""}"), confirm it directly on Google Meet: https://meet.google.com/abn-vce-demo.
-   * Otherwise offer two clean options (e.g. Thursday at 2:30 PM BST or Friday at 11:00 AM BST on Google Meet: https://meet.google.com/abn-vce-demo), and add: "Alternatively, you can choose any time directly on my booking calendar: https://calendar.app.google/abedin-voice-ai-demo".
+5. PROPOSE OR CONFIRM MEETING:
+   - Propose or confirm a quick 10-minute demo on Google Meet (e.g. ${agentAnalysis.proposedTime || "Thursday at 2:30 PM BST"}: https://meet.google.com/pending-calendar-creation) with a quick fallback to your booking calendar (https://calendar.app.google/abedin-voice-ai-demo).
 
-5. SIGNATURE FORMAT (Strictly no phone numbers):
-   Best regards,
-   Nayem Abedin
-   Founder & CEO, Abedin Tech
+6. SIGNATURE FORMAT:
+   Best,
+   Nayem
+
+   Nayem Abedin · Abedin Tech
    https://abedintech.com/voice-ai/
 
 CONVERSATION TRANSCRIPT:
@@ -465,14 +457,14 @@ Return strictly JSON:
   let draftedBody = "";
   let answeredPoints: string[] = agentAnalysis.extractedQuestionsAndInquiries;
 
-  // High-precision fallback compositions based on category
+  // High-precision concise fallback compositions based on category
   if (agentAnalysis.detectedCategory === "PARTNER" || conversation.companyName.toLowerCase().includes("agency") || latestBodyLower.includes("pilot")) {
-    draftedBody = `Hi ${firstName},\n\nThanks for getting back to me! You hit the nail on the head—evening Google Ads generating calls after 5–7 PM when clinic reception is closed is the single biggest cause of wasted ad spend and client churn for growth agencies.\n\nAbedin Voice AI operates 24/7 as an autonomous voice receptionist that instantly answers after-hours calls in sub-500ms, qualifies patients, and books appointments directly into clinic calendars with zero human delay.\n\nFor onboarding your 5 pilot clinics next month, we provide:\n1. 30% recurring monthly margin on all client lines.\n2. Turnkey 15-minute setup per clinic with 2-way Google Calendar synchronization.\n3. Dedicated agency co-branded portal and sandbox testing.\n\nAre you free for a 15-minute Google Meet walkthrough this Thursday at 2:30 PM BST or Friday at 11:00 AM BST to review the 5-clinic pilot setup?\n\nAlternatively, feel free to pick any slot directly on my booking calendar: https://calendar.app.google/abedin-voice-ai-demo\n\nLooking forward to speaking!\n\nBest regards,\nNayem Abedin\nFounder & CEO, Abedin Tech\nhttps://abedintech.com/voice-ai/`;
+    draftedBody = `Hi ${firstName},\n\nThanks for getting back to me. Evening ad calls after 7 PM when clinic reception is closed is our exact focus—Abedin Voice AI answers in sub-500ms and locks appointments directly into clinic calendars 24/7.\n\nFor onboarding your 5 pilot clinics, we offer a 30% recurring monthly margin and turnkey 15-minute setup per location.\n\nAre you free for a quick 10-minute Google Meet walkthrough this Thursday at 2:30 PM BST? (Meet link: https://meet.google.com/pending-calendar-creation)\n\nAlternatively, feel free to pick any slot on my calendar: https://calendar.app.google/abedin-voice-ai-demo\n\nBest,\nNayem\n\nNayem Abedin · Abedin Tech\nhttps://abedintech.com/voice-ai/`;
   } else if (agentAnalysis.detectedCategory === "INVESTOR" || conversation.companyName.toLowerCase().includes("capital") || conversation.companyName.toLowerCase().includes("seedcamp")) {
-    draftedBody = `Hi ${firstName},\n\nDelighted to connect! I've attached our 10-slide Seed presentation and our latest technical benchmarks showing sub-500ms voice turnaround across 4,200+ live healthcare calls.\n\nWe achieve sub-500ms response speed by pairing low-latency streaming Whisper STT with fine-tuned fast LLM inference and streaming neural synthesis directly over WebRTC/SIP trunks, eliminating standard turn-based API latency.\n\nTuesday at 2:00 PM BST works smoothly on my end. I have scheduled our Google Meet walkthrough here: https://meet.google.com/abn-vce-demo (or feel free to choose another slot on my booking calendar: https://calendar.app.google/abedin-voice-ai-demo).\n\nLooking forward to our discussion!\n\nBest regards,\nNayem Abedin\nFounder & CEO, Abedin Tech\nhttps://abedintech.com/voice-ai/`;
+    draftedBody = `Hi ${firstName},\n\nDelighted to connect. I've attached our 10-slide Seed presentation and technical benchmarks (sub-500ms voice turnaround across 4,200+ healthcare calls using streaming STT and neural voice over WebRTC).\n\nTuesday at 2:00 PM BST works smoothly on my end. I've set up our Google Meet here: https://meet.google.com/pending-calendar-creation (or feel free to choose another slot: https://calendar.app.google/abedin-voice-ai-demo).\n\nLooking forward to speaking!\n\nBest,\nNayem\n\nNayem Abedin · Abedin Tech\nhttps://abedintech.com/voice-ai/`;
   } else {
     // Clinic / Dental Customer
-    draftedBody = `Hi ${firstName},\n\nThanks for reaching out! To answer your question directly: Abedin Voice AI operates with deterministic clinical guardrails and native 2-way real-time integration with Google Calendar and clinic practice systems.\n\nFor acute emergencies, the agent immediately assesses pain severity and reserves your designated morning emergency slot while dispatching an instant confirmation SMS. For routine inquiries, it books appointments seamlessly without double-booking.\n\nWould you be open to a quick 10-minute live demonstration walkthrough on Google Meet this Thursday at 2:30 PM BST or Friday at 11:00 AM BST (Meet link: https://meet.google.com/abn-vce-demo)?\n\nAlternatively, you can choose any time directly on my booking calendar: https://calendar.app.google/abedin-voice-ai-demo\n\nBest regards,\nNayem Abedin\nFounder & CEO, Abedin Tech\nhttps://abedintech.com/voice-ai/`;
+    draftedBody = `Hi ${firstName},\n\nThanks for reaching out! Yes, we sync 2-way with Google Calendar and major practice management systems in real time, so appointments lock instantly with zero double-booking.\n\nFor acute emergencies, the AI flags pain severity and reserves your morning emergency slot, while routine cleanings are booked normally.\n\nWould you be open for a quick 10-minute demo on Google Meet this Thursday at 2:30 PM BST? (Meet link: https://meet.google.com/pending-calendar-creation)\n\nOr feel free to grab any slot here: https://calendar.app.google/abedin-voice-ai-demo\n\nBest,\nNayem\n\nNayem Abedin · Abedin Tech\nhttps://abedintech.com/voice-ai/`;
   }
 
   try {
@@ -547,7 +539,7 @@ Return strictly JSON:
       category: conversation.category,
       scheduledTime: scheduledIso,
       durationMinutes: 20,
-      meetUrl: "https://meet.google.com/abn-vce-demo",
+      meetUrl: "https://meet.google.com/pending-calendar-creation",
       status: "CONFIRMED",
       dealValue: conversation.category === "PARTNER" ? 45000 : 14400,
       reminders: {
@@ -613,7 +605,7 @@ Return strictly JSON:
       conversation.category === "PARTNER" ? "30% recurring margin and 5-clinic pilot onboarding framework" : "14-day zero-risk trial setup",
     ],
     commitmentsMade: [
-      "Confirmed Google Meet demonstration slot: https://meet.google.com/abn-vce-demo",
+      "Confirmed Google Meet demonstration slot: https://meet.google.com/pending-calendar-creation",
       conversation.category === "PARTNER" ? "5 pilot clinics onboarding next month" : "14-day zero-risk pilot",
     ],
     agreedTimeSlots: [agentAnalysis.proposedTime || "Thursday 2:30 PM BST", "Friday 11:00 AM BST"],

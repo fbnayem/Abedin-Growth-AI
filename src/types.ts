@@ -570,3 +570,318 @@ export interface AutopilotStatusState {
   recentLogs: AutopilotCycleLog[];
 }
 
+// ==========================================
+// PART 1 & 2: CLIENT IDENTITY & INTELLIGENCE PROFILE
+// ==========================================
+export interface ClientIdentityResolution {
+  contactId?: string;
+  leadId?: string;
+  companyId?: string;
+  campaignId?: string;
+  email: string;
+  name: string;
+  company: string;
+  jobTitle?: string;
+  domain: string;
+  identityConfidence: number; // 0.0 - 1.0
+  resolutionMethod: "EXACT_EMAIL" | "DOMAIN_MATCH" | "THREAD_CONTINUITY" | "CRM_LOOKUP" | "UNRESOLVED_NEW";
+  sourceProvenance?: string;
+}
+
+export interface ClientIntelligenceProfile {
+  identity: {
+    name: string;
+    email: string;
+    title?: string;
+    company: string;
+    website?: string;
+    industry?: string;
+    country?: string;
+    timezone?: string;
+  };
+  leadInfo: {
+    source: string;
+    campaignId?: string;
+    campaignName?: string;
+    firstTouchDate?: string;
+    firstOutreachSubject?: string;
+    assignedOwner: string;
+  };
+  productInterest: {
+    productName: string;
+    featuresDiscussed: string[];
+    useCases: string[];
+    desiredOutcomes: string[];
+  };
+  businessProblem: {
+    statedProblems: string[];
+    operationalPain?: string;
+    currentWorkflow?: string;
+    currentVendor?: string;
+    urgency: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "EXPLORATORY";
+  };
+  requirements: {
+    inboundCalling: boolean;
+    outboundCalling: boolean;
+    expectedCallVolume?: string;
+    averageCallDuration?: string;
+    concurrency?: string;
+    crmIntegration?: string;
+    calendarProvider?: string;
+    languageRequirements?: string[];
+    complianceNeeds?: string[];
+    customRequirements?: string[];
+  };
+  commercialInfo: {
+    pricesAlreadyDiscussed: string[];
+    packageDiscussed?: string;
+    discountsMentioned?: string;
+    customQuoteRequired: boolean;
+    trialDiscussed: boolean;
+    budgetSignals?: string;
+    purchasingTimeline?: string;
+  };
+  buyingState: {
+    buyingStage: BuyingStage;
+    purchaseReadiness: number; // 0 - 100
+    meetingReadiness: number;  // 0 - 100
+    decisionAuthority: "SOLE_DECISION_MAKER" | "INFLUENCER" | "TECHNICAL_EVALUATOR" | "GATEKEEPER" | "UNKNOWN";
+    buyingProbability: number; // 0 - 100
+  };
+  objections: {
+    type: string;
+    severity: "BLOCKER" | "HIGH" | "MEDIUM" | "RESOLVED";
+    details: string;
+    resolved: boolean;
+  }[];
+  meetingRecord: {
+    meetingOffered: boolean;
+    bookingCtaSent: boolean;
+    bookingDate?: string;
+    bookedStatus: "NONE" | "OFFERED" | "BOOKED" | "COMPLETED" | "CANCELLED" | "MISSED";
+    meetingUrl?: string;
+  };
+  conversationMemory: {
+    importantFacts: string[];
+    promisesMade: string[];
+    questionsAwaitingResponse: string[];
+    informationRequestedFromClient: string[];
+    nextFollowUpDate?: string;
+    rollingSummary: string;
+    lastUpdated: string;
+  };
+}
+
+// ==========================================
+// PART 6 & 7: MULTI-DIMENSIONAL INTENT & BUYING STAGE
+// ==========================================
+export type ComprehensiveIntent =
+  | "INFORMATION_REQUEST"
+  | "FEATURE_QUESTION"
+  | "TECHNICAL_QUESTION"
+  | "INTEGRATION_QUESTION"
+  | "SECURITY_QUESTION"
+  | "COMPLIANCE_QUESTION"
+  | "PRICING_QUESTION"
+  | "PRICE_COMPARISON"
+  | "DISCOUNT_REQUEST"
+  | "TRIAL_REQUEST"
+  | "DEMO_REQUEST"
+  | "IMPLEMENTATION_QUESTION"
+  | "PURCHASE_INTENT"
+  | "READY_TO_START"
+  | "NEGOTIATION"
+  | "OBJECTION"
+  | "COMPETITOR_COMPARISON"
+  | "PARTNERSHIP"
+  | "INVESTMENT"
+  | "REFERRAL"
+  | "SUPPORT"
+  | "FOLLOW_UP_REQUEST"
+  | "NOT_INTERESTED"
+  | "UNSUBSCRIBE"
+  | "WRONG_PERSON"
+  | "OUT_OF_OFFICE"
+  | "BOUNCE"
+  | "AUTOMATED_MESSAGE"
+  | "UNKNOWN";
+
+export type BuyingStage =
+  | "DISCOVERY"
+  | "PROBLEM_AWARE"
+  | "SOLUTION_EXPLORING"
+  | "PRODUCT_EVALUATING"
+  | "TECHNICAL_EVALUATION"
+  | "COMMERCIAL_EVALUATION"
+  | "DEMO_READY"
+  | "BUYING_INTENT"
+  | "PURCHASE_READY"
+  | "NEGOTIATION"
+  | "ONBOARDING"
+  | "CUSTOMER"
+  | "CLOSED_LOST"
+  | "NOT_INTERESTED"
+  | "UNSUBSCRIBED";
+
+export type NextBestActionType =
+  | "ANSWER_ONLY"
+  | "ANSWER_AND_QUALIFY"
+  | "ANSWER_AND_ASK_ONE_QUESTION"
+  | "ANSWER_AND_OFFER_DEMO"
+  | "SEND_BOOKING_CTA"
+  | "PROVIDE_PRICING"
+  | "REQUEST_PRICING_REQUIREMENTS"
+  | "PROVIDE_TECHNICAL_EXPLANATION"
+  | "REQUEST_TECHNICAL_REQUIREMENTS"
+  | "HANDLE_OBJECTION"
+  | "PROVIDE_ROI_CONTEXT"
+  | "PROVIDE_TRIAL_INFORMATION"
+  | "START_ONBOARDING"
+  | "REQUEST_ONBOARDING_INFORMATION"
+  | "ESCALATE_TO_SALES"
+  | "ESCALATE_TO_TECHNICAL"
+  | "ESCALATE_TO_FOUNDER"
+  | "SCHEDULE_FOLLOW_UP"
+  | "NO_REPLY"
+  | "SUPPRESS";
+
+export interface NextBestActionResult {
+  action: NextBestActionType;
+  reason: string;
+  meetingLinkAllowed: boolean;
+  pricingAllowed: boolean;
+  technicalAgentRequired: boolean;
+  pricingAgentRequired: boolean;
+  objectionAgentRequired: boolean;
+  roiAgentRequired: boolean;
+  humanReviewRequired: boolean;
+  escalationReason?: string;
+  questionsToAnswer: string[];
+  questionsToAsk: string[];
+  missingInformation: string[];
+  confidence: number;
+}
+
+export interface ReplyPlan {
+  contact: {
+    name: string;
+    company: string;
+    email: string;
+  };
+  product: string;
+  primaryIntent: ComprehensiveIntent;
+  secondaryIntents: ComprehensiveIntent[];
+  buyingStage: BuyingStage;
+  purchaseReadiness: number;
+  meetingReadiness: number;
+  questionsToAnswer: string[];
+  knownRelevantFacts: string[];
+  objections: string[];
+  missingInformation: string[];
+  specialistsRequired: ("TECHNICAL" | "PRICING" | "OBJECTION" | "ROI")[];
+  nextBestAction: NextBestActionType;
+  sendBookingLink: boolean;
+  sendOnboardingLink: boolean;
+  reason: string;
+}
+
+export interface CTARegistryEntry {
+  id: string;
+  type: "BOOK_DEMO" | "WEBSITE" | "CUSTOMER_ONBOARDING" | "DOCUMENTATION" | "CONFIRMED_MEETING";
+  provider: "GOOGLE_CALENDAR" | "WEBSITE" | "STRIPE_ONBOARDING" | "GOOGLE_MEET" | "CUSTOM";
+  url: string;
+  title: string;
+  enabled: boolean;
+  verificationStatus: "VERIFIED_ACTIVE" | "PENDING_VERIFICATION" | "DISABLED";
+  lastVerifiedAt: string;
+}
+
+export interface EmailUnderstanding {
+  primaryIntent: ComprehensiveIntent;
+  secondaryIntents: ComprehensiveIntent[];
+  explicitQuestions: string[];
+  hiddenQuestions: string[];
+  sentiment: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "FRUSTRATED" | "SKEPTICAL" | "ENTHUSIASTIC";
+  urgency: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
+  commercialIntent: "HIGH" | "MEDIUM" | "LOW" | "NONE" | "IMMEDIATE";
+  technicalDepth: "NONE" | "GENERAL" | "DETAILED" | "ARCHITECTURAL" | "DEEP" | "MODERATE" | "SURFACE";
+  buyingSignals: string[];
+  objections: string[];
+  isOutOfOffice?: boolean;
+  isAutomatedSystemMessage?: boolean;
+  isUnsubscribeRequest?: boolean;
+  isUnsubscribe?: boolean;
+  isReferral?: boolean;
+  referralContact?: { name: string; email: string };
+}
+
+export interface PurchaseReadinessResult {
+  score: number; // 0 - 100
+  signals: string[];
+  reasoning: string;
+}
+
+export interface MeetingReadinessResult {
+  score: number; // 0 - 100
+  shouldOfferBooking: boolean;
+  signals: string[];
+  reasoning: string;
+}
+
+export interface ConversationDecisionLog {
+  id: string;
+  timestamp: string;
+  conversationId: string;
+  contactEmail: string;
+  contactName: string;
+  companyName: string;
+  inboundMessageSnippet: string;
+  identityResolution: ClientIdentityResolution;
+  emailUnderstanding: EmailUnderstanding;
+  buyingStage: {
+    previous: BuyingStage;
+    current: BuyingStage;
+  };
+  purchaseReadiness: PurchaseReadinessResult;
+  meetingReadiness: MeetingReadinessResult;
+  specialistsConsulted: {
+    technical?: { verifiedCapabilities: string[]; answerSummary: string };
+    pricing?: { packageOffered: string; pricingConfidence: number; customQuoteNeeded: boolean };
+    objection?: { handledObjection: string; strategy: string };
+    roi?: { metricEstimated: string; annualValueEstimated?: string };
+  };
+  nextBestAction: NextBestActionResult;
+  replyPlan: ReplyPlan;
+  generatedDraft: {
+    subject: string;
+    body: string;
+  };
+  auditorResult: {
+    decision: "PASS" | "REWRITE" | "ESCALATE" | "BLOCK";
+    score: number; // 0-100
+    checksPassed: string[];
+    issuesDetected: string[];
+  };
+  deterministicSafetyResult: {
+    zeroPhoneClean: boolean;
+    semanticLinkClean: boolean;
+    mergeTagsClean: boolean;
+    suppressionClean: boolean;
+    duplicateLockClean: boolean;
+    circuitBreakerClean: boolean;
+  };
+  finalDecision: "SEND_AUTONOMOUS" | "AWAITING_HUMAN_APPROVAL" | "SUPPRESSED_NO_ACTION" | "BLOCKED_BY_SAFETY";
+  finalEmailBody?: string;
+  whyExplanation: string;
+}
+
+export interface CircuitBreakerState {
+  globalAutonomousSendEnabled: boolean;
+  pausedReason?: string;
+  consecutiveErrorCount: number;
+  duplicateSendAlertTriggered: boolean;
+  bounceRateSpikeDetected: boolean;
+  lastSafetyTripTimestamp?: string;
+}
+
+
