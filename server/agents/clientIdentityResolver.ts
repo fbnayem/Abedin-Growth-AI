@@ -1,4 +1,4 @@
-import { ClientIdentityResolution, Lead, Conversation } from "../../src/types";
+import { ClientIdentityResolution, Lead, Conversation } from "../../shared/domain/models";
 import { globalStore } from "../dataStore";
 
 /**

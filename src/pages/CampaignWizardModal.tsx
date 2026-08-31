@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import {
   Sparkles,
@@ -42,7 +43,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   const handleGenerateStrategy = async () => {
     setGenerating(true);
     try {
-      const res = await fetch("/api/campaigns/generate-strategy", {
+      const res = await apiFetch("/api/campaigns/generate-strategy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, Handshake, Sparkles, Building, Mail, Globe, Plus, Loader2 } from "lucide-react";
 import { Partner, PartnerType } from "../types";
@@ -31,7 +32,7 @@ export const AddPartnerModal: React.FC<AddPartnerModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/partners", {
+      const res = await apiFetch("/api/partners", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

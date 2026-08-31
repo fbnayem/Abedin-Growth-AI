@@ -1,10 +1,8 @@
 const fs = require('fs');
-let code = fs.readFileSync('server.ts', 'utf8');
-
-const importStmt = `import { stripeRouter } from "./server/routes/stripe.routes.ts";\n`;
-if (!code.includes('stripeRouter')) {
-  code = code.replace('import express', importStmt + 'import express');
-  code = code.replace(/app\.use\("\/api\/outbox", outboxRouter\);/g, 'app.use("/api/outbox", outboxRouter);\n  app.use("/api/stripe", stripeRouter);');
-  fs.writeFileSync('server.ts', code);
-  console.log('Stripe router mounted!');
+let file = fs.readFileSync('server.ts', 'utf8');
+if (!file.includes('stripeRouter')) {
+  file = file.replace('import { requireAuth } from "./server/middleware/auth";', 'import { requireAuth } from "./server/middleware/auth";\nimport { stripeRouter } from "./server/routes/stripe.routes";');
+  file = file.replace('app.get("/api/health"', 'app.use("/api/stripe", stripeRouter);\n\n  app.get("/api/health"');
+  fs.writeFileSync('server.ts', file);
+  console.log("Mounted stripe router");
 }

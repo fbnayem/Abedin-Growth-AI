@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState, useRef, useEffect } from "react";
 import {
   Sparkles,
@@ -74,7 +75,7 @@ export const GrowthAgentView: React.FC<GrowthAgentViewProps> = ({
     setLoading(true);
 
     try {
-      const res = await fetch("/api/growth-command", {
+      const res = await apiFetch("/api/growth-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command: text }),

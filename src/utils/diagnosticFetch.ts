@@ -1,3 +1,4 @@
+import { apiFetch } from "../lib/apiFetch";
 /**
  * Diagnostic Fetch Wrapper
  * Logs detailed request/response diagnostics, HTTP status codes, error bodies,
@@ -43,7 +44,7 @@ export async function diagnosticFetch(
   console.groupEnd();
 
   try {
-    const res = await window.fetch(input, init);
+    const res = await apiFetch(input, init);
     const durationMs = Math.round(performance.now() - startTime);
 
     // Clone response stream so we can inspect status and body without consuming caller's stream

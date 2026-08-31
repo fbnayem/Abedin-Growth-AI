@@ -1,5 +1,5 @@
 import { safeGenerateJSON } from "../geminiClient";
-import { Conversation, ConversationMemory, CompanyBrain, EmailMessage } from "../../src/types";
+import { Conversation, ConversationMemory, CompanyBrain, EmailMessage } from "../../shared/domain/models";
 import { validateAndEnforceNoPhonePolicy, validateAndEnforceMeetingAndCalendarLinks } from "./multiAgentReplySystem";
 
 /**

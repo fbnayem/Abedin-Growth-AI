@@ -1,5 +1,5 @@
 import { safeGenerateJSON } from "../geminiClient";
-import { Conversation, ConversationMemory, CompanyBrain, EmailMessage, Meeting } from "../../src/types";
+import { Conversation, ConversationMemory, CompanyBrain, EmailMessage, Meeting } from "../../shared/domain/models";
 import { globalStore } from "../dataStore";
 
 export interface MultiAgentReplyOutput {

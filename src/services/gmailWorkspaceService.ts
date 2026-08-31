@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 /**
  * Google Workspace Gmail Integration Service
  * Account: info@abedintech.com
@@ -170,7 +171,7 @@ class GmailWorkspaceService {
     }
 
     // 1. List labels
-    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
+    const res = await apiFetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
       },
@@ -192,7 +193,7 @@ class GmailWorkspaceService {
     }
 
     // 2. Create label if not found
-    const createRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
+    const createRes = await apiFetch('https://gmail.googleapis.com/gmail/v1/users/me/labels', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
@@ -293,7 +294,7 @@ class GmailWorkspaceService {
       threadId,
     });
 
-    const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    const sendRes = await apiFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.accessToken}`,
@@ -315,7 +316,7 @@ class GmailWorkspaceService {
     // Attach "Abedin Growth AI" label to the message
     if (this.labelId && sentMessage.id) {
       try {
-        await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${sentMessage.id}/modify`, {
+        await apiFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${sentMessage.id}/modify`, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${this.accessToken}`,
@@ -354,7 +355,7 @@ class GmailWorkspaceService {
       const query = `label:"${TARGET_LABEL_NAME}" OR to:${this.accountEmail}`;
       const url = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${encodeURIComponent(query)}`;
 
-      const listRes = await fetch(url, {
+      const listRes = await apiFetch(url, {
         headers: {
           Authorization: `Bearer ${this.accessToken}`,
         },
@@ -368,7 +369,7 @@ class GmailWorkspaceService {
       // Fetch message details in batch
       const detailedMessages = await Promise.all(
         listData.messages.slice(0, 10).map(async (msg: { id: string }) => {
-          const mRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`, {
+          const mRes = await apiFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`, {
             headers: {
               Authorization: `Bearer ${this.accessToken}`,
             },

@@ -1,4 +1,4 @@
-import { PolicyDecision, AutopilotSettings } from "../../src/types";
+import { PolicyDecision, AutopilotSettings } from "../../shared/domain/models";
 
 export interface ActionContext {
   actionName: string;

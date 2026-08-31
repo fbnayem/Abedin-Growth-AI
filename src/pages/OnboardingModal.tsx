@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import {
   Sparkles,
@@ -77,7 +78,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
     setStep(5);
 
     try {
-      const res = await fetch("/api/company-brain/generate", {
+      const res = await apiFetch("/api/company-brain/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,41 +1,15 @@
-import { db } from "./server/db/index";
-import * as schema from "./server/db/schema";
-import { gmailService } from "./server/services/gmail.service.ts";
-import { calendarService } from "./server/services/calendar.service.ts";
-import { pipelineService } from "./server/services/pipeline.service.ts";
-import { outboxService } from "./server/services/outbox.service.ts";
-import { killSwitchController } from "./server/controllers/killSwitch.controller.ts";
-import { outboxRouter } from "./server/routes/outbox.routes.ts";
-import { stripeRouter } from "./server/routes/stripe.routes.ts";
+import { globalStore } from "./server/dataStore";
+import { firestore } from "./server/firebase";
+import { requireAuth } from "./server/middleware/auth";
+import { outboxWorker } from "./server/workers/outbox.worker";
+import { stripeRouter } from "./server/routes/stripe.routes";
+import { outboxRouter } from "./server/routes/outbox.routes";
 import express, { Request, Response } from "express";
 import path from "path";
-import dotenv from "dotenv";
 import { createServer as createViteServer } from "vite";
-import { globalStore } from "./server/dataStore";
-import { generateCompanyBrain } from "./server/agents/companyBrainAgent";
-import { scoreAndResearchLead, batchDiscoverLeads } from "./server/agents/leadScoringAgent";
-import { scoreAndResearchInvestor, batchDiscoverInvestors } from "./server/agents/investorAgent";
-import { scoreAndResearchPartner, batchDiscoverPartners } from "./server/agents/partnerAgent";
-import { generateCampaignStrategy } from "./server/agents/campaignAgent";
-import { processConversationThread } from "./server/agents/inboxAgent";
-import { inspectEmailDraft } from "./server/agents/qualityControlAgent";
-import { generateMeetingBrief } from "./server/agents/meetingAgent";
-import { processGrowthCommand } from "./server/agents/growthCommandAgent";
-import { simulatePitchBattle } from "./server/agents/pitchBattleAgent";
-import {
-  extractAndSynthesizeMemory,
-  generateMemoryAwareReply,
-  generateMemoryAwareFollowUp,
-} from "./server/agents/conversationMemoryAgent";
-import {
-  autoReplyToConversation,
-  autoReplyAllPendingInbounds,
-  checkAndDispatchMeetingReminders,
-  sendMissedMeetingRecoveryEmail,
-  signMeetingAgreement,
-  processMeetingFirstPayment,
-  simulateInboundProspectReply,
-} from "./server/agents/autoReplyEngine";
+import cors from "cors";
+import dotenv from "dotenv";
+
 import {
   executeMultiAgentReplyPipeline,
   validateAndEnforceNoPhonePolicy,
@@ -76,51 +50,80 @@ async function startServer() {
 
   app.use(express.json());
 
+app.use("/api", (req, res, next) => {
+  // Bypass auth for webhooks
+  if (req.path.includes('/webhook')) {
+    return next();
+  }
+  return requireAuth(req, res, next);
+});
+
+
   // Health check
+  app.use("/api/stripe", stripeRouter);
+  app.use("/api/outbox", outboxRouter);
+
   app.get("/api/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", service: "Abedin Growth AI Core Engine" });
   });
 
   // 1. Dashboard summary
-  app.get("/api/dashboard", (_req: Request, res: Response) => {
-    const qualifiedLeadsCount = globalStore.leads.filter(
-      (l) => l.status === "QUALIFIED" || l.status === "ENGAGED" || l.status === "DEMO_SCHEDULED"
-    ).length;
-    const positiveConversationsCount = globalStore.conversations.filter(
-      (c) => c.status === "ACTIVE" || c.status === "HUMAN_NEEDED" || c.status === "MEETING_REQUESTED"
-    ).length;
-    const meetingsBookedCount = globalStore.meetings.filter((m) => m.status === "CONFIRMED").length;
-    const pipelineValue = globalStore.opportunities
-      .filter((o) => o.category === "CUSTOMER")
-      .reduce((sum, o) => sum + o.estimatedValue, 0);
-    const investorConversationsCount = globalStore.investors.filter(
-      (i) => i.status === "REPLIED" || i.status === "MEETING_BOOKED"
-    ).length;
-    const partnerConversationsCount = globalStore.partners.filter(
-      (p) => p.status === "CONVERSATION" || p.status === "ACTIVE_PARTNER"
-    ).length;
+  app.get("/api/dashboard", async (_req: Request, res: Response) => {
+    try {
+      if (!firestore) return res.status(500).json({ error: "Firebase not initialized" });
+      const orgId = "org_1";
+      
+      const contactsSnap = await firestore.collection(`organizations/${orgId}/contacts`).get();
+      let qualifiedLeadsCount = 0;
+      contactsSnap.forEach(doc => {
+         const s = doc.data().status;
+         if (s === "QUALIFIED" || s === "ENGAGED" || s === "DEMO_SCHEDULED") qualifiedLeadsCount++;
+      });
+      
+      const convsSnap = await firestore.collection(`organizations/${orgId}/conversations`).get();
+      let positiveConversationsCount = 0;
+      convsSnap.forEach(doc => {
+         const s = doc.data().status;
+         if (s === "ACTIVE" || s === "HUMAN_NEEDED" || s === "MEETING_REQUESTED") positiveConversationsCount++;
+      });
+      
+      const meetingsSnap = await firestore.collection(`organizations/${orgId}/meetings`).get();
+      let meetingsBookedCount = 0;
+      meetingsSnap.forEach(doc => {
+         if (doc.data().status === "CONFIRMED") meetingsBookedCount++;
+      });
+      
+      const oppsSnap = await firestore.collection(`organizations/${orgId}/opportunities`).get();
+      let pipelineValue = 0;
+      oppsSnap.forEach(doc => {
+          pipelineValue += (doc.data().value || 0);
+      });
 
-    res.json({
-      kpis: {
-        qualifiedLeads: qualifiedLeadsCount,
-        positiveConversations: positiveConversationsCount,
-        meetingsBooked: meetingsBookedCount,
-        pipelineValue,
-        investorConversations: investorConversationsCount,
-        partnerConversations: partnerConversationsCount,
-      },
-      attentionItems: globalStore.attentionItems,
-      dailyBrief: globalStore.dailyBrief,
-      status: "AI Growth Engine: Active",
-    });
+      res.json({
+        kpis: {
+          qualifiedLeads: qualifiedLeadsCount,
+          positiveConversations: positiveConversationsCount,
+          meetingsBooked: meetingsBookedCount,
+          pipelineValue,
+          investorConversations: 0,
+          partnerConversations: 0,
+        },
+        attentionItems: [],
+        dailyBrief: [],
+        status: "AI Growth Engine: Active",
+      });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Failed to load dashboard" });
+    }
   });
 
 
   app.get("/api/analytics/funnel", async (_req: Request, res: Response) => {
     try {
-      const allContacts = await db.select().from(schema.contacts);
-      const allConvs = await db.select().from(schema.conversations);
-      const allMeetings = await db.select().from(schema.meetings);
+      const allContactsSnap = await firestore.collection('organizations/org_1/contacts').get(); const allContacts: any[] = []; allContactsSnap.forEach(d => allContacts.push(d.data()));
+      const allConvsSnap = await firestore.collection('organizations/org_1/conversations').get(); const allConvs: any[] = []; allConvsSnap.forEach(d => allConvs.push(d.data()));
+      const allMeetingsSnap = await firestore.collection('organizations/org_1/meetings').get(); const allMeetings: any[] = []; allMeetingsSnap.forEach(d => allMeetings.push(d.data()));
 
       const discovered = allContacts.length;
       const qualified = 15; // mock complex AI score for now
@@ -145,6 +148,30 @@ async function startServer() {
       console.error(e);
       res.json({ funnel: [] });
     }
+  });
+
+
+  app.get("/api/analytics/funnel", (_req: Request, res: Response) => {
+    // Phase 34: Analytics Rebuilding
+    const discovered = globalStore.leads.length + globalStore.investors.length + globalStore.partners.length;
+    const qualified = globalStore.leads.filter(l => l.score && l.score > 80).length;
+    const outreachSent = globalStore.conversations.length; // Approximate
+    const opened = globalStore.conversations.filter(c => c.unread === false).length;
+    const replied = globalStore.conversations.filter(c => c.status !== "NEW").length;
+    const positive = globalStore.conversations.filter(c => c.intentConfidence && c.intentConfidence > 0.8).length;
+    const demoBooked = globalStore.meetings.length;
+
+    res.json({
+      funnel: [
+        { label: "1. Discovered", count: discovered, dropoff: "100%", color: "bg-slate-700" },
+        { label: "2. AI Qualified (Score > 80)", count: qualified, dropoff: discovered ? `${((qualified/discovered)*100).toFixed(1)}%` : "0%", color: "bg-blue-600" },
+        { label: "3. Outreach Sent", count: outreachSent, dropoff: qualified ? `${((outreachSent/qualified)*100).toFixed(1)}%` : "0%", color: "bg-indigo-600" },
+        { label: "4. Opened", count: opened, dropoff: outreachSent ? `${((opened/outreachSent)*100).toFixed(1)}% Open Rate` : "0%", color: "bg-purple-600" },
+        { label: "5. Replied", count: replied, dropoff: opened ? `${((replied/opened)*100).toFixed(1)}% Reply Rate` : "0%", color: "bg-amber-600" },
+        { label: "6. Positive Intent", count: positive, dropoff: replied ? `${((positive/replied)*100).toFixed(1)}% Positivity` : "0%", color: "bg-emerald-600" },
+        { label: "7. Demo Booked", count: demoBooked, dropoff: positive ? `${((demoBooked/positive)*100).toFixed(1)}% Conversion` : "0%", color: "bg-emerald-500" },
+      ]
+    });
   });
 
   // 2. Company Brain
@@ -419,10 +446,11 @@ async function startServer() {
   });
 
   
+  
   // 3. Leads & Research (REWRITTEN TO NATIVE POSTGRESQL)
   app.get("/api/leads", async (_req: Request, res: Response) => {
     try {
-      const dbLeads = await db.select().from(schema.contacts);
+      const dbLeadsSnap = await firestore.collection('organizations/org_1/contacts').get(); const dbLeads: any[] = []; dbLeadsSnap.forEach(d => dbLeads.push(d.data()));
       // Map DB schema back to the frontend Lead format
       const mappedLeads = dbLeads.map(c => ({
         id: c.id,
@@ -452,7 +480,7 @@ async function startServer() {
     const newId = `lead_${Date.now()}`;
     
     try {
-      await db.insert(schema.contacts).values({
+      await firestore.collection('organizations/org_1/contacts').add({
         id: newId,
         organizationId: "default",
         name: leadData.name || "Prospect",
@@ -490,6 +518,7 @@ async function startServer() {
 
     res.json(newLead);
   });
+
 
 
   app.post("/api/leads/:id/email", async (req: Request, res: Response) => {
@@ -722,8 +751,7 @@ async function startServer() {
       });
 
       // Prepend newly discovered leads in order
-      globalStore.leads.unshift(...generatedList);
-      globalStore.saveToDisk();
+      
 
       // Update daily brief metrics
       if (globalStore.dailyBrief) {
@@ -755,7 +783,7 @@ async function startServer() {
   // 4. Investors
   app.get("/api/investors", async (_req: Request, res: Response) => {
     try {
-      const dbLeads = await db.select().from(schema.contacts);
+      const dbLeadsSnap = await firestore.collection('organizations/org_1/contacts').get(); const dbLeads: any[] = []; dbLeadsSnap.forEach(d => dbLeads.push(d.data()));
       const mapped = dbLeads.map(c => ({
         id: c.id,
         workspaceId: c.organizationId,
@@ -768,34 +796,27 @@ async function startServer() {
         status: c.status,
         createdAt: c.createdAt.toISOString(),
       }));
-      res.json([...mapped, ...globalStore.investors]);
-    } catch(e) { res.json(globalStore.investors); }
+      res.json(mapped);
+    } catch(e) { console.error(e); res.status(500).json({error: e.message}); }
   });
 
   app.post("/api/investors", async (req: Request, res: Response) => {
-    const invData: Partial<Investor> = req.body;
-    const newInv: Investor = {
-      id: `inv_${Date.now()}`,
-      workspaceId: "default",
-      name: invData.name || "Investor Partner",
-      fundName: invData.fundName || "Venture Fund",
-      role: invData.role || "Partner",
-      email: invData.email || "",
-      country: invData.country || "Singapore",
-      stage: invData.stage || "SEED",
-      typicalCheckSize: invData.typicalCheckSize || "$500K - $1.5M",
-      targetSectors: invData.targetSectors || ["Applied AI", "B2B SaaS"],
-      investorFitScore: invData.investorFitScore || 88,
-      status: invData.status || "DISCOVERED",
-      thesisMatchReason: invData.thesisMatchReason || "Active investments in B2B AI software and operational automation.",
-      portfolioFitExample: invData.portfolioFitExample || "Synergistic SaaS portfolio companies.",
-      recommendedPitchAngle: invData.recommendedPitchAngle || "Emphasize unit economics, rapid payback, and sticky calendar integration.",
-      sensitiveRestrictions: invData.sensitiveRestrictions || ["Valuation discussions must be handled by founder"],
-      lastContactAt: new Date().toISOString(),
-    };
-    globalStore.investors.unshift(newInv);
-    globalStore.saveToDisk();
-    res.json(newInv);
+    const invData = req.body;
+    const newId = `inv_${Date.now()}`;
+    try {
+      await firestore.collection('organizations/org_1/contacts').add({
+        id: newId,
+        organizationId: "default",
+        name: invData.name || "Investor Partner",
+        title: invData.role || "Partner",
+        primaryEmail: invData.email || "",
+        status: invData.status || "DISCOVERED"
+      });
+      res.json({ id: newId, ...invData });
+    } catch(e) {
+      console.error(e);
+      res.status(500).json({error: e.message});
+    }
   });
 
   app.post("/api/investors/batch-generate", async (req: Request, res: Response) => {
@@ -812,8 +833,7 @@ async function startServer() {
       });
 
       // Prepend newly discovered investors in order
-      globalStore.investors.unshift(...generatedList);
-      globalStore.saveToDisk();
+      
 
       globalStore.aiRunLogs.unshift({
         id: `run_inv_discover_${Date.now()}`,
@@ -905,7 +925,7 @@ async function startServer() {
   // 5. Partners
   app.get("/api/partners", async (_req: Request, res: Response) => {
     try {
-      const dbLeads = await db.select().from(schema.contacts);
+      const dbLeadsSnap = await firestore.collection('organizations/org_1/contacts').get(); const dbLeads: any[] = []; dbLeadsSnap.forEach(d => dbLeads.push(d.data()));
       const mapped = dbLeads.map(c => ({
         id: c.id,
         workspaceId: c.organizationId,
@@ -918,31 +938,27 @@ async function startServer() {
         status: c.status,
         createdAt: c.createdAt.toISOString(),
       }));
-      res.json([...mapped, ...globalStore.partners]);
-    } catch(e) { res.json(globalStore.partners); }
+      res.json(mapped);
+    } catch(e) { console.error(e); res.status(500).json({error: e.message}); }
   });
 
   app.post("/api/partners", async (req: Request, res: Response) => {
-    const partData: Partial<Partner> = req.body;
-    const newPart: Partner = {
-      id: `part_${Date.now()}`,
-      workspaceId: "default",
-      name: partData.name || "Partner Contact",
-      companyName: partData.companyName || "Partner Agency",
-      partnerType: partData.partnerType || "AGENCY",
-      role: partData.role || "Managing Director",
-      email: partData.email || "",
-      country: partData.country || "United Kingdom",
-      partnerFitScore: partData.partnerFitScore || 87,
-      status: partData.status || "DISCOVERED",
-      potentialCollaboration: partData.potentialCollaboration || "Offer Abedin Voice AI as a managed receptionist add-on.",
-      revenueModel: partData.revenueModel || "30% recurring monthly margin on subscriptions.",
-      targetDecisionMaker: partData.targetDecisionMaker || "Managing Partner",
-      lastContactAt: new Date().toISOString(),
-    };
-    globalStore.partners.unshift(newPart);
-    globalStore.saveToDisk();
-    res.json(newPart);
+    const partData = req.body;
+    const newId = `part_${Date.now()}`;
+    try {
+      await firestore.collection('organizations/org_1/contacts').add({
+        id: newId,
+        organizationId: "default",
+        name: partData.name || "Partner Name",
+        title: partData.role || "Director of Partnerships",
+        primaryEmail: partData.email || "",
+        status: partData.status || "DISCOVERED"
+      });
+      res.json({ id: newId, ...partData });
+    } catch(e) {
+      console.error(e);
+      res.status(500).json({error: e.message});
+    }
   });
 
   app.post("/api/partners/batch-generate", async (req: Request, res: Response) => {
@@ -958,8 +974,7 @@ async function startServer() {
       });
 
       // Prepend newly discovered partners in order
-      globalStore.partners.unshift(...generatedList);
-      globalStore.saveToDisk();
+      
 
       globalStore.aiRunLogs.unshift({
         id: `run_partner_discover_${Date.now()}`,
@@ -1005,7 +1020,7 @@ async function startServer() {
   // 6. Campaigns
   app.get("/api/campaigns", async (_req: Request, res: Response) => {
     try {
-      const dbCamps = await db.select().from(schema.campaigns);
+      const dbCampsSnap = await firestore.collection('organizations/org_1/campaigns').get(); const dbCamps: any[] = []; dbCampsSnap.forEach(d => dbCamps.push(d.data()));
       const mapped = dbCamps.map(c => ({
         id: c.id,
         name: c.name,
@@ -1013,8 +1028,8 @@ async function startServer() {
         targetAudience: c.targetAudience,
         type: c.type
       }));
-      res.json([...mapped, ...globalStore.campaigns]);
-    } catch(e) { res.json(globalStore.campaigns); }
+      res.json(mapped);
+    } catch(e) { console.error(e); res.status(500).json({error: e.message}); }
   });
 
   app.post("/api/campaigns/generate-strategy", async (req: Request, res: Response) => {
@@ -1048,8 +1063,7 @@ async function startServer() {
         createdAt: new Date().toISOString(),
       };
 
-      globalStore.campaigns.unshift(newCampaign);
-      globalStore.saveToDisk();
+      
       res.json(newCampaign);
     } catch (error) {
       console.error("Campaign strategy error:", error);
@@ -1069,6 +1083,37 @@ async function startServer() {
   });
 
   // 7. Inbox & Conversations
+  
+  app.post("/api/integrations/gmail/token", async (req: Request, res: Response) => {
+    const { accessToken, expiresIn, accountEmail } = req.body;
+    const orgId = req.user?.organizationId || "default";
+    
+    try {
+      const existing = await firestore.collection('oauth_connections').where('organizationId', '==', 'org_1').where('provider', '==', 'gmail').get();
+      if (!existing.empty) {
+        await existing.docs[0].ref.update({
+          accessToken: 'mock_token',
+          refreshToken: 'mock_refresh',
+          updatedAt: new Date()
+        });
+      } else {
+        await firestore.collection('oauth_connections').add({
+          id: 'oauth_' + Date.now(),
+          organizationId: 'org_1',
+          provider: 'gmail',
+          accessToken: 'mock_token',
+          refreshToken: 'mock_refresh',
+          status: 'ACTIVE',
+          updatedAt: new Date()
+        });
+      }
+      res.json({ success: true });
+    } catch(e) {
+      console.error("Token sync error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/inbox", (_req: Request, res: Response) => {
     // Return conversations sorted by: 
     // 1) Active threads with unreplied prospect inbound messages first
@@ -1623,39 +1668,32 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
   // 8. Pipeline Opportunities
   app.get("/api/pipeline", async (_req: Request, res: Response) => {
     try {
-      const dbOpps = await db.select().from(schema.opportunities);
+      const dbOppsSnap = await firestore.collection('organizations/org_1/opportunities').get(); const dbOpps: any[] = []; dbOppsSnap.forEach(d => dbOpps.push(d.data()));
       const mapped = dbOpps.map(o => ({
         id: o.id,
         contactId: o.contactId,
         stage: o.stage,
         value: o.value
       }));
-      res.json([...mapped, ...globalStore.opportunities]);
-    } catch(e) { res.json(globalStore.opportunities); }
+      res.json(mapped);
+    } catch(e) { console.error(e); res.status(500).json({error: e.message}); }
   });
 
-  app.post("/api/pipeline", (req: Request, res: Response) => {
-    const oppData: Partial<Opportunity> = req.body;
-    const newOpp: Opportunity = {
-      id: `opp_${Date.now()}`,
-      workspaceId: "default",
-      title: oppData.title || "New Opportunity",
-      companyName: oppData.companyName || "Target Org",
-      contactName: oppData.contactName || "Prospect Lead",
-      contactEmail: oppData.contactEmail || "",
-      category: oppData.category || "CUSTOMER",
-      stage: oppData.stage || "QUALIFIED",
-      estimatedValue: oppData.estimatedValue || 12000,
-      currency: oppData.currency || "£",
-      probability: oppData.probability || 50,
-      aiScore: oppData.aiScore || 88,
-      nextStep: oppData.nextStep || "Schedule discovery demo",
-      expectedCloseDate: oppData.expectedCloseDate || new Date(Date.now() + 86400000 * 30).toISOString().split("T")[0],
-      updatedAt: new Date().toISOString(),
-    };
-    globalStore.opportunities.unshift(newOpp);
-    globalStore.saveToDisk();
-    res.json(newOpp);
+  app.post("/api/pipeline", async (req: Request, res: Response) => {
+    const oppData = req.body;
+    const newId = `opp_${Date.now()}`;
+    try {
+      await firestore.collection('organizations/org_1/opportunities').add({
+        id: newId,
+        contactId: oppData.contactId || 'unknown',
+        value: oppData.value || 0,
+        stage: oppData.stage || "DISCOVERY"
+      });
+      res.json({ id: newId, ...oppData });
+    } catch(e) {
+      console.error(e);
+      res.status(500).json({error: e.message});
+    }
   });
 
   app.put("/api/pipeline/:id/stage", (req: Request, res: Response) => {
@@ -1674,7 +1712,7 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
   // 9. Meetings & Calendar
   app.get("/api/meetings", async (_req: Request, res: Response) => {
     try {
-      const dbMeetings = await db.select().from(schema.meetings);
+      const dbMeetingsSnap = await firestore.collection('organizations/org_1/meetings').get(); const dbMeetings: any[] = []; dbMeetingsSnap.forEach(d => dbMeetings.push(d.data()));
       const mapped = dbMeetings.map(m => ({
         id: m.id,
         contactId: m.contactId,
@@ -1685,8 +1723,8 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
         scheduledAt: m.scheduledTime ? m.scheduledTime.toISOString() : undefined,
         meetLink: m.meetUrl,
       }));
-      res.json([...mapped, ...globalStore.meetings]);
-    } catch(e) { res.json(globalStore.meetings); }
+      res.json(mapped);
+    } catch(e) { console.error(e); res.status(500).json({error: e.message}); }
   });
 
   app.post("/api/meetings", async (req: Request, res: Response) => {
@@ -1716,8 +1754,7 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
       aiBrief,
     };
 
-    globalStore.meetings.unshift(newMeeting);
-    globalStore.saveToDisk();
+    
     res.json(newMeeting);
   });
 
@@ -1951,16 +1988,16 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
   });
 
   app.get("/api/autopilot/status", (_req: Request, res: Response) => {
-    res.json(autopilotRunner.getStatus());
+    res.json(autopilotRunner.status);
   });
 
   app.post("/api/autopilot/toggle", (_req: Request, res: Response) => {
-    const isActive = autopilotRunner.toggle();
-    res.json({ isActive, status: autopilotRunner.getStatus() });
+    const isActive = autopilotRunner.startBackgroundLoop();
+    res.json({ isActive, status: autopilotRunner.status });
   });
 
   app.post("/api/autopilot/settings", (req: Request, res: Response) => {
-    const updated = autopilotRunner.setSettings(req.body);
+    const updated = // autopilotRunner.setSettings(req.body);
     res.json(updated);
   });
 
@@ -1969,7 +2006,7 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
       const result = await autopilotRunner.runFullCycleNow(true);
       res.json({
         ...result,
-        status: autopilotRunner.getStatus(),
+        status: autopilotRunner.status,
         leadsCount: globalStore.leads.length,
         investorsCount: globalStore.investors.length,
         conversationsCount: globalStore.conversations.length,
@@ -2081,9 +2118,7 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
   });
 
   // 19. Complete Outbox & Audit Trails
-  app.get("/api/outbox", (_req: Request, res: Response) => {
-    res.json(globalStore.outboxLogs);
-  });
+
 
   // Vite middleware for development / static serving in production
   if (process.env.NODE_ENV !== "production") {
@@ -2106,7 +2141,10 @@ app.post("/api/signature/webhook", express.raw({ type: 'application/json' }), as
       const meetingId = event.data.envelopeSummary.customFields.customField.find((f: any) => f.name === 'meetingId')?.value;
       if (meetingId) {
         console.log(`DocuSign webhook received for meeting: ${meetingId}`);
-        await db.update(schema.meetings).set({ status: 'CONFIRMED' }).where(eq(schema.meetings.id, meetingId));
+        
+        const meetingRef = firestore.collection('organizations/org_1/meetings').doc(meetingId);
+        await meetingRef.update({ status: 'CONFIRMED' });
+
       }
     }
     res.status(200).send("OK");
@@ -2116,10 +2154,40 @@ app.post("/api/signature/webhook", express.raw({ type: 'application/json' }), as
   }
 });
 
+  
+  // Gmail Pub/Sub Webhook
+  app.post("/api/webhooks/gmail", async (req: Request, res: Response) => {
+    try {
+      // In production, verify Google Pub/Sub signature
+      const message = req.body.message;
+      if (!message || !message.data) {
+        return res.status(400).send("Bad Request");
+      }
+      
+      const decodedData = Buffer.from(message.data, 'base64').toString('utf8');
+      const event = JSON.parse(decodedData);
+      
+      
+      console.log(`Received Gmail Pub/Sub event for ${event.emailAddress} (historyId: ${event.historyId})`);
+      
+      const { gmailHistorySyncService } = require('./server/services/gmailHistorySync.service');
+      gmailHistorySyncService.processEvent(event.emailAddress, event.historyId)
+        .catch((e: Error) => console.error("Error processing history event:", e));
+      
+      res.status(200).send("OK");
+
+    } catch(e) {
+      console.error("Gmail webhook error", e);
+      res.status(500).send("Error");
+    }
+  });
+
   app.get("*", (_req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  outboxWorker.start();
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Abedin Growth AI] Server running at http://0.0.0.0:${PORT}`);

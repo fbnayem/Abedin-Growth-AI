@@ -59,3 +59,11 @@ export const logout = async () => {
   await auth.signOut();
   cachedAccessToken = null;
 };
+
+export const getFirebaseIdToken = async (): Promise<string | null> => {
+  const user = auth.currentUser;
+  if (user) {
+    return await user.getIdToken();
+  }
+  return null;
+};

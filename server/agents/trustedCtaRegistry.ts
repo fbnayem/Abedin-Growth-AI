@@ -1,4 +1,4 @@
-import { CTARegistryEntry } from "../../src/types";
+import { CTARegistryEntry } from "../../shared/domain/models";
 
 export const CALENDAR_BOOKING_URL = "https://calendar.app.google/abedin-voice-ai-demo";
 export const GOOGLE_MEET_URL = "https://meet.google.com/abn-vce-demo";

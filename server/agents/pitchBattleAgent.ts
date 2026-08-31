@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { CompanyBrain, Lead, Investor } from "../../src/types";
+import { CompanyBrain, Lead, Investor } from "../../shared/domain/models";
 
 export interface PitchSimulationInput {
   entityType: "CUSTOMER" | "INVESTOR";

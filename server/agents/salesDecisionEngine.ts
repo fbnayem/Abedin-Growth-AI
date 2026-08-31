@@ -12,7 +12,7 @@ import {
   Conversation,
   EmailMessage,
   EmailUnderstanding,
-} from "../../src/types";
+} from "../../shared/domain/models";
 import { safeGenerateJSON } from "../geminiClient";
 import { globalStore } from "../dataStore";
 import { CALENDAR_BOOKING_URL, GOOGLE_MEET_URL, WEBSITE_URL, ONBOARDING_URL } from "./trustedCtaRegistry";

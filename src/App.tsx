@@ -1,3 +1,4 @@
+import { apiFetch } from './lib/apiFetch';
 import React, { useState, useEffect } from "react";
 
 import { initAuth, googleSignIn, logout as firebaseLogout, getAccessToken } from "./lib/firebase";
@@ -70,7 +71,7 @@ export function App() {
         setCurrentUser(user);
         setIsAuthLoading(false);
         // Send token to backend so it can be used for autonomous background tasks
-        fetch('/api/settings/token', {
+        apiFetch('/api/settings/token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token })
@@ -198,12 +199,12 @@ export function App() {
   const syncLiveEngineData = async () => {
     try {
       const [autoRes, dashRes, leadsRes, invRes, inboxRes, logsRes] = await Promise.all([
-        fetch("/api/autopilot/status"),
-        fetch("/api/dashboard"),
-        fetch("/api/leads"),
-        fetch("/api/investors"),
-        fetch("/api/inbox"),
-        fetch("/api/logs"),
+        apiFetch("/api/autopilot/status"),
+        apiFetch("/api/dashboard"),
+        apiFetch("/api/leads"),
+        apiFetch("/api/investors"),
+        apiFetch("/api/inbox"),
+        apiFetch("/api/logs"),
       ]);
 
       const isJson = (res: Response) => res.headers.get("content-type")?.includes("application/json");
@@ -237,17 +238,23 @@ export function App() {
     } catch (e) {
       if (e instanceof TypeError && e.message === 'Failed to fetch') {
         // Ignore dev server restart disconnect
+      } else if (e instanceof TypeError && e.message === 'Failed to fetch') {
+        // Ignore dev server restart disconnect
       } else if (e instanceof SyntaxError && e.message.includes('json')) {
         // Ignore benign HTML response during dev server restart
       } else {
+        if (e instanceof SyntaxError && e.message.includes('json')) {
+        // Ignore benign HTML response during dev server restart
+      } else {
         console.error("Live data sync error:", e);
+      }
       }
     }
   };
 
   const handleToggleAutopilot = async () => {
     try {
-      const res = await fetch("/api/autopilot/toggle", { method: "POST" });
+      const res = await apiFetch("/api/autopilot/toggle", { method: "POST" });
       if (res.ok) {
         const data = await res.json();
         if (data.status) setAutopilotStatus(data.status);
@@ -260,7 +267,7 @@ export function App() {
 
   const handleRunAutopilotCycleNow = async () => {
     try {
-      const res = await fetch("/api/autopilot/run-cycle-now", { method: "POST" });
+      const res = await apiFetch("/api/autopilot/run-cycle-now", { method: "POST" });
       if (res.ok) {
         const data = await res.json();
         if (data.status) setAutopilotStatus(data.status);
@@ -290,19 +297,19 @@ export function App() {
           logsRes,
           autoRes,
         ] = await Promise.all([
-          fetch("/api/dashboard"),
-          fetch("/api/company-brain"),
-          fetch("/api/leads"),
-          fetch("/api/investors"),
-          fetch("/api/partners"),
-          fetch("/api/campaigns"),
-          fetch("/api/inbox"),
-          fetch("/api/pipeline"),
-          fetch("/api/meetings"),
-          fetch("/api/knowledge"),
-          fetch("/api/settings"),
-          fetch("/api/logs"),
-          fetch("/api/autopilot/status"),
+          apiFetch("/api/dashboard"),
+          apiFetch("/api/company-brain"),
+          apiFetch("/api/leads"),
+          apiFetch("/api/investors"),
+          apiFetch("/api/partners"),
+          apiFetch("/api/campaigns"),
+          apiFetch("/api/inbox"),
+          apiFetch("/api/pipeline"),
+          apiFetch("/api/meetings"),
+          apiFetch("/api/knowledge"),
+          apiFetch("/api/settings"),
+          apiFetch("/api/logs"),
+          apiFetch("/api/autopilot/status"),
         ]);
 
         const isJson = (r: Response) => r.headers.get("content-type")?.includes("application/json");
@@ -400,8 +407,8 @@ export function App() {
         }
         // Refresh conversations and dashboard
         const [inboxRes, dashRes] = await Promise.all([
-          fetch("/api/inbox"),
-          fetch("/api/dashboard"),
+          apiFetch("/api/inbox"),
+          apiFetch("/api/dashboard"),
         ]);
         if (inboxRes.ok) setConversations(await inboxRes.json());
         if (dashRes.ok) {
@@ -443,7 +450,7 @@ export function App() {
 
   const handleResearchLead = async (lead: Lead) => {
     try {
-      const res = await fetch("/api/leads/research", {
+      const res = await apiFetch("/api/leads/research", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(lead),
@@ -464,7 +471,7 @@ export function App() {
 
   const handleBatchDiscoverLeads = async () => {
     try {
-      const res = await fetch("/api/leads/batch-generate", {
+      const res = await apiFetch("/api/leads/batch-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -485,7 +492,7 @@ export function App() {
 
   const handleToggleCampaignStatus = async (campaignId: string) => {
     try {
-      const res = await fetch(`/api/campaigns/${campaignId}/toggle`, {
+      const res = await apiFetch(`/api/campaigns/${campaignId}/toggle`, {
         method: "POST",
       });
       if (res.ok) {
@@ -500,7 +507,7 @@ export function App() {
   };
 
   const handleSendInboxReply = async (convId: string, subject: string, body: string) => {
-    const res = await fetch(`/api/inbox/${convId}/reply`, {
+    const res = await apiFetch(`/api/inbox/${convId}/reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subject, body }),
@@ -515,7 +522,7 @@ export function App() {
   };
 
   const handleClassifyThread = async (convId: string) => {
-    const res = await fetch(`/api/inbox/${convId}/classify`, {
+    const res = await apiFetch(`/api/inbox/${convId}/classify`, {
       method: "POST",
     });
     if (res.ok) {
@@ -527,7 +534,7 @@ export function App() {
   };
 
   const handleUpdatePipelineStage = async (oppId: string, newStage: any) => {
-    const res = await fetch(`/api/pipeline/${oppId}/stage`, {
+    const res = await apiFetch(`/api/pipeline/${oppId}/stage`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ stage: newStage }),
@@ -541,7 +548,7 @@ export function App() {
   };
 
   const handleGenerateMeetingBrief = async (meeting: Meeting) => {
-    const res = await fetch("/api/meetings/brief", {
+    const res = await apiFetch("/api/meetings/brief", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(meeting),
@@ -810,7 +817,7 @@ export function App() {
               settings={autopilotSettings}
               onUpdateSettings={(newS) => {
                 setAutopilotSettings(newS);
-                fetch("/api/settings/autopilot", {
+                apiFetch("/api/settings/autopilot", {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify(newS),

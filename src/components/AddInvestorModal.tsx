@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, TrendingUp, Sparkles, Building, Mail, Globe, Plus, Loader2 } from "lucide-react";
 import { Investor, InvestorStage } from "../types";
@@ -32,7 +33,7 @@ export const AddInvestorModal: React.FC<AddInvestorModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/investors", {
+      const res = await apiFetch("/api/investors", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

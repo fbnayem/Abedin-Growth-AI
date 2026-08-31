@@ -5,7 +5,7 @@ import {
   EmailUnderstanding,
   NextBestActionResult,
   BuyingStage,
-} from "../../src/types";
+} from "../../shared/domain/models";
 import {
   CALENDAR_BOOKING_URL,
   GOOGLE_MEET_URL,

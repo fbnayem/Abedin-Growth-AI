@@ -1,5 +1,5 @@
 import { safeGenerateJSON } from "../geminiClient";
-import { CompanyBrain } from "../../src/types";
+import { CompanyBrain } from "../../shared/domain/models";
 
 export interface AICommandPlanStep {
   stepNumber: number;

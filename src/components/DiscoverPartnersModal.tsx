@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, Sparkles, Handshake, MapPin, Building2, Sliders, Loader2, ShieldCheck } from "lucide-react";
 import { Partner, PartnerType } from "../types";
@@ -48,7 +49,7 @@ export const DiscoverPartnersModal: React.FC<DiscoverPartnersModalProps> = ({
     const t2 = setTimeout(() => setStepText("Structuring recurring rev-share models & collaboration terms..."), 1500);
 
     try {
-      const res = await fetch("/api/partners/batch-generate", {
+      const res = await apiFetch("/api/partners/batch-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

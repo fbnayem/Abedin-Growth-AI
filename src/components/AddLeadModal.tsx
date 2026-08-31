@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, UserPlus, Sparkles, Building2, Mail, Phone, Globe, Plus, Loader2 } from "lucide-react";
 import { Lead } from "../types";
@@ -33,7 +34,7 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/leads", {
+      const res = await apiFetch("/api/leads", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

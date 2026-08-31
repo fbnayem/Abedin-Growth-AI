@@ -1,5 +1,5 @@
 import { safeGenerateJSON } from "../geminiClient";
-import { Conversation, ReplyIntent, PolicyDecision, CompanyBrain } from "../../src/types";
+import { Conversation, ReplyIntent, PolicyDecision, CompanyBrain } from "../../shared/domain/models";
 import { validateAndEnforceNoPhonePolicy, validateAndEnforceMeetingAndCalendarLinks } from "./multiAgentReplySystem";
 
 export interface ReplyClassificationResult {

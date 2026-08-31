@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState, useEffect } from "react";
 import { Send, CheckCircle2, XCircle, Clock, ShieldCheck, Mail, RefreshCw } from "lucide-react";
 
@@ -8,7 +9,7 @@ export const OutboxView: React.FC = () => {
   const fetchOutbox = async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/outbox");
+      const res = await apiFetch("/api/outbox");
       const isJson = res.headers.get("content-type")?.includes("application/json");
       if (!isJson) return;
       const data = await res.json();
@@ -28,7 +29,7 @@ export const OutboxView: React.FC = () => {
 
   const handleApprove = async (id: string) => {
     try {
-      await fetch(`/api/outbox/${id}/approve`, { method: "POST" });
+      await apiFetch(`/api/outbox/${id}/approve`, { method: "POST" });
       fetchOutbox();
     } catch (e) {
       console.error(e);
@@ -37,7 +38,7 @@ export const OutboxView: React.FC = () => {
 
   const handleReject = async (id: string) => {
     try {
-      await fetch(`/api/outbox/${id}/reject`, { method: "POST" });
+      await apiFetch(`/api/outbox/${id}/reject`, { method: "POST" });
       fetchOutbox();
     } catch (e) {
       console.error(e);

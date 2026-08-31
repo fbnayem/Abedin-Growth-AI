@@ -1,5 +1,5 @@
 import { safeGenerateJSON } from "../geminiClient";
-import { Campaign, EngineCategory, CompanyBrain } from "../../src/types";
+import { Campaign, EngineCategory, CompanyBrain } from "../../shared/domain/models";
 
 export async function generateCampaignStrategy(input: {
   name: string;

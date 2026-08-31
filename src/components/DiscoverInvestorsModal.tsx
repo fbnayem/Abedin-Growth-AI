@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, Sparkles, DollarSign, MapPin, Building2, Sliders, Loader2, ShieldCheck } from "lucide-react";
 import { Investor, InvestorStage } from "../types";
@@ -66,7 +67,7 @@ export const DiscoverInvestorsModal: React.FC<DiscoverInvestorsModalProps> = ({
     const t2 = setTimeout(() => setStepText("Formulating thesis alignment score & tailored pitch angles..."), 1500);
 
     try {
-      const res = await fetch("/api/investors/batch-generate", {
+      const res = await apiFetch("/api/investors/batch-generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -2,6 +2,10 @@ import { db } from './db/index';
 import { eq } from 'drizzle-orm';
 import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, outboxMessages, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
 
+import { db } from './db/index';
+import { eq } from 'drizzle-orm';
+import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, outboxMessages, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
+
 import fs from "fs";
 import path from "path";
 import {
@@ -21,7 +25,7 @@ import {
   SenderIdentity,
   LinkedInConfig,
   OutboxLogItem,
-} from "../src/types";
+} from "../shared/domain/models";
 import { generateFourHundredHistoricalLeads } from "./seedLeadsGenerator";
 import { validateAndEnforceNoPhonePolicy, validateAndEnforceMeetingAndCalendarLinks } from "./agents/multiAgentReplySystem";
 
@@ -249,6 +253,13 @@ export class DataStore {
         { id: "default", name: "Default Workspace", slug: "default-workspace" }
       ]).onConflictDoNothing();
 
+      
+      // Ensure required organizations exist to satisfy foreign key constraints
+      await db.insert(organizations).values([
+        { id: "org_1", name: "Default Org", slug: "default-org-1" },
+        { id: "default", name: "Default Workspace", slug: "default-workspace" }
+      ]).onConflictDoNothing();
+
       const orgId = "org_1";
       
       // Just an example mirror of the leads
@@ -271,6 +282,9 @@ export class DataStore {
 
   public saveToDisk(): boolean {
     this.saveToDb();
+    
+
+    
 
     try {
       const dataToSave = {

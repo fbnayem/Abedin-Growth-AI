@@ -1,5 +1,5 @@
 import { safeGenerateJSON, extractArray } from "../geminiClient";
-import { Partner, CompanyBrain } from "../../src/types";
+import { Partner, CompanyBrain } from "../../shared/domain/models";
 
 export async function scoreAndResearchPartner(
   partnerInput: Partial<Partner>,

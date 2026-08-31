@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, DollarSign, Sparkles, Building, User, Mail, Plus, Loader2 } from "lucide-react";
 import { Opportunity, PipelineStage, EngineType } from "../types";
@@ -32,7 +33,7 @@ export const NewOpportunityModal: React.FC<NewOpportunityModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/pipeline", {
+      const res = await apiFetch("/api/pipeline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

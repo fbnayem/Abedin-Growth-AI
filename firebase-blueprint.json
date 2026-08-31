@@ -1,0 +1,186 @@
+{
+  "entities": {
+    "Organization": {
+      "title": "Organization",
+      "description": "A top-level tenant workspace",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "name": { "type": "string", "maxLength": 255 },
+        "slug": { "type": "string", "maxLength": 255 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "name", "slug"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "A person record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "organizationId": { "type": "string", "maxLength": 255 },
+        "accountId": { "type": "string", "maxLength": 255 },
+        "firstName": { "type": "string", "maxLength": 255 },
+        "lastName": { "type": "string", "maxLength": 255 },
+        "name": { "type": "string", "maxLength": 255 },
+        "primaryEmail": { "type": "string", "maxLength": 255 },
+        "title": { "type": "string", "maxLength": 255 },
+        "phone": { "type": "string", "maxLength": 50 },
+        "linkedinUrl": { "type": "string", "maxLength": 255 },
+        "timezone": { "type": "string", "maxLength": 50 },
+        "language": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "organizationId", "primaryEmail", "status"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "An email thread or chat with a contact",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "organizationId": { "type": "string", "maxLength": 255 },
+        "accountId": { "type": "string", "maxLength": 255 },
+        "contactId": { "type": "string", "maxLength": 255 },
+        "providerThreadId": { "type": "string", "maxLength": 255 },
+        "subject": { "type": "string" },
+        "status": { "type": "string", "maxLength": 50 },
+        "category": { "type": "string", "maxLength": 50 },
+        "lastMessageAt": { "type": "string" },
+        "latestIntent": { "type": "string", "maxLength": 100 },
+        "buyingStage": { "type": "string", "maxLength": 50 },
+        "meetingReadiness": { "type": "integer" },
+        "purchaseReadiness": { "type": "integer" },
+        "nextBestAction": { "type": "string", "maxLength": 100 },
+        "assignedTo": { "type": "string", "maxLength": 255 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "organizationId", "contactId", "status", "lastMessageAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "An individual email or chat message inside a conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "conversationId": { "type": "string", "maxLength": 255 },
+        "provider": { "type": "string", "maxLength": 50 },
+        "providerMessageId": { "type": "string", "maxLength": 255 },
+        "providerThreadId": { "type": "string", "maxLength": 255 },
+        "messageIdHeader": { "type": "string", "maxLength": 255 },
+        "inReplyTo": { "type": "string", "maxLength": 255 },
+        "references": { "type": "string" },
+        "direction": { "type": "string", "maxLength": 50 },
+        "sender": { "type": "string", "maxLength": 255 },
+        "recipients": { "type": "array" },
+        "cc": { "type": "array" },
+        "bcc": { "type": "array" },
+        "subject": { "type": "string" },
+        "textBody": { "type": "string" },
+        "sanitizedHtmlBody": { "type": "string" },
+        "rawMetadata": { "type": "object" },
+        "receivedAt": { "type": "string" },
+        "sentAt": { "type": "string" },
+        "status": { "type": "string", "maxLength": 50 },
+        "isAutomated": { "type": "boolean" },
+        "automationClassification": { "type": "string", "maxLength": 50 },
+        "source": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "conversationId", "direction", "sender", "status", "isAutomated"]
+    },
+    "Campaign": {
+      "title": "Campaign",
+      "description": "An outbound marketing campaign",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "name": { "type": "string", "maxLength": 255 },
+        "status": { "type": "string", "maxLength": 50 },
+        "targetAudience": { "type": "string", "maxLength": 255 },
+        "type": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "status"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "A scheduled meeting",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "contactId": { "type": "string", "maxLength": 255 },
+        "title": { "type": "string", "maxLength": 255 },
+        "status": { "type": "string", "maxLength": 50 },
+        "scheduledTime": { "type": "string" },
+        "meetUrl": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "contactId", "title", "status"]
+    },
+    "Opportunity": {
+      "title": "Opportunity",
+      "description": "A sales opportunity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "contactId": { "type": "string", "maxLength": 255 },
+        "value": { "type": "integer" },
+        "stage": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "contactId", "stage"]
+    },
+    "KnowledgeItem": {
+      "title": "KnowledgeItem",
+      "description": "A piece of knowledge in the company brain",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 255 },
+        "title": { "type": "string", "maxLength": 255 },
+        "content": { "type": "string" },
+        "category": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "title", "content"]
+    }
+  },
+  "firestore": {
+    "organizations/{organizationId}": {
+      "schema": "Organization",
+      "description": "Tenant root"
+    },
+    "organizations/{organizationId}/contacts/{contactId}": {
+      "schema": "Contact",
+      "description": "Contacts within an organization"
+    },
+    "organizations/{organizationId}/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Conversations within an organization"
+    },
+    "organizations/{organizationId}/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages in a conversation"
+    },
+    "organizations/{organizationId}/campaigns/{campaignId}": {
+      "schema": "Campaign",
+      "description": "Campaigns within an org"
+    },
+    "organizations/{organizationId}/meetings/{meetingId}": {
+      "schema": "Meeting",
+      "description": "Meetings within an org"
+    },
+    "organizations/{organizationId}/opportunities/{opportunityId}": {
+      "schema": "Opportunity",
+      "description": "Opportunities within an org"
+    },
+    "organizations/{organizationId}/knowledge/{knowledgeId}": {
+      "schema": "KnowledgeItem",
+      "description": "Company brain knowledge base"
+    }
+  }
+}

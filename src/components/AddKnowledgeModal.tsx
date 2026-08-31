@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, BookOpen, Sparkles, FileText, CheckCircle2, ShieldAlert, Plus, Loader2 } from "lucide-react";
 import { KnowledgeItem, KnowledgeCategory } from "../types";
@@ -29,7 +30,7 @@ export const AddKnowledgeModal: React.FC<AddKnowledgeModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/knowledge", {
+      const res = await apiFetch("/api/knowledge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

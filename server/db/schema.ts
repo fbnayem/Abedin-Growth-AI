@@ -174,6 +174,19 @@ export const attentionItems = pgTable('attention_items', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
+
+export const oauthConnections = pgTable('oauth_connections', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  organizationId: varchar('organization_id', { length: 255 }).references(() => organizations.id).notNull(),
+  provider: varchar('provider', { length: 50 }).notNull(),
+  accountEmail: varchar('account_email', { length: 255 }),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  expiresAt: timestamp('expires_at'),
+  status: varchar('status', { length: 50 }).default('ACTIVE').notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
 export const aiRunLogs = pgTable('ai_run_logs', {
   id: varchar('id', { length: 255 }).primaryKey(),
   agentType: varchar('agent_type', { length: 50 }).notNull(),

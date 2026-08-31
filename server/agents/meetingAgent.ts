@@ -1,5 +1,5 @@
 import { safeGenerateJSON } from "../geminiClient";
-import { Meeting, EngineCategory, CompanyBrain } from "../../src/types";
+import { Meeting, EngineCategory, CompanyBrain } from "../../shared/domain/models";
 
 export async function generateMeetingBrief(input: {
   prospectName: string;

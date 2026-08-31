@@ -1,4 +1,4 @@
-import { Lead, OutboxLogItem, ScoreBreakdown, Conversation, EmailMessage, ReplyIntent } from "../src/types";
+import { Lead, OutboxLogItem, ScoreBreakdown, Conversation, EmailMessage, ReplyIntent } from "../shared/domain/models";
 
 interface ClinicTemplate {
   name: string;

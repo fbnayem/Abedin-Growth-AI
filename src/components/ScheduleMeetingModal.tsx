@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, Calendar, Clock, Sparkles, Building, Mail, User, Plus, Loader2 } from "lucide-react";
 import { Meeting, EngineType } from "../types";
@@ -51,7 +52,7 @@ export const ScheduleMeetingModal: React.FC<ScheduleMeetingModalProps> = ({
 
     setLoading(true);
     try {
-      const res = await fetch("/api/meetings", {
+      const res = await apiFetch("/api/meetings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React from "react";
 import {
   BarChart3,
@@ -22,7 +23,7 @@ export const AnalyticsView: React.FC = () => {
   ]);
 
   React.useEffect(() => {
-    fetch('/api/analytics/funnel')
+    apiFetch('/api/analytics/funnel')
       .then(res => {
         if (!res.headers.get("content-type")?.includes("application/json")) {
           throw new Error("Invalid content-type");

@@ -1,3 +1,4 @@
+import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { Sparkles, ArrowRight, X, Loader2, Target, Users, TrendingUp, Mail, AlertCircle } from "lucide-react";
 import { AICommandResult } from "../../server/agents/growthCommandAgent";
@@ -37,7 +38,7 @@ export const CommandBar: React.FC<CommandBarProps> = ({
     setError(null);
 
     try {
-      const res = await fetch("/api/growth-command", {
+      const res = await apiFetch("/api/growth-command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command: text }),
