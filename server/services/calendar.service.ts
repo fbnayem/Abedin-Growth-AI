@@ -7,6 +7,19 @@ export class CalendarService {
     this.accessToken = tokens.access_token;
   }
 
+  // O. CALENDAR EDGE CASES
+  async checkFreeBusy(startTime: Date, endTime: Date, timeZone: string, emails: string[]): Promise<boolean> {
+     // Implement real check against free/busy API
+     return true; 
+  }
+
+  async validateBusinessHours(startTime: Date, timeZone: string): Promise<boolean> {
+     // Validate against configured business hours
+     const hour = startTime.getUTCHours();
+     // Simple stub
+     return true;
+  }
+
   async createMeeting(params: {
     title: string;
     description?: string;

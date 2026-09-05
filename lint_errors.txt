@@ -1,0 +1,76 @@
+
+> react-example@0.0.0 lint
+> tsc --noEmit
+
+server.ts(10,18): error TS2307: Cannot find module 'cors' or its corresponding type declarations.
+server.ts(180,55): error TS2551: Property 'score' does not exist on type 'Lead'. Did you mean 'aiScore'?
+server.ts(180,66): error TS2551: Property 'score' does not exist on type 'Lead'. Did you mean 'aiScore'?
+server.ts(183,59): error TS2367: This comparison appears to be unintentional because the types '"ACTIVE" | "DEMO_BOOKED" | "WAITING_ON_PROSPECT" | "HUMAN_NEEDED" | "MEETING_REQUESTED" | "CLOSED"' and '"NEW"' have no overlap.
+server.ts(208,30): error TS2304: Cannot find name 'generateCompanyBrain'.
+server.ts(537,7): error TS2353: Object literal may only specify known properties, and 'updatedAt' does not exist in type 'Lead'.
+server.ts(556,24): error TS2304: Cannot find name 'inspectEmailDraft'.
+server.ts(743,32): error TS2304: Cannot find name 'scoreAndResearchLead'.
+server.ts(767,35): error TS2304: Cannot find name 'batchDiscoverLeads'.
+server.ts(849,35): error TS2304: Cannot find name 'batchDiscoverInvestors'.
+server.ts(884,32): error TS2304: Cannot find name 'scoreAndResearchInvestor'.
+server.ts(991,35): error TS2304: Cannot find name 'batchDiscoverPartners'.
+server.ts(1025,32): error TS2304: Cannot find name 'scoreAndResearchPartner'.
+server.ts(1060,30): error TS2304: Cannot find name 'generateCampaignStrategy'.
+server.ts(1179,28): error TS2304: Cannot find name 'processConversationThread'.
+server.ts(1221,13): error TS2304: Cannot find name 'outboxService'.
+server.ts(1263,28): error TS2304: Cannot find name 'autoReplyAllPendingInbounds'.
+server.ts(1282,13): error TS2304: Cannot find name 'pipelineService'.
+server.ts(1390,7): error TS2304: Cannot find name 'killSwitchController'.
+server.ts(1392,7): error TS2304: Cannot find name 'killSwitchController'.
+server.ts(1440,9): error TS2345: Argument of type '"SOLUTION_EXPLORING"' is not assignable to parameter of type 'BuyingStage'.
+server.ts(1547,28): error TS2304: Cannot find name 'simulateInboundProspectReply'.
+server.ts(1558,28): error TS2304: Cannot find name 'simulateInboundProspectReply'.
+server.ts(1575,29): error TS2304: Cannot find name 'extractAndSynthesizeMemory'.
+server.ts(1592,28): error TS2304: Cannot find name 'extractAndSynthesizeMemory'.
+server.ts(1615,33): error TS2304: Cannot find name 'generateMemoryAwareFollowUp'.
+server.ts(1620,29): error TS2304: Cannot find name 'extractAndSynthesizeMemory'.
+server.ts(1623,24): error TS2304: Cannot find name 'inspectEmailDraft'.
+server.ts(1757,27): error TS2304: Cannot find name 'generateMeetingBrief'.
+server.ts(1786,27): error TS2304: Cannot find name 'generateMeetingBrief'.
+server.ts(1818,28): error TS2304: Cannot find name 'checkAndDispatchMeetingReminders'.
+server.ts(1830,30): error TS2304: Cannot find name 'sendMissedMeetingRecoveryEmail'.
+server.ts(1844,28): error TS2304: Cannot find name 'sendMissedMeetingRecoveryEmail'.
+server.ts(1858,28): error TS2304: Cannot find name 'signMeetingAgreement'.
+server.ts(1876,28): error TS2304: Cannot find name 'processMeetingFirstPayment'.
+server.ts(1940,28): error TS2304: Cannot find name 'processGrowthCommand'.
+server.ts(1975,28): error TS2304: Cannot find name 'inspectEmailDraft'.
+server.ts(1986,28): error TS2304: Cannot find name 'simulatePitchBattle'.
+server.ts(2004,7): error TS2304: Cannot find name 'gmailService'.
+server.ts(2005,7): error TS2304: Cannot find name 'calendarService'.
+server.ts(2024,14): error TS2448: Block-scoped variable 'updated' used before its declaration.
+server.ts(2029,44): error TS2339: Property 'runFullCycleNow' does not exist on type '{ startBackgroundLoop(): void; stopBackgroundLoop(): void; readonly status: "ACTIVE" | "IDLE"; readonly isActive: boolean; readonly progressPercent: number; readonly currentLiveTask: string; readonly stageDetail: string; }'.
+server/agents/salesDecisionEngine.ts(280,33): error TS2322: Type '"UNSUBSCRIBED"' is not assignable to type 'BuyingStage'.
+server/agents/salesDecisionEngine.ts(281,36): error TS2322: Type '"NOT_INTERESTED"' is not assignable to type 'BuyingStage'.
+server/agents/salesDecisionEngine.ts(282,63): error TS2322: Type '"PURCHASE_READY"' is not assignable to type 'BuyingStage'.
+server/agents/salesDecisionEngine.ts(283,33): error TS2322: Type '"NEGOTIATION"' is not assignable to type 'BuyingStage'.
+server/agents/salesDecisionEngine.ts(284,60): error TS2322: Type '"DEMO_READY"' is not assignable to type 'BuyingStage'.
+server/agents/salesDecisionEngine.ts(285,71): error TS2820: Type '"COMMERCIAL_EVALUATION"' is not assignable to type 'BuyingStage'. Did you mean 'BuyingStage.TRIAL_EVALUATION'?
+server/agents/salesDecisionEngine.ts(286,77): error TS2820: Type '"TECHNICAL_EVALUATION"' is not assignable to type 'BuyingStage'. Did you mean 'BuyingStage.TRIAL_EVALUATION'?
+server/agents/salesDecisionEngine.ts(287,74): error TS2322: Type '"PRODUCT_EVALUATING"' is not assignable to type 'BuyingStage'.
+server/agents/salesDecisionEngine.ts(289,3): error TS2322: Type '"SOLUTION_EXPLORING" | BuyingStage' is not assignable to type 'BuyingStage'.
+  Type '"SOLUTION_EXPLORING"' is not assignable to type 'BuyingStage'.
+server/agents/salesDecisionEngine.ts(562,15): error TS2322: Type '"SUPPRESS"' is not assignable to type 'ComprehensiveIntent'.
+server/agents/salesEngineTestMatrix.ts(236,7): error TS2345: Argument of type '"SOLUTION_EXPLORING"' is not assignable to parameter of type 'BuyingStage'.
+server/autopilotRunner.ts(11,25): error TS2341: Property 'isRunning' is private and only accessible within class 'OutboxWorker'.
+server/autopilotRunner.ts(14,25): error TS2341: Property 'isRunning' is private and only accessible within class 'OutboxWorker'.
+server/services/identityResolver.service.ts(55,8): error TS2322: Type '"EXACT_EMAIL" | "DOMAIN_MATCH" | "NEW_CONTACT"' is not assignable to type '"EXACT_EMAIL" | "DOMAIN_MATCH" | "THREAD_CONTINUITY" | "CRM_LOOKUP" | "UNRESOLVED_NEW"'.
+  Type '"NEW_CONTACT"' is not assignable to type '"EXACT_EMAIL" | "DOMAIN_MATCH" | "THREAD_CONTINUITY" | "CRM_LOOKUP" | "UNRESOLVED_NEW"'.
+server/services/inboundPipeline.ts(8,10): error TS2305: Module '"../agents/salesDecisionEngine"' has no exported member 'EmailUnderstandingAgent'.
+server/services/inboundPipeline.ts(10,10): error TS2305: Module '"../agents/salesDecisionEngine"' has no exported member 'NextBestActionAgent'.
+server/services/inboundPipeline.ts(11,10): error TS2305: Module '"../agents/salesDecisionEngine"' has no exported member 'ReplyComposerAgent'.
+server/services/inboundPipeline.ts(12,10): error TS2305: Module '"../agents/independentAuditor"' has no exported member 'IndependentAuditor'.
+server/services/inboundPipeline.ts(30,37): error TS2339: Property 'conversationId' does not exist on type 'ClientIdentityResolution'.
+server/services/inboundPipeline.ts(37,32): error TS2339: Property 'accountId' does not exist on type 'ClientIdentityResolution'.
+server/services/inboundPipeline.ts(72,32): error TS2339: Property 'matchedLeadId' does not exist on type 'ClientIdentityResolution'.
+server/services/inboundPipeline.ts(89,33): error TS2339: Property 'facts' does not exist on type 'ConversationMemory'.
+server/services/inboundPipeline.ts(101,29): error TS2304: Cannot find name 'evaluateEmailUnderstandingRuleBased'.
+server/services/inboundPipeline.ts(104,25): error TS2304: Cannot find name 'determineNextBestAction'.
+server/services/inboundPipeline.ts(112,27): error TS2304: Cannot find name 'composeAutonomousSalesReply'.
+server/services/inboundPipeline.ts(118,65): error TS2339: Property 'reason' does not exist on type '{ decision: string; }'.
+shared/domain/models.ts(45,13): error TS2567: Enum declarations can only merge with namespace or other enum declarations.
+shared/domain/models.ts(812,13): error TS2567: Enum declarations can only merge with namespace or other enum declarations.

@@ -2,10 +2,6 @@ import { db } from './db/index';
 import { eq } from 'drizzle-orm';
 import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, outboxMessages, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
 
-import { db } from './db/index';
-import { eq } from 'drizzle-orm';
-import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, outboxMessages, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
-
 import fs from "fs";
 import path from "path";
 import {

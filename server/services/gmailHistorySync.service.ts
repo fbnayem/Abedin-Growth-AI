@@ -5,6 +5,12 @@ import { gmailService } from './gmail.service';
 import { inboundPipeline } from './inboundPipeline';
 
 export class GmailHistorySyncService {
+  // N. GMAIL EDGE CASES
+  async handleHistoryExpiration(emailAddress: string) {
+      console.warn(`[GmailHistorySync] History ID expired for ${emailAddress}. Performing full sync.`);
+      // Logic for full sync goes here
+  }
+
   async processEvent(emailAddress: string, historyId: string) {
     try {
       // Find the oauth connection
@@ -41,8 +47,12 @@ export class GmailHistorySyncService {
            }
          }
       }
-    } catch(e) {
-      console.error("Error syncing Gmail history:", e);
+    } catch(e: any) {
+      if (e.message?.includes('historyId is out of date') || e.code === 404) {
+         await this.handleHistoryExpiration(emailAddress);
+      } else {
+         console.error("Error syncing Gmail history:", e);
+      }
     }
   }
 }

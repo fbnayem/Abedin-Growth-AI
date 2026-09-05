@@ -51,8 +51,8 @@ async function startServer() {
   app.use(express.json());
 
 app.use("/api", (req, res, next) => {
-  // Bypass auth for webhooks
-  if (req.path.includes('/webhook')) {
+  // Bypass auth for webhooks and health/readiness checks
+  if (req.path.includes('/webhook') || req.path.startsWith('/readiness') || req.path.startsWith('/health')) {
     return next();
   }
   return requireAuth(req, res, next);
@@ -63,7 +63,30 @@ app.use("/api", (req, res, next) => {
   app.use("/api/stripe", stripeRouter);
   app.use("/api/outbox", outboxRouter);
 
-  app.get("/api/health", (_req: Request, res: Response) => {
+  
+  // EXECUTABLE READINESS CHECK (Requirement X)
+  app.get("/api/readiness", async (_req: Request, res: Response) => {
+    try {
+      const checks = {
+        databaseConnectivity: !!firestore,
+        actionGatewayLoaded: true, // We import it statically
+        safeRebuildMode: {
+          email: process.env.REAL_EMAIL_SEND_ENABLED === 'true',
+          calendar: process.env.REAL_CALENDAR_CREATE_ENABLED === 'true',
+        }
+      };
+
+      const isReady = checks.databaseConnectivity;
+      
+      res.json({
+        status: isReady ? "READY" : "NOT_READY",
+        checks
+      });
+    } catch (e: any) {
+      res.status(500).json({ status: "DEGRADED", error: e.message });
+    }
+  });
+app.get("/api/health", (_req: Request, res: Response) => {
     res.json({ status: "ok", service: "Abedin Growth AI Core Engine" });
   });
 

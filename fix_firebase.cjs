@@ -1,4 +1,6 @@
-import { initializeApp as initializeClientApp } from 'firebase/app';
+const fs = require('fs');
+const file = 'server/firebase.ts';
+let code = `import { initializeApp as initializeClientApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 import { getAuth as getClientAuth, signInAnonymously } from 'firebase/auth';
 
@@ -34,3 +36,5 @@ try {
 
 export const firestore = db;
 export const firebaseAuth = adminAuth;
+`;
+fs.writeFileSync(file, code);

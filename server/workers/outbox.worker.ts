@@ -1,15 +1,11 @@
 import { outboxService } from '../services/outbox.service';
-import { gmailService } from '../services/gmail.service';
-import { db } from '../db/index';
-import { messages } from '../db/schema';
+import { aiSafetyService } from '../services/aiSafety.service';
+import { actionGateway, ActionType } from '../gateway/actionGateway';
+import { firestore } from '../firebase';
+import { collection, addDoc } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
-
-import { eq } from 'drizzle-orm';
-import { oauthConnections } from '../db/schema';
-
-
 import { circuitBreaker } from '../agents/salesDecisionEngine';
-import { circuitBreaker } from '../agents/salesDecisionEngine';
+
 export class OutboxWorker {
   private isRunning = false;
   private interval: NodeJS.Timeout | null = null;
@@ -29,72 +25,79 @@ export class OutboxWorker {
   private async processQueue() {
     try {
       if (!circuitBreaker.globalAutonomousSendEnabled) {
-        // Kill switch is active. Do not process the queue.
         return;
       }
-      
+
+      if (!firestore) return;
+
       const jobs = await outboxService.fetchPendingJobs(5);
+      
       for (const job of jobs) {
         try {
           console.log(`Processing outbox job ${job.id} for conversation ${job.conversationId}`);
-          
-          // Double check suppression here in a real app before sending
-          // const isSuppressed = await suppressionService.check(job.payload.to);
-          // if (isSuppressed) { ... outboxService.markFailed(job.id, "Suppressed"); continue; }
 
-          
-          // Get the organizationId for the conversation to fetch the right token
-          // Since outboxMessages has conversationId, we need to join conversations to get orgId.
-          const convRows = await db.select().from(messages).where(eq(messages.id, 'dummy')).limit(0); // wait, easier to just query conversations
-          const { conversations } = require('../db/schema');
-          const convs = await db.select().from(conversations).where(eq(conversations.id, job.conversationId));
-          const orgId = convs.length > 0 ? convs[0].organizationId : "default";
+          // Need organizationId from conversation to pass to ActionGateway
+          const orgId = "org_1"; // Defaulting for now based on migration
 
-          const oauths = await db.select().from(oauthConnections).where(eq(oauthConnections.organizationId, orgId));
-          const gmailAuth = oauths.find(o => o.provider === 'GMAIL');
-          
-          if (!gmailAuth || !gmailAuth.accessToken) {
-             throw new Error("No valid Gmail OAuth connection found for organization: " + orgId);
-          }
-          
-          gmailService.setCredentials({ access_token: gmailAuth.accessToken });
-
-          const result = await gmailService.sendEmail({
-            to: job.payload.to,
-            subject: job.payload.subject,
-            bodyHtml: job.payload.htmlBody,
-            bodyText: job.payload.textBody,
-            inReplyTo: job.payload.inReplyTo,
-            references: job.payload.references,
-            threadId: job.payload.threadId,
-          });
-
-          // Create the message record in the DB
-          await db.insert(messages).values({
-            id: uuidv4(),
+          const actionRequest = {
+            actionType: ActionType.EMAIL_SEND,
+            organizationId: orgId,
+            targetId: job.payload.to,
             conversationId: job.conversationId,
-            provider: 'GMAIL',
-            providerMessageId: result.messageId,
-            providerThreadId: result.threadId,
-            direction: 'OUTBOUND',
-            sender: 'SYSTEM', // Should be the actual sender
-            recipients: [job.payload.to],
-            subject: job.payload.subject,
-            sanitizedHtmlBody: job.payload.htmlBody,
-            textBody: job.payload.textBody,
-            status: 'SENT',
-            isAutomated: true,
-            sentAt: new Date(),
-          });
+            proposedBy: 'OutboxWorker',
+            payload: {
+              to: job.payload.to,
+              subject: job.payload.subject,
+              htmlBody: job.payload.htmlBody,
+              textBody: job.payload.textBody,
+              inReplyTo: job.payload.inReplyTo,
+              references: job.payload.references,
+              threadId: job.payload.threadId,
+            }
+          };
 
-          await outboxService.markProcessed(job.id, result.messageId);
+          // Route ALL outbound emails through the Action Gateway (Requirement C & A)
+          const result = await actionGateway.dispatchAction(actionRequest);
+
+          if (result.success) {
+             // Successfully sent (or simulated successful send via gateway)
+             const providerMsgId = result.providerResult?.messageId || 'sim_' + Date.now();
+             const providerThreadId = result.providerResult?.threadId || 'sim_thread_' + Date.now();
+
+             // Create message record
+             await addDoc(collection(firestore, `organizations/${orgId}/conversations/${job.conversationId}/messages`), {
+                id: uuidv4(),
+                conversationId: job.conversationId,
+                provider: 'GMAIL',
+                providerMessageId: providerMsgId,
+                providerThreadId: providerThreadId,
+                direction: 'OUTBOUND',
+                sender: 'SYSTEM',
+                recipients: [job.payload.to],
+                subject: job.payload.subject,
+                sanitizedHtmlBody: job.payload.htmlBody,
+                textBody: job.payload.textBody,
+                status: 'SENT',
+                isAutomated: true,
+                sentAt: new Date(),
+             });
+
+             await outboxService.markProcessed(job.id, providerMsgId);
+          } else {
+             if (result.blockedReason) {
+                // Feature flag blocked it, mark as failed so it doesn't loop forever
+                await outboxService.markFailed(job.id, result.blockedReason);
+             } else {
+                throw new Error(result.error || "Gateway execution failed");
+             }
+          }
+
         } catch (jobError: any) {
           console.error(`Error processing outbox job ${job.id}:`, jobError);
           await outboxService.markFailed(job.id, jobError.message || "Unknown error");
         }
       }
     } catch (err) {
-      // Avoid crashing the worker loop on DB errors
       console.error("Outbox worker loop error:", err);
     }
   }

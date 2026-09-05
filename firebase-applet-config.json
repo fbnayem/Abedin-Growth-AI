@@ -3,6 +3,7 @@
   "appId": "1:999946381322:web:118c58dc8661c599b857f3",
   "apiKey": "AIzaSyD--H1UvnXZZvBQu3AQzrZdHp_F5VV4gdk",
   "authDomain": "linen-office-320801.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-abedingrowthai-4f1dbee7-7a98-4b15-bc42-b8f42fd24285",
   "storageBucket": "linen-office-320801.firebasestorage.app",
   "messagingSenderId": "999946381322",
   "measurementId": "",
