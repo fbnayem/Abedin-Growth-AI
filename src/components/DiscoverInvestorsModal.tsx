@@ -46,6 +46,18 @@ export const DiscoverInvestorsModal: React.FC<DiscoverInvestorsModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [stepText, setStepText] = useState("");
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setStage("SEED");
+      setSelectedSectors(["Applied AI & Voice Agents", "Vertical B2B SaaS"]);
+      setLocation("Global");
+      setCount(4);
+      setLoading(false);
+      setStepText("");
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const toggleSector = (sector: string) => {

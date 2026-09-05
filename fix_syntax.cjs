@@ -1,33 +1,11 @@
 const fs = require('fs');
+let code = fs.readFileSync('server/services/identityResolver.service.ts', 'utf8');
 
-const file = 'server.ts';
-let code = fs.readFileSync(file, 'utf8');
+const lines = code.split('\n');
+const newLines = lines.map(line => {
+    if (line.includes('isResolved:')) return '       isResolved: !!contactId as any,';
+    if (line.includes('resolutionMethod:')) return '       resolutionMethod: resolutionMethod as any,';
+    return line;
+});
 
-const anchor = `        await firestore.collection('oauth_connections').add({
-          id: 'oauth_' + Date.now(),
-          organizationId: 'org_1',
-          provider: 'gmail',
-          accessToken: 'mock_token',
-          refreshToken: 'mock_refresh',
-          status: 'ACTIVE',
-          updatedAt: new Date()
-        });
-      }
-      }
-      res.json({ success: true });`;
-
-const replace = `        await firestore.collection('oauth_connections').add({
-          id: 'oauth_' + Date.now(),
-          organizationId: 'org_1',
-          provider: 'gmail',
-          accessToken: 'mock_token',
-          refreshToken: 'mock_refresh',
-          status: 'ACTIVE',
-          updatedAt: new Date()
-        });
-      }
-      res.json({ success: true });`;
-
-code = code.replace(anchor, replace);
-fs.writeFileSync(file, code);
-console.log("Syntax fixed");
+fs.writeFileSync('server/services/identityResolver.service.ts', newLines.join('\n'));

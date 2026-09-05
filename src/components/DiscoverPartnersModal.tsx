@@ -38,6 +38,17 @@ export const DiscoverPartnersModal: React.FC<DiscoverPartnersModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [stepText, setStepText] = useState("");
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setPartnerType("AGENCY");
+      setTerritory("United Kingdom");
+      setCount(4);
+      setLoading(false);
+      setStepText("");
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleDiscover = async (e: React.FormEvent) => {

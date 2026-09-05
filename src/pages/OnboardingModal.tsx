@@ -55,6 +55,21 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   const [analyzing, setAnalyzing] = useState(false);
   const [generatedBrain, setGeneratedBrain] = useState<CompanyBrain | null>(initialBrain || null);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setStep(1);
+      setCompanyName(initialBrain?.companyName || "Abedin Tech");
+      setProductName(initialBrain?.productName || "Abedin Voice AI");
+      setCompanyUrl(initialBrain?.companyUrl || "https://abedintech.com/voice-ai/");
+      setProductUrl(initialBrain?.productUrl || "https://abedintech.com/voice-ai/");
+      setGmailConnected(true);
+      setCalendarConnected(true);
+      setAnalyzing(false);
+      setGeneratedBrain(initialBrain || null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const toggleObjective = (obj: string) => {

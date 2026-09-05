@@ -41,6 +41,18 @@ export const DiscoverLeadsModal: React.FC<DiscoverLeadsModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [stepText, setStepText] = useState("");
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setIndustry("Dental & Aesthetic Clinics");
+      setLocation("United Kingdom");
+      setCriteria("High inbound telephone appointment bookings, after-hours missed call risk");
+      setCount(4);
+      setLoading(false);
+      setStepText("");
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleDiscover = async (e: React.FormEvent) => {

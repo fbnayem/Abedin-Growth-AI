@@ -163,6 +163,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </label>
 
+          <label className="flex items-start gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={localSettings.autoReengageStaleLeads}
+              onChange={(e) =>
+                setLocalSettings({
+                  ...localSettings,
+                  autoReengageStaleLeads: e.target.checked,
+                })
+              }
+              className="mt-0.5"
+            />
+            <div className="text-xs">
+              <span className="font-bold text-slate-900">Automated Stale Lead Re-engagement</span>
+              <p className="text-slate-500">
+                Periodically check pipeline for leads not contacted in &gt;30 days and automatically draft a "touch base" sequence.
+              </p>
+            </div>
+          </label>
+
           {/* Daily 100 Emails Cap & Rate Limiting */}
           <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
             <div className="flex items-center justify-between">

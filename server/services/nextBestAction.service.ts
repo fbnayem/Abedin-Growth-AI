@@ -1,4 +1,4 @@
-import { NextBestAction, BuyingStage } from '../domain/models';
+import { NextBestAction, BuyingStage } from '../../shared/domain/models';
 
 export interface NextBestActionInput {
   intent: string;

@@ -20,6 +20,15 @@ export const CommandBar: React.FC<CommandBarProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setQuery("");
+      setLoading(false);
+      setError(null);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const quickPrompts = [

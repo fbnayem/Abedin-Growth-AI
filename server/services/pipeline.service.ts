@@ -9,7 +9,7 @@ import { replyComposerAgent } from '../agents/replyComposer.agent';
 import { outboxService } from './outbox.service';
 import { suppressionService } from './suppression.service';
 import { technicalAgent } from '../agents/technical.agent';
-import { BuyingStage, NextBestAction } from '../domain/models';
+import { BuyingStage, NextBestAction } from '../../shared/domain/models';
 import { auditReplyAgainstPlan } from '../agents/independentAuditor'; // We might need to refactor its imports
 
 export class PipelineService {

@@ -25,6 +25,22 @@ export const AddInvestorModal: React.FC<AddInvestorModalProps> = ({
   const [thesisMatchReason, setThesisMatchReason] = useState("Invests in generative voice agents and workflow automation startups.");
   const [loading, setLoading] = useState(false);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setName("");
+      setFundName("");
+      setRole("General Partner");
+      setEmail("");
+      setCountry("United Kingdom");
+      setStage("SEED");
+      setTypicalCheckSize("£250k - £1M");
+      setTargetSectors("Applied AI, B2B SaaS, Automation");
+      setThesisMatchReason("Invests in generative voice agents and workflow automation startups.");
+      setLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {

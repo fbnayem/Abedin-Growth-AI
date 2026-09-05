@@ -44,6 +44,19 @@ export const ScheduleMeetingModal: React.FC<ScheduleMeetingModalProps> = ({
     if (initialData?.category) setCategory(initialData.category);
   }, [initialData]);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setProspectName(initialData?.name || "");
+      setCompanyName(initialData?.companyName || "");
+      setProspectEmail(initialData?.email || "");
+      setCategory(initialData?.category || "CUSTOMER");
+      setScheduledTime(defaultTimeString);
+      setDurationMinutes(30);
+      setLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -26,6 +26,23 @@ export const AddLeadModal: React.FC<AddLeadModalProps> = ({
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setName("");
+      setTitle("Managing Director");
+      setCompanyName("");
+      setCompanyWebsite("");
+      setEmail("");
+      setPhone("");
+      setIndustry("Healthcare & Dental Clinics");
+      setCountry("United Kingdom");
+      setEmployeeCount("10-50");
+      setNotes("");
+      setLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {

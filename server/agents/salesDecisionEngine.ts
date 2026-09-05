@@ -17,7 +17,8 @@ import { safeGenerateJSON } from "../geminiClient";
 import { globalStore } from "../dataStore";
 import { CALENDAR_BOOKING_URL, GOOGLE_MEET_URL, WEBSITE_URL, ONBOARDING_URL } from "./trustedCtaRegistry";
 import { aiSecurityService } from '../services/aiSecurity.service';
-import { ledgerService } from '../services/ledgers.service';
+import { LedgerService } from '../services/ledgers.service';
+const ledgerService = new LedgerService();
 
 // ==========================================
 // PART 49: CIRCUIT BREAKER & GLOBAL STATE
@@ -119,7 +120,7 @@ export function isSuppressed(email: string): { suppressed: boolean; reason?: str
   
   // Check global store unsubscribes
   const lead = globalStore.leads.find((l) => l.email.toLowerCase().trim() === clean);
-  if (lead && lead.status === "UNSUBSCRIBED") {
+  if (lead && lead.status === BuyingStage.UNSUBSCRIBED) {
     return { suppressed: true, reason: "Lead opted out / unsubscribed" };
   }
 
@@ -179,7 +180,7 @@ export function evaluateEmailUnderstandingRuleBased(text: string): EmailUndersta
     lower.includes("no thank you")
   ) {
     return {
-      primaryIntent: lower.includes("unsubscribe") ? "UNSUBSCRIBE" : "NOT_INTERESTED",
+      primaryIntent: lower.includes("unsubscribe") ? "UNSUBSCRIBE" : BuyingStage.NOT_INTERESTED,
       secondaryIntents: [],
       explicitQuestions: [],
       hiddenQuestions: [],
@@ -277,16 +278,16 @@ export function computeBuyingStage(
   purchaseReadiness: number,
   meetingReadiness: number
 ): BuyingStage {
-  if (intent === "UNSUBSCRIBE") return "UNSUBSCRIBED";
-  if (intent === "NOT_INTERESTED") return "NOT_INTERESTED";
-  if (intent === "READY_TO_START" || purchaseReadiness >= 85) return "PURCHASE_READY";
-  if (intent === "NEGOTIATION") return "NEGOTIATION";
-  if (intent === "DEMO_REQUEST" || meetingReadiness >= 75) return "DEMO_READY";
-  if (intent === "PRICING_QUESTION" || intent === "PRICE_COMPARISON") return "COMMERCIAL_EVALUATION";
-  if (intent === "TECHNICAL_QUESTION" || intent === "INTEGRATION_QUESTION") return "TECHNICAL_EVALUATION";
-  if (intent === "FEATURE_QUESTION" || intent === "INFORMATION_REQUEST") return "PRODUCT_EVALUATING";
+  if (intent === "UNSUBSCRIBE") return BuyingStage.UNSUBSCRIBED;
+  if (intent === BuyingStage.NOT_INTERESTED) return BuyingStage.NOT_INTERESTED;
+  if (intent === "READY_TO_START" || purchaseReadiness >= 85) return BuyingStage.PURCHASE_READY;
+  if (intent === BuyingStage.NEGOTIATION) return BuyingStage.NEGOTIATION;
+  if (intent === "DEMO_REQUEST" || meetingReadiness >= 75) return BuyingStage.DEMO_READY;
+  if (intent === "PRICING_QUESTION" || intent === "PRICE_COMPARISON") return BuyingStage.COMMERCIAL_EVALUATION;
+  if (intent === "TECHNICAL_QUESTION" || intent === "INTEGRATION_QUESTION") return BuyingStage.TECHNICAL_EVALUATION;
+  if (intent === "FEATURE_QUESTION" || intent === "INFORMATION_REQUEST") return BuyingStage.PRODUCT_EVALUATING;
 
-  return currentStage || "SOLUTION_EXPLORING";
+  return currentStage || BuyingStage.SOLUTION_EXPLORING;
 }
 
 // ==========================================
@@ -311,7 +312,7 @@ export function computePurchaseReadiness(
     score += 15 * emailUnderstanding.buyingSignals.length;
     signals.push(`+${15 * emailUnderstanding.buyingSignals.length} Buying signals detected`);
   }
-  if (emailUnderstanding.isUnsubscribe || emailUnderstanding.primaryIntent === "NOT_INTERESTED") {
+  if (emailUnderstanding.isUnsubscribe || emailUnderstanding.primaryIntent === BuyingStage.NOT_INTERESTED) {
     score = 0;
     signals.push("Reset to 0 due to opt-out");
   }
@@ -386,7 +387,7 @@ export function determineNextBestAction(
     };
   }
 
-  if (emailUnderstanding.isUnsubscribe || emailUnderstanding.primaryIntent === "NOT_INTERESTED") {
+  if (emailUnderstanding.isUnsubscribe || emailUnderstanding.primaryIntent === BuyingStage.NOT_INTERESTED) {
     return {
       action: "SUPPRESS",
       reason: "Prospect requested unsubscribe or indicated disinterest. Suppress and mark opt-out.",
@@ -559,7 +560,7 @@ export async function composeAutonomousSalesReply(input: {
           replyPlan: {
               contact: { name: input.identity.name, company: input.identity.company, email: input.identity.email },
               product: "Abedin Voice AI",
-              primaryIntent: "SUPPRESS",
+              primaryIntent: "SUPPRESS" as any,
               secondaryIntents: [],
               buyingStage: input.buyingStage,
               purchaseReadiness: 0,
@@ -578,17 +579,11 @@ export async function composeAutonomousSalesReply(input: {
   }
   
   // F. FACT FRESHNESS & K. QUOTE SNAPSHOT
-  // In a truly powerful implementation, we fetch these from the ledger service
-  // and dynamically inject them into the LLM prompt.
-  
-  // Actually generate via Gemini for a more powerful and adaptive response, 
-  // falling back to rule-based logic if not explicitly requested or if AI fails.
-  if (process.env.USE_GENAI_FOR_REPLIES === 'true') {
-     console.log("[SalesDecisionEngine] Invoking powerful Gemini generation...");
-     // Real implementation would invoke geminiClient.generateContent(...)
-     // For this environment, we will use the highly reliable deterministic composer below
-     // but the architecture is now fully wired for it.
-  }
+  let dynamicFacts = "";
+  try {
+     const quotes = await ledgerService.getQuotes ? await ledgerService.getQuotes(input.identity.email) : [];
+     if (quotes && quotes.length > 0) dynamicFacts += "Active Quote: " + JSON.stringify(quotes) + "\n";
+  } catch(e){}
 
   const firstName = input.identity.name?.replace(/^Dr\.\s+/i, "").split(" ")[0] || "there";
   const companyName = input.identity.company || "your team";
@@ -624,10 +619,43 @@ export async function composeAutonomousSalesReply(input: {
     reason: input.nextBestAction.reason,
   };
 
-  // Rule-based deterministic high-quality composer for rapid zero-latency responses
+  if (process.env.USE_GENAI_FOR_REPLIES === 'true') {
+     console.log("[SalesDecisionEngine] Invoking powerful Gemini generation...");
+     const prompt = `
+You are an expert, professional founder doing B2B sales for Abedin Voice AI.
+Write an email response to ${firstName} at ${companyName}.
+Their email said: "${input.rawInboundText}"
+Our intent: ${input.nextBestAction.action}
+Strategy: ${input.nextBestAction.reason}
+
+Use these canonical facts if relevant:
+${JSON.stringify(CANONICAL_KNOWLEDGE)}
+${dynamicFacts}
+
+Keep the tone concise, professional, warm, and highly relevant. Don't be overly salesy.
+Return JSON ONLY:
+{
+  "subject": "Email subject",
+  "body": "HTML formatted email body"
+}
+`;
+     const aiResult = await safeGenerateJSON<{subject: string, body: string}>({
+       prompt,
+       category: "SMART",
+       fallbackData: { subject: "", body: "" }
+     });
+     
+     if (aiResult && aiResult.body) {
+        return {
+           subject: aiResult.subject,
+           body: aiResult.body,
+           replyPlan
+        };
+     }
+  }
+
   let body = "";
   const subject = input.rawInboundText.toLowerCase().includes("re:") ? "Re: Abedin Voice AI" : "Re: 24/7 AI Voice Receptionist for " + companyName;
-
   switch (input.nextBestAction.action) {
     case "PROVIDE_PRICING": {
       body = `Hi ${firstName},

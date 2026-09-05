@@ -1,3 +1,4 @@
+import { ClaimGroundingEngine } from '../policies/claimGrounding';
 import {
   ReplyPlan,
   ConversationDecisionLog,
@@ -44,14 +45,14 @@ export interface AuditResult {
 /**
  * Executes the Independent Executive Reply Auditor (Part 30 & 31)
  */
-export function auditReplyAgainstPlan(input: {
+export async function auditReplyAgainstPlan(input: {
   draftBody: string;
   replyPlan: ReplyPlan;
   identity: ClientIdentityResolution;
   emailUnderstanding: EmailUnderstanding;
   nextBestAction: NextBestActionResult;
   conversationId: string;
-}): AuditResult {
+}): Promise<AuditResult> {
   const checksPassed: string[] = [];
   const issuesDetected: string[] = [];
   let score = 100;
@@ -180,6 +181,17 @@ export function auditReplyAgainstPlan(input: {
       score -= 20;
       issuesDetected.push("Pricing quote does not reference canonical £499 rate");
     }
+  }
+
+  
+  // 11. Claim-Level Grounding (Part L)
+  const groundingEngine = new ClaimGroundingEngine();
+  const groundingResult = await groundingEngine.verifyClaims(sanitizedBody);
+  if (!groundingResult.isGrounded) {
+      score -= 30;
+      issuesDetected.push(...groundingResult.ungroundedClaims);
+  } else {
+      checksPassed.push("All claims grounded in approved knowledge");
   }
 
   const finalDecision: AuditResult["decision"] =

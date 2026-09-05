@@ -13,6 +13,7 @@ import {
   Mail,
   Linkedin,
   Phone,
+  Split
 } from "lucide-react";
 import { Campaign, EngineType, CampaignStep } from "../types";
 
@@ -28,17 +29,37 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
   onCampaignCreated,
 }) => {
   const [engineType, setEngineType] = useState<EngineType>("CUSTOMER");
-  const [name, setName] = useState("UK Dental Practice Reception Recovery");
-  const [targetAudience, setTargetAudience] = useState("Dental Practice Managers & Owners");
-  const [industries, setIndustries] = useState("Dental & Healthcare Clinics");
-  const [locations, setLocations] = useState("United Kingdom");
+  const [name, setName] = useState("");
+  const [targetAudience, setTargetAudience] = useState("");
+  const [industries, setIndustries] = useState("");
+  const [locations, setLocations] = useState("");
   const [enrolledCount, setEnrolledCount] = useState(25);
 
   const [generating, setGenerating] = useState(false);
   const [previewSteps, setPreviewSteps] = useState<CampaignStep[] | null>(null);
   const [strategySummary, setStrategySummary] = useState<string>("");
+  const [projectedMetrics, setProjectedMetrics] = useState<{ reach: number; engagement: number; conversion: number; } | null>(null);
+  const [isABTestingEnabled, setIsABTestingEnabled] = useState(false);
+
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setEngineType("CUSTOMER");
+      setName("");
+      setTargetAudience("");
+      setIndustries("");
+      setLocations("");
+      setEnrolledCount(25);
+      setGenerating(false);
+      setPreviewSteps(null);
+      setStrategySummary("");
+      setProjectedMetrics(null);
+      setIsABTestingEnabled(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
 
   const handleGenerateStrategy = async () => {
     setGenerating(true);
@@ -53,6 +74,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
           targetIndustries: industries.split(",").map((s) => s.trim()),
           targetLocations: locations.split(",").map((s) => s.trim()),
           enrolledCount,
+          isABTestingEnabled,
         }),
       });
 
@@ -60,6 +82,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
       const createdCampaign: Campaign = await res.json();
       setPreviewSteps(createdCampaign.steps);
       setStrategySummary(createdCampaign.aiStrategySummary || "");
+      setProjectedMetrics(createdCampaign.projectedMetrics || null);
       onCampaignCreated(createdCampaign);
     } catch (err) {
       console.error(err);
@@ -141,9 +164,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
               {/* Campaign Name */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Campaign Name</label>
-                <input
-                  type="text"
-                  value={name}
+                <input type="text" placeholder="e.g. Q3 UK Dental Recovery" value={name}
                   onChange={(e) => setName(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
@@ -153,18 +174,14 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Target Persona</label>
-                  <input
-                    type="text"
-                    value={targetAudience}
+                  <input type="text" placeholder="e.g. Practice Managers, Founders" value={targetAudience}
                     onChange={(e) => setTargetAudience(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                   />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Target Location</label>
-                  <input
-                    type="text"
-                    value={locations}
+                  <input type="text" placeholder="e.g. London, Manchester, UK" value={locations}
                     onChange={(e) => setLocations(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                   />
@@ -174,9 +191,7 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
               {/* Industries */}
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Industry Segments</label>
-                <input
-                  type="text"
-                  value={industries}
+                <input type="text" placeholder="e.g. Healthcare, Tech" value={industries}
                   onChange={(e) => setIndustries(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
@@ -196,6 +211,27 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
                   onChange={(e) => setEnrolledCount(Number(e.target.value))}
                   className="w-full"
                 />
+              </div>
+              
+              {/* A/B Testing Toggle */}
+              <div 
+                className={`p-4 rounded-xl border flex items-center justify-between cursor-pointer transition-colors ${isABTestingEnabled ? 'bg-purple-50 border-purple-200' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'}`}
+                onClick={() => setIsABTestingEnabled(!isABTestingEnabled)}
+              >
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${isABTestingEnabled ? 'bg-purple-200 text-purple-700' : 'bg-slate-200 text-slate-500'}`}>
+                    <Split className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className={`text-xs font-bold ${isABTestingEnabled ? 'text-purple-900' : 'text-slate-700'}`}>Enable A/B Testing Mode</h4>
+                    <p className={`text-[11px] mt-0.5 ${isABTestingEnabled ? 'text-purple-700' : 'text-slate-500'}`}>
+                      Automatically splits outreach into two variations for statistical comparison
+                    </p>
+                  </div>
+                </div>
+                <div className={`w-10 h-5 rounded-full flex items-center px-1 transition-colors ${isABTestingEnabled ? 'bg-purple-600' : 'bg-slate-300'}`}>
+                  <div className={`w-3.5 h-3.5 rounded-full bg-white transition-transform ${isABTestingEnabled ? 'translate-x-4.5' : 'translate-x-0'}`} />
+                </div>
               </div>
             </div>
           ) : (

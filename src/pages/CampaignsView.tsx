@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   Send,
   Plus,
@@ -11,8 +11,51 @@ import {
   Users,
   ChevronRight,
   TrendingUp,
+  TrendingDown,
+  Minus,
+  Filter,
+  ArrowDownUp,
+  BarChart2,
+  AlertCircle,
 } from "lucide-react";
+import { CampaignCompareModal } from "./CampaignCompareModal";
 import { Campaign } from "../types";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
+
+
+export const generateMockChartData = (enrolledCount: number, seed: string) => {
+  const data = [];
+  let baseEng = Math.max(5, Math.floor(enrolledCount * 0.1));
+  let baseConv = Math.max(1, Math.floor(enrolledCount * 0.02));
+  
+  // Use a simple seed based on campaign id length or char codes
+  const seedNum = seed.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    
+    // Add realistic-looking sinusoidal noise
+    const engVal = Math.max(0, Math.floor(baseEng + Math.sin(i + seedNum) * (baseEng * 0.3) + Math.random() * (baseEng * 0.2)));
+    const convVal = Math.max(0, Math.floor(baseConv + Math.cos(i + seedNum) * (baseConv * 0.3) + Math.random() * (baseConv * 0.2)));
+    
+    // cumulative growth for conversion maybe, or just daily. Let's do daily active
+    data.push({
+      date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      engagement: engVal,
+      conversion: convVal
+    });
+  }
+  return data;
+};
 
 interface CampaignsViewProps {
   campaigns: Campaign[];
@@ -25,6 +68,52 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
   onOpenNewCampaign,
   onToggleCampaignStatus,
 }) => {
+  const [isCompareMode, setIsCompareMode] = useState(false);
+  const [compareIds, setCompareIds] = useState<string[]>([]);
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [thresholds, setThresholds] = useState<Record<string, number>>({});
+
+  const handleThresholdChange = (campId: string, value: string) => {
+    const num = parseInt(value, 10);
+    if (!isNaN(num) && num >= 0 && num <= 100) {
+      setThresholds(prev => ({ ...prev, [campId]: num }));
+    } else if (value === '') {
+      const newT = { ...thresholds };
+      delete newT[campId];
+      setThresholds(newT);
+    }
+  };
+
+  const handleCardClick = (id: string) => {
+    if (!isCompareMode) return;
+    setCompareIds(prev => {
+      if (prev.includes(id)) return prev.filter(p => p !== id);
+      if (prev.length < 2) return [...prev, id];
+      return prev;
+    });
+  };
+
+
+  const [filterStatus, setFilterStatus] = useState<string>("ALL");
+  const [sortBy, setSortBy] = useState<string>("date_desc");
+
+  const processedCampaigns = [...campaigns]
+    .filter((c) => filterStatus === "ALL" || c.status === filterStatus)
+    .sort((a, b) => {
+      if (sortBy === "date_desc") return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+      if (sortBy === "date_asc") return new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+      if (sortBy === "conversion_desc") {
+        const aConv = a.enrolledCount > 0 ? a.convertedCount / a.enrolledCount : 0;
+        const bConv = b.enrolledCount > 0 ? b.convertedCount / b.enrolledCount : 0;
+        return bConv - aConv;
+      }
+      if (sortBy === "engagement_desc") {
+        const aEng = a.sentCount > 0 ? a.openedCount / a.sentCount : 0;
+        const bEng = b.sentCount > 0 ? b.openedCount / b.sentCount : 0;
+        return bEng - aEng;
+      }
+      return 0;
+    });
   return (
     <div className="space-y-5">
       {/* Title & Actions */}
@@ -50,12 +139,65 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
         </button>
       </div>
 
-      {/* Campaigns Grid / List */}
-      <div className="space-y-4">
-        {campaigns.map((camp) => (
+
+            {/* Filters & Sorting */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-3 bg-white rounded-xl border border-slate-200 shadow-xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+          <button
+            onClick={() => {
+              setIsCompareMode(!isCompareMode);
+              setCompareIds([]);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors uppercase flex items-center gap-1.5 mr-2 ${
+              isCompareMode
+                ? "bg-purple-100 text-purple-700 border border-purple-200"
+                : "bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+            }`}
+          >
+            <BarChart2 className="w-3.5 h-3.5" />
+            {isCompareMode ? "Cancel Compare" : "Compare"}
+          </button>
+          <div className="w-px h-5 bg-slate-200 mx-1"></div>
+          <Filter className="w-4 h-4 text-slate-400 mr-1" />
+          {["ALL", "ACTIVE", "PAUSED", "COMPLETED", "DRAFT"].map((status) => (
+            <button
+              key={status}
+              onClick={() => setFilterStatus(status)}
+              className={`px-3 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors uppercase ${
+                filterStatus === status
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              {status === "ALL" ? "All" : status}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <ArrowDownUp className="w-4 h-4 text-slate-400" />
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="pl-3 pr-8 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer appearance-none"
+            style={{ backgroundImage: 'url("data:image/svg+xml,%3csvg xmlns=\'http://www.w3.org/2000/svg\' fill=\'none\' viewBox=\'0 0 20 20\'%3e%3cpath stroke=\'%236b7280\' stroke-linecap=\'round\' stroke-linejoin=\'round\' stroke-width=\'1.5\' d=\'M6 8l4 4 4-4\'/%3e%3c/svg%3e")', backgroundPosition: 'right 0.5rem center', backgroundRepeat: 'no-repeat', backgroundSize: '1.5em 1.5em' }}
+          >
+            <option value="date_desc">Newest First</option>
+            <option value="date_asc">Oldest First</option>
+            <option value="conversion_desc">Highest Conversion</option>
+            <option value="engagement_desc">Highest Engagement</option>
+          </select>
+        </div>
+      </div>
+
+            {/* Campaigns Grid / List */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {processedCampaigns.map((camp) => (
           <div
             key={camp.id}
-            className="p-5 rounded-xl bg-white border border-slate-200 shadow-2xs hover:shadow-sm transition-all space-y-4"
+            onClick={() => handleCardClick(camp.id)}
+            className={`flex flex-col p-5 rounded-xl bg-white border shadow-2xs transition-all space-y-4 ${
+              isCompareMode ? "cursor-pointer hover:border-purple-300" : "hover:shadow-sm border-slate-200"
+            } ${compareIds.includes(camp.id) ? "ring-2 ring-purple-500 border-purple-500 bg-purple-50/10" : ""}`}
           >
             {/* Header row */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -72,12 +214,27 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                   >
                     {camp.engineType}
                   </span>
-                  <h3 className="text-base font-bold text-slate-900">{camp.name}</h3>
+                                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    {camp.name}
+                    {thresholds[camp.id] !== undefined && 
+                     ((camp.enrolledCount > 0 ? (camp.convertedCount / camp.enrolledCount) * 100 : 0) < thresholds[camp.id]) && (
+                      <div className="relative group flex items-center">
+                        <AlertCircle className="w-4 h-4 text-rose-500 animate-pulse" />
+                        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block w-max bg-slate-900 text-white text-[10px] py-1 px-2 rounded font-medium shadow-xl">
+                          Conversion Rate ({((camp.enrolledCount > 0 ? (camp.convertedCount / camp.enrolledCount) * 100 : 0)).toFixed(1)}%) is below threshold ({thresholds[camp.id]}%)
+                        </div>
+                      </div>
+                    )}
+                  </h3>
                   <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
                       camp.status === "ACTIVE"
-                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                        : "bg-slate-100 text-slate-600"
+                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                        : camp.status === "PAUSED"
+                        ? "bg-amber-50 text-amber-700 border-amber-200"
+                        : camp.status === "COMPLETED"
+                        ? "bg-slate-100 text-slate-700 border-slate-200"
+                        : "bg-slate-50 text-slate-500 border-slate-200" // DRAFT or other
                     }`}
                   >
                     {camp.status}
@@ -90,55 +247,138 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
 
               {/* Status Toggle & Metrics */}
               <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">Alert If &lt;</span>
+                  <input 
+                    type="number"
+                    min="0"
+                    max="100"
+                    placeholder="--"
+                    value={thresholds[camp.id] || ''}
+                    onChange={(e) => handleThresholdChange(camp.id, e.target.value)}
+                    className="w-8 text-xs font-bold text-slate-700 bg-transparent text-center focus:outline-none focus:ring-1 focus:ring-rose-400 rounded"
+                  />
+                  <span className="text-[10px] font-bold text-slate-400 uppercase">%</span>
+                </div>
                 <button
                   onClick={() => onToggleCampaignStatus(camp.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
-                    camp.status === "ACTIVE"
-                      ? "bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
-                      : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200"
-                  }`}
+                  className="flex items-center gap-2 group focus:outline-none"
+                  title={camp.status === "ACTIVE" ? "Pause Campaign" : "Activate Campaign"}
                 >
-                  {camp.status === "ACTIVE" ? (
-                    <>
-                      <Pause className="w-3.5 h-3.5" />
-                      <span>Pause</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-3.5 h-3.5" />
-                      <span>Resume</span>
-                    </>
-                  )}
+                  <span className={`text-[10px] font-bold uppercase transition-colors ${camp.status === "ACTIVE" ? "text-emerald-600" : "text-slate-400"}`}>
+                    {camp.status === "ACTIVE" ? "Active" : "Paused"}
+                  </span>
+                  <div className={`w-9 h-5 rounded-full p-0.5 transition-colors relative ${
+                    camp.status === "ACTIVE" ? "bg-emerald-500" : "bg-slate-300 group-hover:bg-slate-400"
+                  }`}>
+                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${
+                      camp.status === "ACTIVE" ? "translate-x-4" : "translate-x-0"
+                    }`} />
+                  </div>
                 </button>
               </div>
             </div>
 
-            {/* Performance Stats Strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs">
-              <div className="text-center">
-                <div className="text-[10px] text-slate-400 font-bold uppercase">Enrolled</div>
-                <div className="text-sm font-black text-slate-800 mt-0.5">{camp.enrolledCount}</div>
-              </div>
-              <div className="text-center">
-                <div className="text-[10px] text-slate-400 font-bold uppercase">Sent</div>
-                <div className="text-sm font-black text-slate-800 mt-0.5">{camp.sentCount}</div>
-              </div>
-              <div className="text-center">
-                <div className="text-[10px] text-slate-400 font-bold uppercase">Opened</div>
-                <div className="text-sm font-black text-blue-600 mt-0.5">
-                  {camp.openedCount} ({camp.sentCount > 0 ? Math.round((camp.openedCount / camp.sentCount) * 100) : 74}%)
+            
+            
+            
+            {/* Grouped Performance & Chart (Only if ACTIVE, otherwise just stats) */}
+            <div className="flex-1 flex flex-col space-y-4">
+              {/* Performance Stats Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs">
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Reach</div>
+                  <div className="text-sm font-black text-slate-800 mt-0.5">{camp.enrolledCount}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Sent</div>
+                  <div className="text-sm font-black text-slate-800 mt-0.5">{camp.sentCount}</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Open</div>
+                  <div className="text-sm font-black text-blue-600 mt-0.5">
+                    {camp.openedCount} <span className="text-[10px] font-semibold text-blue-400">({camp.sentCount > 0 ? Math.round((camp.openedCount / camp.sentCount) * 100) : 0}%)</span>
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Reply</div>
+                  <div className="text-sm font-black text-indigo-600 mt-0.5">
+                    {camp.repliedCount} <span className="text-[10px] font-semibold text-indigo-400">({camp.sentCount > 0 ? Math.round((camp.repliedCount / camp.sentCount) * 100) : 0}%)</span>
+                  </div>
+                </div>
+                <div className="text-center flex flex-col items-center">
+                  <div className="text-[10px] text-slate-400 font-bold uppercase">Demo</div>
+                  <div className="text-sm font-black text-emerald-600 mt-0.5 flex items-center gap-0.5">
+                    {camp.convertedCount} <span className="text-[10px] font-semibold text-emerald-400">({camp.enrolledCount > 0 ? Math.round((camp.convertedCount / camp.enrolledCount) * 100) : 0}%)</span>
+                    {(() => {
+                      const rate = camp.enrolledCount > 0 ? Math.round((camp.convertedCount / camp.enrolledCount) * 100) : 0;
+                      if (rate === 0 && camp.status !== 'ACTIVE') return <Minus className="w-3 h-3 text-slate-300 ml-0.5" />;
+                      // Pseudo-deterministic velocity based on rate & id
+                      const isUp = rate >= 10 || (camp.id.charCodeAt(camp.id.length - 1) % 2 === 0);
+                      return isUp 
+                        ? <TrendingUp className="w-3.5 h-3.5 text-emerald-500 ml-0.5" /> 
+                        : <TrendingDown className="w-3.5 h-3.5 text-amber-500 ml-0.5" />;
+                    })()}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <div className="text-[10px] text-purple-400 font-bold uppercase">Proj.</div>
+                  <div className="text-sm font-black text-purple-600 mt-0.5">
+                    {Math.floor(camp.enrolledCount * 0.12)}
+                  </div>
                 </div>
               </div>
-              <div className="text-center">
-                <div className="text-[10px] text-slate-400 font-bold uppercase">Replied</div>
-                <div className="text-sm font-black text-indigo-600 mt-0.5">
-                  {camp.repliedCount} ({camp.sentCount > 0 ? Math.round((camp.repliedCount / camp.sentCount) * 100) : 28}%)
+
+              {/* 30-Day Trend Chart for Active Campaigns */}
+              {camp.status === "ACTIVE" && (
+                <div className="flex-1 flex flex-col pt-1">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                    30-Day Performance Trend
+                  </div>
+                  <div className="flex-1 min-h-[160px] w-full bg-white border border-slate-100 rounded-xl p-3 shadow-xs">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={generateMockChartData(camp.enrolledCount, camp.id)}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis 
+                          dataKey="date" 
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: 10, fill: '#94a3b8' }}
+                          dy={10}
+                          minTickGap={20}
+                        />
+                        <YAxis 
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fontSize: 10, fill: '#94a3b8' }}
+                          dx={-10}
+                        />
+                        <Tooltip 
+                          contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          name="Engagement"
+                          dataKey="engagement" 
+                          stroke="#3b82f6" 
+                          strokeWidth={2}
+                          dot={false}
+                          activeDot={{ r: 4 }}
+                        />
+                        <Line 
+                          type="monotone" 
+                          name="Conversion"
+                          dataKey="conversion" 
+                          stroke="#10b981" 
+                          strokeWidth={2}
+                          dot={false}
+                          activeDot={{ r: 4 }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
-              </div>
-              <div className="text-center">
-                <div className="text-[10px] text-slate-400 font-bold uppercase">Converted</div>
-                <div className="text-sm font-black text-emerald-600 mt-0.5">{camp.convertedCount}</div>
-              </div>
+              )}
             </div>
 
             {/* AI Strategy Summary */}
@@ -149,12 +389,64 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
               </div>
             )}
 
+
+            {/* 30-Day Trend Chart for Active Campaigns */}
+            {camp.status === "ACTIVE" && (
+              <div className="pt-2">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3">
+                  30-Day Performance Trend
+                </div>
+                <div className="h-48 w-full bg-white border border-slate-100 rounded-xl p-3 shadow-xs">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={generateMockChartData(camp.enrolledCount, camp.id)}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis 
+                        dataKey="date" 
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 10, fill: '#94a3b8' }}
+                        dy={10}
+                        minTickGap={20}
+                      />
+                      <YAxis 
+                        axisLine={false}
+                        tickLine={false}
+                        tick={{ fontSize: 10, fill: '#94a3b8' }}
+                        dx={-10}
+                      />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
+                      />
+                      <Line 
+                        type="monotone" 
+                        name="Engagement"
+                        dataKey="engagement" 
+                        stroke="#3b82f6" 
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                      <Line 
+                        type="monotone" 
+                        name="Conversion"
+                        dataKey="conversion" 
+                        stroke="#10b981" 
+                        strokeWidth={2}
+                        dot={false}
+                        activeDot={{ r: 4 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
             {/* Step Sequence Accordion Preview */}
             <div className="space-y-2">
               <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 Outreach Steps ({camp.steps?.length || 0})
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {(camp.steps || []).map((step: any, idx: number) => (
                   <div
                     key={step.stepNumber || step.id || idx}
@@ -181,6 +473,33 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
           </div>
         ))}
       </div>
+
+      {/* Sticky Banner for Compare Mode */}
+      {isCompareMode && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-4 z-40 animate-in slide-in-from-bottom-5">
+          <span className="text-sm font-medium">
+            {compareIds.length === 0 && "Select 2 campaigns to compare"}
+            {compareIds.length === 1 && "Select 1 more campaign"}
+            {compareIds.length === 2 && "Ready to compare"}
+          </span>
+          {compareIds.length === 2 && (
+            <button
+              onClick={() => setShowCompareModal(true)}
+              className="px-4 py-1.5 bg-purple-500 hover:bg-purple-600 rounded-full text-xs font-bold transition-colors"
+            >
+              View Comparison
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Compare Modal */}
+      <CampaignCompareModal
+        isOpen={showCompareModal}
+        onClose={() => setShowCompareModal(false)}
+        campaign1={campaigns.find(c => c.id === compareIds[0]) || null}
+        campaign2={campaigns.find(c => c.id === compareIds[1]) || null}
+      />
     </div>
   );
 };

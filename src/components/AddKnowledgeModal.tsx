@@ -22,6 +22,19 @@ export const AddKnowledgeModal: React.FC<AddKnowledgeModalProps> = ({
   const [isSensitive, setIsSensitive] = useState(false);
   const [loading, setLoading] = useState(false);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setTitle("");
+      setCategory("PRODUCT");
+      setContent("");
+      setSource("Manual Documentation");
+      setApprovedForAI(true);
+      setIsSensitive(false);
+      setLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {

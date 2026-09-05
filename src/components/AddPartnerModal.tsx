@@ -24,6 +24,21 @@ export const AddPartnerModal: React.FC<AddPartnerModalProps> = ({
   const [revenueModel, setRevenueModel] = useState("30% recurring monthly margin on client subscriptions.");
   const [loading, setLoading] = useState(false);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setName("");
+      setCompanyName("");
+      setPartnerType("AGENCY");
+      setRole("Managing Director");
+      setEmail("");
+      setCountry("United Kingdom");
+      setPotentialCollaboration("Offer Abedin Voice AI as a managed receptionist add-on to existing clients.");
+      setRevenueModel("30% recurring monthly margin on client subscriptions.");
+      setLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -73,6 +73,16 @@ export const PitchSimulatorModal: React.FC<PitchSimulatorModalProps> = ({
       : "Anchor on your sub-500ms speed, proprietary prompt-tuning, and direct calendar ROI."
   );
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setMessages([defaultOpeningMessage]);
+      setUserInput("");
+      setLoading(false);
+      setOverallScore(75);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSendMessage = async () => {

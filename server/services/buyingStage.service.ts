@@ -1,4 +1,4 @@
-import { BuyingStage } from '../domain/models';
+import { BuyingStage } from '../../shared/domain/models';
 
 export class BuyingStageService {
   calculateNextStage(currentStage: BuyingStage, intent: string, purchaseReadiness: number, meetingReadiness: number): BuyingStage {
@@ -31,7 +31,7 @@ export class BuyingStageService {
     }
 
     if (currentStage === BuyingStage.NEW && intent) {
-      return BuyingStage.REPLIED;
+      return BuyingStage.ENGAGED;
     }
 
     return currentStage;

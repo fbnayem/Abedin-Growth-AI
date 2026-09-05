@@ -26,6 +26,7 @@ interface DashboardViewProps {
     pipelineValue: number;
     investorConversations: number;
     partnerConversations: number;
+    projectedMonthlyRevenue?: number;
   };
   attentionItems: NeedsAttentionItem[];
   dailyBrief: DailyGrowthBrief;
@@ -45,6 +46,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     pipelineValue: 0,
     investorConversations: 0,
     partnerConversations: 0,
+    projectedMonthlyRevenue: 0,
   },
   attentionItems = [],
   dailyBrief = {
@@ -70,6 +72,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     pipelineValue: kpis?.pipelineValue || 0,
     investorConversations: kpis?.investorConversations || 0,
     partnerConversations: kpis?.partnerConversations || 0,
+    projectedMonthlyRevenue: kpis?.projectedMonthlyRevenue || 0,
   };
   const safeDailyBrief = dailyBrief || {
     date: new Date().toLocaleDateString(),
@@ -119,7 +122,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       )}
 
       {/* Primary KPI Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3 sm:gap-4">
         {/* Qualified Leads */}
         <div
           onClick={() => onNavigateTab("leads")}
@@ -174,6 +177,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             £{Math.round(safeKpis.pipelineValue / 1000)}k
           </div>
           <div className="text-[10px] text-slate-500 font-medium mt-0.5">Annual Contract Value</div>
+        </div>
+        {/* Projected Monthly Revenue */}
+        <div
+          className="p-4 rounded-xl bg-white border border-slate-200 shadow-2xs hover:shadow-xs transition-all group"
+        >
+          <div className="flex items-center justify-between text-slate-400 group-hover:text-blue-600">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Proj. MRR</span>
+            <Flame className="w-4 h-4 text-blue-500" />
+          </div>
+          <div className="mt-2 text-2xl font-black text-slate-900">
+            £{Math.round(safeKpis.projectedMonthlyRevenue! / 1000)}k
+          </div>
+          <div className="text-[10px] text-blue-600 font-medium mt-0.5">+12% vs Last Month</div>
         </div>
 
         {/* Investor Conversations */}

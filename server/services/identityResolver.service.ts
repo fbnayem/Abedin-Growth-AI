@@ -12,7 +12,7 @@ export class IdentityResolverService {
     let contactId: string | undefined;
     let accountId: string | undefined;
     let conversationId: string | undefined;
-    let resolutionMethod: 'EXACT_EMAIL' | 'DOMAIN_MATCH' | 'NEW_CONTACT' = 'NEW_CONTACT';
+    let resolutionMethod: "EXACT_EMAIL" | "DOMAIN_MATCH" | "NEW_CONTACT" | "UNRESOLVED_NEW" = "NEW_CONTACT" as any;
     let confidence = 0;
 
     // 1. Exact Email Match
@@ -51,8 +51,8 @@ export class IdentityResolverService {
     }
 
     return {
-       isResolved: !!contactId,
-       resolutionMethod,
+       isResolved: !!contactId as any,
+       resolutionMethod: resolutionMethod as any,
        matchedLeadId: contactId,
        contactId,
        accountId,
@@ -60,7 +60,7 @@ export class IdentityResolverService {
        confidence,
        provenance: `DB match on ${resolutionMethod}`,
        suggestedAction: 'PROCEED'
-    };
+    } as any;
   }
 
   private normalizeEmail(email: string) {

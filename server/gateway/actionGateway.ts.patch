@@ -1,0 +1,30 @@
+--- server/gateway/actionGateway.ts
++++ server/gateway/actionGateway.ts
+@@ -34,6 +34,7 @@
+   success: boolean;
+   blockedReason?: string;
+   error?: string;
++  isAmbiguousResult?: boolean;
+   providerResult?: any;
+ }
+ 
+@@ -107,7 +108,18 @@
+         return await this.handleCalendarCreate(request);
+       // Add other implementations here...
+     } catch (e: any) {
+-      return { success: false, error: e.message };
++      // Simulate a network failure that might be ambiguous (e.g. timeout)
++      if (e.message.includes('timeout') || e.message.includes('ECONNRESET') || e.code === 'ETIMEDOUT') {
++         return { 
++             success: false, 
++             error: e.message, 
++             isAmbiguousResult: true 
++         };
++      }
++      return { 
++          success: false, 
++          error: e.message 
++      };
+     }
+   }
+ 

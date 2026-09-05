@@ -11,6 +11,11 @@ export const organizations = pgTable('organizations', {
   locale: varchar('locale', { length: 20 }).default('en-US').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
 });
 
 export const users = pgTable('users', {
@@ -36,6 +41,11 @@ export const accounts = pgTable('accounts', {
   lifecycleStage: varchar('lifecycle_stage', { length: 50 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
 });
 
 export const contacts = pgTable('contacts', {
@@ -51,9 +61,15 @@ export const contacts = pgTable('contacts', {
   linkedinUrl: varchar('linkedin_url', { length: 255 }),
   timezone: varchar('timezone', { length: 50 }),
   language: varchar('language', { length: 20 }),
+  stakeholderRole: varchar('stakeholder_role', { length: 50 }).default('UNKNOWN'),
   status: varchar('status', { length: 50 }).default('ACTIVE').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
 });
 
 export const conversations = pgTable('conversations', {
@@ -74,6 +90,11 @@ export const conversations = pgTable('conversations', {
   assignedTo: varchar('assigned_to', { length: 255 }).references(() => users.id),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
 });
 
 export const messages = pgTable('messages', {
@@ -116,6 +137,11 @@ export const conversationFacts = pgTable('conversation_facts', {
   verificationStatus: varchar('verification_status', { length: 50 }).default('UNVERIFIED').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
 });
 
 export const outboxMessages = pgTable('outbox_messages', {
@@ -185,6 +211,11 @@ export const oauthConnections = pgTable('oauth_connections', {
   expiresAt: timestamp('expires_at'),
   status: varchar('status', { length: 50 }).default('ACTIVE').notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
 });
 
 export const aiRunLogs = pgTable('ai_run_logs', {
@@ -194,4 +225,68 @@ export const aiRunLogs = pgTable('ai_run_logs', {
   summary: text('summary'),
   status: varchar('status', { length: 50 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+export const customerCommitments = pgTable('customer_commitments', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  accountId: varchar('account_id', { length: 255 }).references(() => accounts.id),
+  contactId: varchar('contact_id', { length: 255 }).references(() => contacts.id).notNull(),
+  conversationId: varchar('conversation_id', { length: 255 }).references(() => conversations.id).notNull(),
+  commitment: text('commitment').notNull(),
+  sourceMessageId: varchar('source_message_id', { length: 255 }).references(() => messages.id),
+  madeBy: varchar('made_by', { length: 255 }),
+  dueDate: timestamp('due_date'),
+  status: varchar('status', { length: 50 }).notNull(),
+  riskLevel: varchar('risk_level', { length: 50 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
+});
+
+export const questionLedger = pgTable('question_ledger', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  conversationId: varchar('conversation_id', { length: 255 }).references(() => conversations.id).notNull(),
+  questionText: text('question_text').notNull(),
+  status: varchar('status', { length: 50 }).notNull(), // OPEN, PARTIALLY_ANSWERED, ANSWERED, DEFERRED, HUMAN_REQUIRED
+  sourceMessageId: varchar('source_message_id', { length: 255 }).references(() => messages.id),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
+});
+
+export const objectionLedger = pgTable('objection_ledger', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  conversationId: varchar('conversation_id', { length: 255 }).references(() => conversations.id).notNull(),
+  type: varchar('type', { length: 100 }),
+  statement: text('statement').notNull(),
+  sourceMessageId: varchar('source_message_id', { length: 255 }).references(() => messages.id),
+  severity: varchar('severity', { length: 50 }),
+  status: varchar('status', { length: 50 }).notNull(),
+  resolution: text('resolution'),
+  resolvedAt: timestamp('resolved_at'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  observedAt: timestamp('observed_at').defaultNow(),
+  lastVerifiedAt: timestamp('last_verified_at'),
+  validFrom: timestamp('valid_from'),
+  validUntil: timestamp('valid_until'),
+  supersededBy: varchar('superseded_by', { length: 255 }),
+});
+
+export const quoteSnapshots = pgTable('quote_snapshots', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  contactId: varchar('contact_id', { length: 255 }).references(() => contacts.id).notNull(),
+  pricingVersion: varchar('pricing_version', { length: 100 }),
+  details: jsonb('details'),
+  quotedAt: timestamp('quoted_at').defaultNow().notNull(),
+  expiresAt: timestamp('expires_at'),
+  status: varchar('status', { length: 50 }).notNull(),
 });

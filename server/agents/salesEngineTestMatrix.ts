@@ -1,3 +1,4 @@
+import { BuyingStage } from "../../shared/domain/models";
 import { resolveClientIdentity } from "./clientIdentityResolver";
 import {
   evaluateEmailUnderstandingRuleBased,
@@ -233,7 +234,7 @@ export async function runCompleteSalesEngineTestMatrix(): Promise<TestMatrixRepo
     const purchaseReadiness = computePurchaseReadiness(emailUnderstanding);
     const meetingReadiness = computeMeetingReadiness(emailUnderstanding, 1);
     const buyingStage = computeBuyingStage(
-      "SOLUTION_EXPLORING",
+      BuyingStage.SOLUTION_EXPLORING,
       emailUnderstanding.primaryIntent,
       purchaseReadiness.score,
       meetingReadiness.score
@@ -257,7 +258,7 @@ export async function runCompleteSalesEngineTestMatrix(): Promise<TestMatrixRepo
     });
 
     // 7. Executive Audit
-    const audit = auditReplyAgainstPlan({
+    const audit = await auditReplyAgainstPlan({
       draftBody: reply.body,
       replyPlan: reply.replyPlan,
       identity,

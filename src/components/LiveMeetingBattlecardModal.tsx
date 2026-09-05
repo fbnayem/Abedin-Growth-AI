@@ -42,6 +42,13 @@ export const LiveMeetingBattlecardModal: React.FC<LiveMeetingBattlecardModalProp
   const lead = isCustomer ? (entity as Lead) : null;
   const investor = !isCustomer ? (entity as Investor) : null;
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setCopied(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const title = isCustomer

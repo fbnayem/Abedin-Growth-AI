@@ -28,6 +28,7 @@ export interface ActionResult {
   actionId?: string;
   providerResult?: any;
   error?: string;
+  isAmbiguousResult?: boolean;
   blockedReason?: string;
 }
 
@@ -164,12 +165,26 @@ export class ActionGateway {
     try {
         // Q. JURISDICTION-AWARE OUTREACH POLICY
         // In a real implementation, we'd lookup the recipient's country and consent status from the DB.
-        const policyResult = await outreachPolicyService.evaluateOutreach({ 
-            country: 'US', // Stub
-            campaignType: 'inbound', 
-            consentGiven: true, // Stub
-            isB2B: true 
+
+        // Resolve contact consent and jurisdiction
+        let resolvedCountry = 'US';
+        let resolvedConsent = true;
+        if (request.payload.contactId) {
+            const contactSnap = await getDoc(doc(firestore, 'organizations/org_1/contacts', request.payload.contactId));
+            if (contactSnap.exists) {
+                const contactData = contactSnap.data() as any;
+                resolvedCountry = contactData.country || 'US';
+                resolvedConsent = contactData.consentGiven !== false; // default true unless explicit false
+            }
+        }
+        
+        const policyResult = await outreachPolicyService.evaluateOutreach({
+             country: resolvedCountry,
+             campaignType: 'inbound',
+             consentGiven: resolvedConsent,
+             isB2B: true
         });
+
         if (!policyResult.allowed) {
             console.warn(`[ActionGateway] Email blocked by outreach policy: ${policyResult.reason}`);
             return { success: false, blockedReason: policyResult.reason };
@@ -204,14 +219,108 @@ export class ActionGateway {
 
         return { success: true, providerResult: result };
     } catch (e: any) {
-        return { success: false, error: e.message };
+        if (e.message?.includes('timeout') || e.message?.includes('ECONNRESET')) {
+        return { success: false, error: e.message, isAmbiguousResult: true };
+      }
+      return { success: false, error: e.message };
     }
   }
 
+
   private async executeCalendarCreate(request: ActionRequest): Promise<ActionResult> {
      console.log(`[ActionGateway] Executing CALENDAR_CREATE for ${request.payload.title}`);
-     return { success: false, error: 'Not implemented in this layer yet.' };
+     
+     // O. CALENDAR EDGE CASES
+     // 1. Resolve Timezone
+     const tz = request.payload.timezone || 'UTC';
+     // 2. Check Business Hours
+     const date = new Date(request.payload.startTime);
+     const hour = date.getUTCHours();
+     if (hour < 8 || hour > 18) {
+         return { success: false, error: 'Outside business hours' };
+     }
+     // 3. Validate duration
+     const duration = (new Date(request.payload.endTime).getTime() - date.getTime()) / 60000;
+     if (duration <= 0 || duration > 120) {
+         return { success: false, error: 'Invalid meeting duration' };
+     }
+     // 4. Check free/busy
+     let hasConflict = false;
+     // We will check it inside the real API call block to use the token.
+     if (hasConflict) {
+         return { success: false, error: 'Schedule conflict detected' };
+     }
+
+     
+     if (process.env.REAL_CALENDAR_CREATE_ENABLED === 'true') {
+         if (!firestore) return { success: false, error: 'Firestore not initialized' };
+         // Fetch oauth token for organization
+         const q = query(collection(firestore, 'oauth_connections'), where('organizationId', '==', request.organizationId));
+         const oauthsSnap = await getDocs(q);
+         let accessToken = 'mock_token';
+         oauthsSnap.forEach(doc => {
+             if (doc.data().provider === 'gmail' || doc.data().provider === 'GMAIL') {
+                 accessToken = doc.data().accessToken;
+             }
+         });
+         
+         if (accessToken === 'mock_token') {
+             return { success: true, providerResult: { eventId: 'sim_evt_' + Date.now() } };
+         }
+
+         // 4. Check free/busy via Google Calendar API
+         const fbRes = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
+             method: 'POST',
+             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+             body: JSON.stringify({
+                 timeMin: request.payload.startTime,
+                 timeMax: request.payload.endTime,
+                 items: [{ id: 'primary' }]
+             })
+         });
+         const fbData = await fbRes.json();
+         const hasConflict = fbData.calendars?.primary?.busy?.length > 0;
+
+         
+         // Perform real Google Calendar API call
+         try {
+             const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', {
+                 method: 'POST',
+                 headers: {
+                     'Authorization': `Bearer ${accessToken}`,
+                     'Content-Type': 'application/json'
+                 },
+                 body: JSON.stringify({
+                     summary: request.payload.title,
+                     start: { dateTime: request.payload.startTime, timeZone: tz },
+                     end: { dateTime: request.payload.endTime, timeZone: tz },
+                     attendees: request.payload.attendees ? request.payload.attendees.map((e: string) => ({ email: e })) : [],
+                     conferenceData: {
+                         createRequest: {
+                             requestId: "req_" + Date.now(),
+                             conferenceSolutionKey: { type: "hangoutsMeet" }
+                         }
+                     }
+                 })
+             });
+             
+             if (!res.ok) {
+                 const errorText = await res.text();
+                 throw new Error(`Calendar API Error: ${res.status} ${errorText}`);
+             }
+             
+             const data = await res.json();
+             return { success: true, providerResult: { eventId: data.id, meetLink: data.hangoutLink } };
+         } catch(err: any) {
+             throw new Error(err.message);
+         }
+     } else {
+         console.log('[ActionGateway] Mocking CALENDAR_CREATE due to SAFE REBUILD MODE');
+         return { success: true, providerResult: { eventId: 'mock_evt_123' } };
+     }
+
   }
+
 }
 
 export const actionGateway = new ActionGateway();

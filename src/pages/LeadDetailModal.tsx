@@ -33,7 +33,7 @@ import {
   Eye,
   Zap,
 } from "lucide-react";
-import { Lead, Conversation, EmailMessage } from "../types";
+import { Lead, Conversation, EmailMessage, CompanyBrain } from "../types";
 import { RevenueLeakCalculator } from "../components/RevenueLeakCalculator";
 import { DeliverabilityScanner } from "../components/DeliverabilityScanner";
 import { SequenceCadenceViewer } from "../components/SequenceCadenceViewer";
@@ -42,6 +42,7 @@ import { diagnosticFetch } from "../utils/diagnosticFetch";
 
 interface LeadDetailModalProps {
   lead: Lead | null;
+  companyBrain?: CompanyBrain | null;
   conversations?: Conversation[];
   onClose: () => void;
   onOpenScoreWhy: (lead: Lead) => void;
@@ -55,6 +56,7 @@ interface LeadDetailModalProps {
 }
 
 export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
+  companyBrain,
   lead,
   conversations = [],
   onClose,
@@ -175,6 +177,33 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   }, [lead?.id, hasReplied]);
 
   // Reply state
+  const [isGeneratingAILine, setIsGeneratingAILine] = useState(false);
+
+  const handleAISuggest = async () => {
+    if (!lead || !companyBrain) return;
+    setIsGeneratingAILine(true);
+    
+    // In a real app we'd call an API. Here we simulate a high-quality personalized open.
+    setTimeout(() => {
+      const snippets = lead.personalizationSnippets || [];
+      const bestSnippet = snippets.length > 0 ? snippets[0].text : `I saw your recent work at ${lead.companyName}`;
+      const valProp = companyBrain.valueProposition || "We help scale operations efficiently.";
+      
+      const suggestedDraft = `Hi ${lead.name.split(" ")[0]},
+
+${bestSnippet}. Given ${companyBrain.companyName}'s focus on ${valProp.toLowerCase().substring(0, 50)}..., I thought it would make sense to connect.
+
+We built a solution specifically for teams like yours at ${lead.companyName}. Would you be open to a 2-minute test call this week?
+
+Best,
+${companyBrain.founderName || "Founder"}
+${companyBrain.companyName}`;
+      
+      setEmailBody(suggestedDraft);
+      setIsGeneratingAILine(false);
+    }, 1200);
+  };
+
   const [replySubject, setReplySubject] = useState("");
   const [replyBody, setReplyBody] = useState("");
   const [sendingReply, setSendingReply] = useState(false);

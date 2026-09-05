@@ -136,6 +136,7 @@ export function App() {
     pipelineValue: 48000,
     investorConversations: 3,
     partnerConversations: 4,
+    projectedMonthlyRevenue: 12000,
   });
 
   const [attentionItems, setAttentionItems] = useState<NeedsAttentionItem[]>([]);
@@ -191,6 +192,7 @@ export function App() {
     requireApprovalForPartners: false,
     requireApprovalForDiscountRequests: true,
     autoCheckQualityControl: true,
+    autoReengageStaleLeads: false,
     maxOutreachPerDay: 50,
   });
   const [aiLogs, setAiLogs] = useState<AIRunLog[]>([]);
@@ -780,6 +782,7 @@ export function App() {
 
           {currentTab === "meetings" && (
             <MeetingsView
+              companyBrain={companyBrain}
               meetings={meetings}
               onGenerateBrief={handleGenerateMeetingBrief}
               onScheduleNew={() => {
@@ -859,6 +862,7 @@ export function App() {
       />
 
       <LeadDetailModal
+        companyBrain={companyBrain}
         lead={activeLeadDetail}
         conversations={conversations}
         onClose={() => setActiveLeadDetail(null)}

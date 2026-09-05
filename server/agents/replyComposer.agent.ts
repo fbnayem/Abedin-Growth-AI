@@ -1,6 +1,6 @@
 import { getGeminiAI, getModelForCategory } from '../geminiClient';
 import { EmailUnderstanding } from './emailUnderstanding.agent';
-import { NextBestAction, BuyingStage } from '../domain/models';
+import { NextBestAction, BuyingStage } from '../../shared/domain/models';
 
 export interface ComposerInput {
   conversationContext: string;

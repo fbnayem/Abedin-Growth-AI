@@ -45,21 +45,20 @@ export enum ContractStatus {
 export enum BuyingStage {
   NEW = 'NEW',
   CONTACTED = 'CONTACTED',
-  REPLIED = 'REPLIED',
-  PROBLEM_AWARE = 'PROBLEM_AWARE',
+  ENGAGED = 'ENGAGED',
   DISCOVERY = 'DISCOVERY',
+  SOLUTION_EVALUATION = 'SOLUTION_EVALUATION',
   SOLUTION_EXPLORING = 'SOLUTION_EXPLORING',
   PRODUCT_EVALUATING = 'PRODUCT_EVALUATING',
   TECHNICAL_EVALUATION = 'TECHNICAL_EVALUATION',
-  SECURITY_REVIEW = 'SECURITY_REVIEW',
   COMMERCIAL_EVALUATION = 'COMMERCIAL_EVALUATION',
   DEMO_READY = 'DEMO_READY',
   DEMO_BOOKED = 'DEMO_BOOKED',
-  TRIAL_EVALUATION = 'TRIAL_EVALUATION',
-  BUYING_INTENT = 'BUYING_INTENT',
+  TRIAL_READY = 'TRIAL_READY',
+  TRIAL_ACTIVE = 'TRIAL_ACTIVE',
   PURCHASE_READY = 'PURCHASE_READY',
   NEGOTIATION = 'NEGOTIATION',
-  CONTRACTING = 'CONTRACTING',
+  CONTRACT_PENDING = 'CONTRACT_PENDING',
   PAYMENT_PENDING = 'PAYMENT_PENDING',
   ONBOARDING = 'ONBOARDING',
   CUSTOMER = 'CUSTOMER',
@@ -373,8 +372,10 @@ export interface Campaign {
   openedCount: number;
   repliedCount: number;
   convertedCount: number;
+  projectedMetrics?: { reach: number; engagement: number; conversion: number; };
   autonomyMode: 'MANUAL_APPROVAL' | 'SEMI_AUTONOMOUS' | 'FULL_AUTOPILOT';
   aiStrategySummary: string;
+  isABTestingEnabled?: boolean;
   createdAt: string;
 }
 
@@ -595,6 +596,7 @@ export interface AutopilotSettings {
   autonomyLevel?: 'ASSISTED' | 'SEMI_AUTONOMOUS' | 'FULLY_AUTONOMOUS';
   requireApprovalForInvestors?: boolean;
   autoCheckQualityControl?: boolean;
+  autoReengageStaleLeads?: boolean;
   senderName?: string;
   senderEmail?: string;
   senderJobTitle?: string;
@@ -808,23 +810,6 @@ export type ComprehensiveIntent =
   | "BOUNCE"
   | "AUTOMATED_MESSAGE"
   | "UNKNOWN";
-
-export type BuyingStage =
-  | "DISCOVERY"
-  | "PROBLEM_AWARE"
-  | "SOLUTION_EXPLORING"
-  | "PRODUCT_EVALUATING"
-  | "TECHNICAL_EVALUATION"
-  | "COMMERCIAL_EVALUATION"
-  | "DEMO_READY"
-  | "BUYING_INTENT"
-  | "PURCHASE_READY"
-  | "NEGOTIATION"
-  | "ONBOARDING"
-  | "CUSTOMER"
-  | "CLOSED_LOST"
-  | "NOT_INTERESTED"
-  | "UNSUBSCRIBED";
 
 export type NextBestActionType =
   | "ANSWER_ONLY"

@@ -19,10 +19,7 @@ try {
     // 1. Client SDK for Firestore (to bypass IAM limits via anonymous auth)
     const clientApp = initializeClientApp(config);
     db = getFirestore(clientApp, config.firestoreDatabaseId);
-    const clientAuth = getClientAuth(clientApp);
-    signInAnonymously(clientAuth).catch(e => {
-        console.error("Backend anonymous auth failed:", e);
-    });
+    // Anonymous auth removed since firestore rules are relaxed for the preview environment
 
     // 2. Admin SDK for Auth (to verify ID tokens locally)
     const adminApp = initializeAdminApp({ projectId: config.projectId });

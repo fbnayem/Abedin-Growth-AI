@@ -25,6 +25,22 @@ export const NewOpportunityModal: React.FC<NewOpportunityModalProps> = ({
   const [nextStep, setNextStep] = useState("Schedule product discovery & voice demo");
   const [loading, setLoading] = useState(false);
 
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setTitle("");
+      setCompanyName("");
+      setContactName("");
+      setContactEmail("");
+      setCategory("CUSTOMER");
+      setStage("QUALIFIED");
+      setEstimatedValue(12000);
+      setProbability(50);
+      setNextStep("Schedule product discovery & voice demo");
+      setLoading(false);
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
