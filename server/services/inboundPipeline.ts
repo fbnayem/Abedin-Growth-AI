@@ -15,9 +15,15 @@ import { isValidOrgId } from '../tenancy/orgScope';
 import { IdentityResolverService } from './identityResolver.service';
 import { referencedMessageIds, resolveThread, type ThreadCandidate } from '../domain/threadResolution';
 import { inArray } from 'drizzle-orm';
-import { evaluateEmailUnderstandingRuleBased, determineNextBestAction, composeAutonomousSalesReply } from '../agents/salesDecisionEngine';
+import {
+  evaluateEmailUnderstandingRuleBased,
+  determineNextBestAction,
+  composeAutonomousSalesReply,
+  UNASSESSED_PURCHASE_READINESS,
+  UNASSESSED_MEETING_READINESS,
+} from '../agents/salesDecisionEngine';
 import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
-import { recordFacts } from '../lib/factStore';
+import { recordFacts, listActiveFacts } from '../lib/factStore';
 import { observationsFromMemory } from '../domain/memoryFacts';
 
 type AuditDecision = 'PASS' | 'BLOCK' | 'HUMAN_REVIEW_REQUIRED';
@@ -318,7 +324,17 @@ export class InboundPipeline {
       const understanding = evaluateEmailUnderstandingRuleBased(email.textBody || email.htmlBody);
 
       // 6. Next Best Action (NBA)
-      const nbaResult = determineNextBestAction(understanding, BuyingStage.DISCOVERY, {} as any, {} as any);
+      // The two `{} as any` arguments here read as placeholders and behaved as ones: neither
+      // throws, so `purchaseReadiness.score >= 85` was `undefined >= 85` (false) and
+      // `meetingReadiness.shouldOfferBooking` was `undefined` (falsy). Two branches of the
+      // decision engine could never fire, silently. Named constants keep the same safe
+      // behaviour and make it legible.
+      const nbaResult = determineNextBestAction(
+        understanding,
+        BuyingStage.DISCOVERY,
+        UNASSESSED_PURCHASE_READINESS,
+        UNASSESSED_MEETING_READINESS
+      );
 
       // 7. Compose Reply if needed
       if (nbaResult.action === 'DO_NOTHING' as any || nbaResult.action === 'SUPPRESS_NO_ACTION' as any) {
@@ -327,7 +343,62 @@ export class InboundPipeline {
       }
 
       budgetTracker.recordModelCall(500, 0.01); // Mock cost
-      const draft = await composeAutonomousSalesReply({ incomingEmail: email.textBody, latestIntent: understanding.primaryIntent, buyingStage: BuyingStage.DISCOVERY, nextBestAction: nbaResult, prospectName: email.from } as any);
+
+      // P1.6/P1.8 — facts recorded earlier in THIS pipeline are now read back and given to
+      // the planner. Until now nothing called `listActiveFacts`: facts were written on every
+      // inbound message and never read by anything, so the conversation history the system
+      // was carefully maintaining reached no prompt. Superseded facts are excluded by
+      // `activeFacts` (§20), so a value the customer has since corrected cannot come back as
+      // current.
+      let knownRelevantFacts: string[] = [];
+      try {
+        const active = await listActiveFacts(organizationId, conversationId);
+        knownRelevantFacts = active.map((f) => `${f.key}: ${f.value}`);
+        console.log(
+          `[InboundPipeline] ${knownRelevantFacts.length} active fact(s) supplied to the planner ` +
+            `for conversation ${conversationId}.`
+        );
+      } catch (e: any) {
+        // Recorded, not swallowed. An empty fact list and an unreadable fact store are
+        // different states, and only one of them means "we know of nothing" (§14).
+        console.error(
+          `[InboundPipeline] Could not read facts for conversation ${conversationId}; the ` +
+            `planner will run without them:`,
+          e?.message ?? e
+        );
+      }
+
+      // P1.8 remainder — the call that has never once produced a draft.
+      //
+      // It was:
+      //
+      //     composeAutonomousSalesReply({ incomingEmail: email.textBody,
+      //       latestIntent: understanding.primaryIntent, buyingStage: BuyingStage.DISCOVERY,
+      //       nextBestAction: nbaResult, prospectName: email.from } as any)
+      //
+      // The signature requires `identity`, `emailUnderstanding` and `rawInboundText`. Four of
+      // the six fields were passed under names the function does not read, and `as any`
+      // stopped the compiler saying so. At runtime `input.identity` was `undefined` and the
+      // first unconditional use of it threw:
+      //
+      //     TypeError: Cannot read properties of undefined (reading 'contactId')
+      //
+      // measured by calling the function with this exact argument object. The enclosing
+      // handler is `catch (e) { console.error(...) }`, so every inbound email reached here,
+      // threw, was logged to stdout and the pipeline returned as though it had worked. No
+      // draft, no outbox job, no alert.
+      //
+      // The correctly resolved `identity` was already in scope ~130 lines above. The cast is
+      // gone, so the compiler now checks this call.
+      const draft = await composeAutonomousSalesReply({
+        organizationId,
+        identity,
+        emailUnderstanding: understanding,
+        nextBestAction: nbaResult,
+        buyingStage: BuyingStage.DISCOVERY,
+        rawInboundText: email.textBody || email.htmlBody || '',
+        knownRelevantFacts,
+      });
 
       // 8. Independent Audit
       //

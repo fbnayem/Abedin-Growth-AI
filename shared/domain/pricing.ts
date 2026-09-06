@@ -32,7 +32,25 @@
  * from it, never the other way round.
  */
 
-export type CurrencyCode = 'GBP';
+/**
+ * The closed set of currencies, as a RUNTIME value.
+ *
+ * `CurrencyCode` was type-only, so nothing could check a currency that arrived from outside the
+ * program — a jsonb column, a request body, a provider response. A type that exists only at
+ * compile time cannot validate data that only exists at run time, and money read from a blob is
+ * exactly the case where the check has to be real.
+ *
+ * `CurrencyCode` is derived FROM this array rather than declared beside it, so the two cannot
+ * drift: adding a currency here adds it to the type, and there is no way to add one to the type
+ * without adding it here.
+ */
+export const CURRENCIES = ['GBP'] as const;
+
+export type CurrencyCode = (typeof CURRENCIES)[number];
+
+export function isCurrencyCode(value: unknown): value is CurrencyCode {
+  return typeof value === 'string' && (CURRENCIES as readonly string[]).includes(value);
+}
 
 /**
  * An amount in MINOR units — pence, not pounds.

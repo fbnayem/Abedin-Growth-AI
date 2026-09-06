@@ -400,6 +400,37 @@ export function computeMeetingReadiness(
 // ==========================================
 // PART 10: NEXT BEST ACTION ENGINE
 // ==========================================
+
+/**
+ * Readiness when nothing has computed it.
+ *
+ * The live pipeline called `determineNextBestAction(understanding, DISCOVERY, {} as any, {} as any)`.
+ * That does not throw — `undefined >= 85` is simply `false` — so it looked like it worked while
+ * two decision branches were permanently dead: the "ready to start" path could only ever fire on
+ * an explicit intent, never on a score, and the same for "offer booking".
+ *
+ * Nothing in this repository produces a `PurchaseReadinessResult` or a `MeetingReadinessResult`;
+ * they are types with no computers. Until something computes them, the honest value is an
+ * explicit "we have not assessed this" — not an empty object wearing a cast.
+ *
+ * The values are chosen so unknown never becomes permission (§14): a score of 0 cannot clear a
+ * threshold, and `shouldOfferBooking: false` means we do not offer a meeting we cannot justify.
+ * The previous `{} as any` produced the same behaviour by accident; this produces it on purpose,
+ * and says so when read.
+ */
+export const UNASSESSED_PURCHASE_READINESS: PurchaseReadinessResult = Object.freeze({
+  score: 0,
+  signals: [],
+  reasoning: 'Purchase readiness has not been assessed; no scorer is wired.',
+});
+
+export const UNASSESSED_MEETING_READINESS: MeetingReadinessResult = Object.freeze({
+  score: 0,
+  shouldOfferBooking: false,
+  signals: [],
+  reasoning: 'Meeting readiness has not been assessed; no scorer is wired.',
+});
+
 export function determineNextBestAction(
   emailUnderstanding: EmailUnderstanding,
   buyingStage: BuyingStage,
@@ -597,6 +628,15 @@ export const CANONICAL_KNOWLEDGE = {
 // PART 17-20: GROUNDED FOUNDER REPLY COMPOSER
 // ==========================================
 export async function composeAutonomousSalesReply(input: {
+  /**
+   * Whose data this reply may read.
+   *
+   * The planner reads a customer's quote history to decide what pricing it may state, and
+   * it had no tenant in scope to read it WITH: `ClientIdentityResolution` carries a contact
+   * but no organisation, and `getQuotes` filtered on contact alone. Required rather than
+   * optional — a tenant scope a caller can omit is one a caller will omit.
+   */
+  organizationId: string;
   identity: ClientIdentityResolution;
   emailUnderstanding: EmailUnderstanding;
   nextBestAction: NextBestActionResult;
@@ -672,7 +712,7 @@ export async function composeAutonomousSalesReply(input: {
       "No contact id resolved for this sender, so their quote history could not be read.";
   } else {
     try {
-      const quotes = await ledgerService.getQuotes(contactId);
+      const quotes = await ledgerService.getQuotes(input.organizationId, contactId);
       if (quotes.length > 0) {
         dynamicFacts += "Active Quote: " + JSON.stringify(quotes) + "\n";
       }

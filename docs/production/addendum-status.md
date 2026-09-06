@@ -1247,6 +1247,154 @@ before they are turned on, and the refusal message says so.
 
 ---
 
+## 1l. Remediation progress — the P1.5–P1.8 remainders (landed 2026-09-07)
+
+### A correction to section 1i, first
+
+P1.8 wired the context bundle into `executeMultiAgentReplyPipeline`, and I recorded that "the
+composer uses them", with the remainder being that "the inbound pipeline does not yet *populate*
+the bundle".
+
+`executeMultiAgentReplyPipeline` has **two occurrences in the entire repository**: its own
+definition, and an unused import in `server.ts`. **Nothing calls it.** Both halves of that
+status entry were about a function that never runs.
+
+The P1.8 test I wrote for it was titled *"the COMPOSER actually uses the bundle — the module
+existing is not the same claim"*, and it is a correct test. I then did not ask whether anything
+used the composer. That is the same §2 failure as the S45 promotion reverted earlier in this
+document: a status is a claim about evidence, and I had checked one link of the chain.
+
+### The path that does run had never produced a draft
+
+The live drafter is `composeAutonomousSalesReply`, called from `inboundPipeline.ts`:
+
+    composeAutonomousSalesReply({ incomingEmail: email.textBody,
+      latestIntent: understanding.primaryIntent, buyingStage: BuyingStage.DISCOVERY,
+      nextBestAction: nbaResult, prospectName: email.from } as any)
+
+The signature requires `identity`, `emailUnderstanding` and `rawInboundText`. **Four of the six
+fields are passed under names the function does not read**, and `as any` is the only reason it
+compiled. Measured by calling the function with that exact argument object:
+
+    TypeError: Cannot read properties of undefined (reading 'contactId')
+
+Both branches through the function dereference `input.identity`, so no path survives. The
+enclosing handler is `catch (e) { console.error(...) }`, so **every inbound email reached this
+line, threw, was logged to stdout, and the pipeline returned as though it had worked** — no
+draft, no outbox job, no alert, no record. The correctly resolved `identity` was already in
+scope about 130 lines above.
+
+Two lines earlier, `determineNextBestAction(understanding, DISCOVERY, {} as any, {} as any)`.
+That one does *not* throw — `undefined >= 85` is simply `false` — so two decision branches
+("ready to start" on score, "offer booking" on readiness) were permanently dead and nothing said
+so. Nothing in the repository computes a `PurchaseReadinessResult` or a
+`MeetingReadinessResult`; they are types with no producers. They are now explicit
+`UNASSESSED_*` constants, frozen, whose values are the safe direction (§14): a score of 0
+cannot clear a threshold and `shouldOfferBooking: false` does not offer a meeting we cannot
+justify. The old `{} as any` produced that behaviour by accident; this produces it on purpose.
+
+### Facts were written on every message and read by nothing
+
+`listActiveFacts` had **zero callers**. P1.6 built supersession, provenance tiering and
+bitemporal validity, the pipeline recorded observations on every inbound message — and no prompt
+ever saw one. The live planner now reads them back, and a fact-store failure is reported rather
+than degrading into "this customer has told us nothing" (§14).
+
+### The ledgers cannot run, and would have leaked across tenants when they could
+
+All four methods in `ledgers.service.ts` query `db`, a Drizzle handle over PostgreSQL. With
+`DATABASE_URL` unset — as here — `server/db/index.ts` exports a Proxy that **throws on any
+property access**. So every ledger read raises "Database is not configured", and three of the
+four have no callers in any case.
+
+That is why two defects in them were still worth fixing rather than noting:
+
+- **No tenancy filter.** All four tables declare `organization_id` NOT NULL. Not one method
+  filtered on it. `getOpenQuestions(conversationId)` returned every matching row in any
+  organisation — one customer's objections into another customer's prompt. `organizationId` is
+  now a required first parameter on all four; an optional tenant scope is one a caller forgets.
+- **No supersession filter.** `question_ledger` carries `valid_until` and `superseded_by`,
+  and the query filtered on `status = 'OPEN'` alone. A superseded question would re-enter a
+  prompt as current — the §20 defect P1.6 fixed for facts, in a table nobody had read.
+
+Fixing the first exposed a third: `composeAutonomousSalesReply` reads a customer's quote history
+to decide what pricing it may state, and **had no tenant in scope to read it with**.
+`ClientIdentityResolution` carries a contact and no organisation. `organizationId` is now a
+required input on the planner.
+
+### `quote_snapshots` cannot express a Quote
+
+The table has `id, organization_id, contact_id, pricing_version, details (jsonb), quoted_at,
+expires_at, status`. A `Quote` needs `version`, `approvedBy`, `approvedAt`,
+`supersededBy`, `updatedAt` and `conversationId` — **none of which exist as columns** — and
+its line items sit inside an untyped blob.
+
+This is commercial, not cosmetic. `quoteBinding()` refuses a quote whose `approvedBy` is
+absent — "an approval nobody is accountable for is not an approval" (§14). An adapter that filled
+the gap with `null` would return a quote that silently never binds, and **the customer would be
+sent list pricing despite having negotiated a price**. `adaptQuoteSnapshot` therefore REFUSES
+such a row and names the missing field, rather than laundering an incomplete record into
+something that looks valid and behaves as though no quote existed. Money that cannot be read
+exactly — a non-integer minor unit, an unknown currency, mixed currencies in one quote — is
+refused rather than repaired.
+
+`CurrencyCode` was a type with no runtime representation, so nothing could check a currency
+arriving from a jsonb column. `CURRENCIES` is now the value and the type derives from it, so
+the two cannot drift.
+
+### Evidence
+
+`npm test`: **688 tests across 25 files**, up from 643 across 23.
+
+The live-path fix is **mutation-tested 11/11**, including reverting the call to the original
+wrong-name shape, dropping `identity`, removing the fact read, un-freezing the readiness
+constants, and restoring the two hardcoded "latency / calendar sync" sentences.
+
+The adapters carry **32 invariant tests**: field renames, the tenancy drop, supersession, the
+exact expiry boundary, deterministic ordering, and every refusal path on the quote adapter.
+
+A ninth guardrail, `check-no-cast-call-arguments`, forbids an object literal cast to `any` in
+argument position — the specific place a cast destroys the check that caller and callee agree at
+all. Baseline zero. **Mutation-tested 13/13**, including three that try to disable it. It found
+one real exception on its first run (`new Proxy({} as any, …)` in `server/db/index.ts`, where
+the `{}` is a proxy target that is never read), which is recorded with its reason rather than
+silently ignored.
+
+Two process notes. My mutation harness reported `BAD MUTATION` twice because
+`salesDecisionEngine.ts` is CRLF and `inboundPipeline.ts` is LF, so LF-joined anchors matched
+nothing — a no-op mutation counted as a pass would have been invisible, and the harness reports
+it because it compares before and after. And I twice wrote `npx tsc --noEmit | head -5 && echo
+"TSC OK"`, which reports `head`'s exit status; it printed "OK" over real errors until I stopped
+using it.
+
+### What changed status
+
+**S21 stays PARTIAL, and the reason is now different and smaller.** It was "the pipeline does not
+populate the bundle". The truth was that the bundle lives in a function nothing calls. The live
+planner now receives selected facts directly and is tenant-scoped, so the *data* reaches a
+prompt — but it does so without the bundle's manifest, hash or character budget, because the
+builder is still wired only into the dead composer. Reconciling those two paths is the remaining
+work, and it is a design decision rather than a wiring one.
+
+**S20 stays PARTIAL but moves materially.** Facts are now written AND read on a live path, with
+supersession respected at both ends. The PostgreSQL `conversation_facts` table remains unwritten
+(facts live in Firestore), and nothing re-verifies a fact against the world.
+
+**S5 gains a recorded blocker.** The ledgers, `quote_snapshots` and `conversation_facts` are
+PostgreSQL tables in a deployment with no PostgreSQL. Three of the context bundle's five inputs
+live in a database this deployment cannot reach. That is not a wiring oversight; it is a
+datastore split, and closing it needs a decision: provision PostgreSQL, or move ledgers and
+quotes to Firestore where the facts already are.
+
+### Operator actions this adds
+
+- **Provision PostgreSQL, or decide to move ledgers/quotes to Firestore.** Until then the ledger
+  reads throw and the quote lookup reports a failure rather than a price.
+- `quote_snapshots` needs `version`, `approved_by`, `approved_at`, `superseded_by`,
+  `updated_at` and `conversation_id` before any row it holds can become a binding quote.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally

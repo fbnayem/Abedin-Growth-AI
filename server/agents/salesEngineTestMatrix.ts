@@ -250,6 +250,8 @@ export async function runCompleteSalesEngineTestMatrix(): Promise<TestMatrixRepo
 
     // 6. Reply Composition
     const reply = await composeAutonomousSalesReply({
+      // A synthetic org for the offline matrix; it reads no real tenant data.
+      organizationId: 'org_test_matrix',
       identity,
       emailUnderstanding,
       nextBestAction,
