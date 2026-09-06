@@ -9,8 +9,17 @@ import { outreachPolicyService } from '../policies/outreachPolicy';
 import { fetchWithTimeout } from '../lib/httpClient';
 import { orgPath, isValidOrgId } from '../tenancy/orgScope';
 import { classifyThrown, requiresReconciliation, type ProviderErrorKind } from '../lib/providerError';
+import { FABRICATED_PROVIDER_ID, isFabricatedProviderId } from '../lib/providerId';
 import { assertCapability, CapabilityError, normalizeScopes, type Capability } from '../lib/capabilities';
-import { assertTimeZone, isWithinBusinessHours, parseInstant, DEFAULT_BUSINESS_HOURS } from '../../shared/domain/time';
+import { assertTimeZone, isWithinBusinessHours, parseInstant, DEFAULT_BUSINESS_HOURS, systemClock, type Clock } from '../../shared/domain/time';
+import { outboundMessageId } from '../lib/messageIdentity';
+import {
+  reconcileEmailSend,
+  mayRetryAfterReconciliation,
+  wasApplied,
+  type ReconciliationOutcome,
+  type ReconciliationVerdict,
+} from '../lib/reconciliation';
 
 export enum ActionType {
   EMAIL_SEND = 'EMAIL_SEND',
@@ -55,7 +64,13 @@ export interface ActionResult {
     | 'INVALID_INSTANT'
     | 'INVALID_DURATION'
     | 'OUTSIDE_BUSINESS_HOURS'
-    | 'CAPABILITY_NOT_GRANTED';
+    | 'CAPABILITY_NOT_GRANTED'
+    /**
+     * S32 — the send could not be given a stable, provider-searchable identity, so if it
+     * timed out we could never establish whether it had happened. Refused before the network
+     * rather than after it.
+     */
+    | 'UNRECONCILABLE_SEND';
   /** P1.11 — the normalized provider failure kind, when the failure came from a provider. */
   errorKind?: ProviderErrorKind;
   /**
@@ -63,6 +78,15 @@ export interface ActionResult {
    * this is true may cause the side effect a second time (§32).
    */
   requiresReconciliation?: boolean;
+  /**
+   * S32 — what asking the provider established. Present whenever `requiresReconciliation` was
+   * true and a reconciliation was attempted.
+   *
+   * The caller must branch on `verdict`, not on `success`: an APPLIED verdict means the action
+   * DID take effect even though the dispatch reports failure, and recording that as a failure
+   * loses a message the customer has already received.
+   */
+  reconciliation?: ReconciliationOutcome;
 }
 
 /**
@@ -125,17 +149,10 @@ export function capabilityFor(actionType: ActionType): Capability | null {
   }
 }
 
-/**
- * P0.8 — A provider id must come from a provider. Ids shaped like `sim_`, `mock_` or `test_`
- * were previously minted locally and written to durable records with status SENT, which made
- * every "successful send" in the system unfalsifiable. Nothing matching this may be persisted
- * as evidence that an external action occurred.
- */
-export const FABRICATED_PROVIDER_ID = /^(sim|mock|test|fake|stub)[-_]/i;
-
-export function isFabricatedProviderId(id: unknown): boolean {
-  return typeof id === 'string' && FABRICATED_PROVIDER_ID.test(id);
-}
+// P0.8 — the fabricated-id rule moved to lib/providerId.ts so reconciliation can apply the
+// same rule without importing the gateway (that would close a cycle). Re-exported here
+// because this was its published home and callers already import it from the gateway.
+export { FABRICATED_PROVIDER_ID, isFabricatedProviderId };
 
 export class ActionGateway {
   
@@ -145,6 +162,16 @@ export class ActionGateway {
   // /api/readiness reported them as if they had. Flags are now read lazily, per decision, from
   // server/config/safeMode.ts — the same module readiness reads, so the displayed value and the
   // enforced value cannot drift apart.
+
+  /**
+   * S30/S32 — an injectable clock, because reconciliation turns on an elapsed interval.
+   *
+   * "Has enough time passed that the provider's index would show this message if it had it?"
+   * is a question about a duration, and a test that answers it from the wall clock proves
+   * nothing about the boundary it claims to test. This is the seam that lets a test stand one
+   * millisecond either side of the settle window and observe two different verdicts.
+   */
+  constructor(private readonly clock: Clock = systemClock) {}
 
   /**
    * Central entry point for all external actions.
@@ -210,6 +237,10 @@ export class ActionGateway {
 
     // 3. Execution routing
     let result: ActionResult = { success: false };
+    // S32 — stamped BEFORE the attempt. Reconciliation asks whether enough time has passed for
+    // the provider's index to reflect the send, and reading the clock after the failure would
+    // measure the timeout's own duration as settle time.
+    const attemptedAt = this.clock.now();
     try {
       await this.logAction(actionId, 'DISPATCHING', request);
       
@@ -261,23 +292,112 @@ export class ActionGateway {
         requiresReconciliation: mustReconcile,
       });
 
-      if (mustReconcile) {
+      if (!mustReconcile) {
+        return {
+          success: false,
+          error: classified.message,
+          errorKind: classified.kind,
+          isAmbiguousResult: classified.isAmbiguous,
+          requiresReconciliation: false,
+        };
+      }
+
+      console.warn(
+        `[ActionGateway] ${classified.kind} on an irreversible ${request.actionType}: the ` +
+          `outcome is unknown, so this must be reconciled against the provider before any ` +
+          `retry. ${classified.disposition.rationale}`
+      );
+
+      // S32 — the part that was a comment. Until now the ambiguity was recorded and handed to
+      // "an operator or the reconciliation worker", and there was no reconciliation worker, so
+      // every ambiguous send was dead-lettered whether or not it had actually been delivered.
+      // We now ask the provider.
+      const reconciliation = await this.reconcileAmbiguous(request, attemptedAt);
+      await this.logAction(actionId, `RECONCILED_${reconciliation.verdict}`, request, {
+        verdict: reconciliation.verdict,
+        evidence: reconciliation.evidence,
+        providerMessageId: reconciliation.providerMessageId,
+        lookupErrorKind: reconciliation.lookupErrorKind,
+      });
+
+      if (wasApplied(reconciliation.verdict)) {
+        // The action DID take effect. Reporting failure here would lose a message the
+        // recipient has already read, and would leave the job eligible for a retry that
+        // sends it again. `success` is about the side effect, not about the HTTP call.
         console.warn(
-          `[ActionGateway] ${classified.kind} on an irreversible ${request.actionType}: the ` +
-            `outcome is unknown, so this must be reconciled against the provider before any ` +
-            `retry. ${classified.disposition.rationale}`
+          `[ActionGateway] Reconciliation established that the ${request.actionType} DID take ` +
+            `effect despite the ${classified.kind}. Recording it as done. ${reconciliation.evidence}`
         );
+        return {
+          success: true,
+          providerResult: {
+            messageId: reconciliation.providerMessageId,
+            threadId: reconciliation.providerThreadId,
+            reconciled: true,
+          },
+          errorKind: classified.kind,
+          isAmbiguousResult: false,
+          requiresReconciliation: false,
+          reconciliation,
+        };
       }
 
       return {
         success: false,
         error: classified.message,
         errorKind: classified.kind,
-        isAmbiguousResult: classified.isAmbiguous,
-        requiresReconciliation: mustReconcile,
-        blockedReason: mustReconcile ? 'AMBIGUOUS_PROVIDER_RESULT' : undefined,
+        isAmbiguousResult: true,
+        // Resolved to a definite failure only when the provider was asked and said no, after
+        // the settle window. Every other path leaves this true, and true means "do not retry".
+        requiresReconciliation: !mayRetryAfterReconciliation(reconciliation.verdict),
+        blockedReason: mayRetryAfterReconciliation(reconciliation.verdict)
+          ? undefined
+          : 'AMBIGUOUS_PROVIDER_RESULT',
+        reconciliation,
       };
     }
+  }
+
+  /**
+   * Ask the provider what actually happened, for the action types where we can.
+   *
+   * The default is STILL_UNKNOWN, and it is the default for a reason: an action type with no
+   * reconciliation implementation must not be treated as reconciled. A `default:` branch that
+   * returned NOT_APPLIED — "we could not check, so assume it did not happen" — would license
+   * exactly the duplicate this whole mechanism exists to prevent (§14).
+   */
+  private async reconcileAmbiguous(
+    request: ActionRequest,
+    attemptedAt: Date
+  ): Promise<ReconciliationOutcome> {
+    if (request.actionType !== ActionType.EMAIL_SEND) {
+      return {
+        verdict: 'STILL_UNKNOWN' as ReconciliationVerdict,
+        evidence:
+          `No reconciliation is implemented for ${request.actionType}. Unchecked is not the ` +
+          'same as checked-and-absent, so this stays un-retryable and needs an operator.',
+        providerMessageId: null,
+        providerThreadId: null,
+        lookupErrorKind: null,
+      };
+    }
+
+    let rfc822MessageId: string | null = null;
+    try {
+      rfc822MessageId = outboundMessageId(
+        request.payload?.idempotencyKey,
+        process.env.OUTBOUND_MESSAGE_ID_DOMAIN
+      );
+    } catch {
+      // The send was never reconcilable. `reconcileEmailSend` says so in its own words.
+      rfc822MessageId = null;
+    }
+
+    return reconcileEmailSend(gmailService, {
+      rfc822MessageId,
+      attemptedAt,
+      now: this.clock.now(),
+    });
   }
 
   /**
@@ -537,6 +657,26 @@ export class ActionGateway {
             return { success: false, error: reason, errorCode: 'PROVIDER_NOT_CONFIGURED' };
         }
 
+        // S32 — a send that could never afterwards be asked about is refused BEFORE the
+        // network, not discovered to be unreconcilable after it has timed out.
+        //
+        // The Message-ID is derived from the job's idempotency key, so the same job produces
+        // the same id on every attempt in every process. That determinism is the whole
+        // mechanism: `rfc822msgid:<id>` then answers "did THIS send happen", which is the only
+        // question §32 reconciliation asks. A random id would be stable within one attempt and
+        // different on the retry, so it would answer "no" every time and licence the duplicate.
+        let rfc822MessageId: string;
+        try {
+            rfc822MessageId = outboundMessageId(
+                request.payload.idempotencyKey,
+                process.env.OUTBOUND_MESSAGE_ID_DOMAIN
+            );
+        } catch (e: any) {
+            const reason = String(e?.message ?? e);
+            console.warn(`[ActionGateway] EMAIL_SEND refused: ${reason}`);
+            return { success: false, error: reason, errorCode: 'UNRECONCILABLE_SEND' };
+        }
+
         gmailService.setCredentials({ access_token: accessToken });
         const result = await gmailService.sendEmail({
             to: request.payload.to,
@@ -546,6 +686,7 @@ export class ActionGateway {
             inReplyTo: request.payload.inReplyTo,
             references: request.payload.references,
             threadId: request.payload.threadId,
+            rfc822MessageId,
         });
 
         return { success: true, providerResult: result };

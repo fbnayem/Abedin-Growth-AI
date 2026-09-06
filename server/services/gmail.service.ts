@@ -2,6 +2,8 @@ import { config } from '../config/environment';
 import { fetchWithTimeout } from '../lib/httpClient';
 import { classifyResponse, classifyThrown, ProviderError } from '../lib/providerError';
 import type { EmailProvider, RefreshableCredential } from '../providers/types';
+import type { SentMessageLookup } from '../lib/reconciliation';
+import { bareMessageId, headerLine, isWellFormedMessageId } from '../lib/messageIdentity';
 import type { Capability } from '../lib/capabilities';
 
 export interface SendEmailOptions {
@@ -12,6 +14,14 @@ export interface SendEmailOptions {
   inReplyTo?: string;
   references?: string;
   threadId?: string;
+  /**
+   * S32 — the RFC 5322 Message-ID to stamp on this message, derived deterministically from the
+   * job's idempotency key by the caller. It is what makes the send reconcilable: after an
+   * ambiguous outcome, `rfc822msgid:<this>` is an exact provider-side search for "did this
+   * specific send happen". Optional in the type only so the demo path can run; the gateway
+   * requires it.
+   */
+  rfc822MessageId?: string;
 }
 
 export interface GmailMessage {
@@ -33,7 +43,7 @@ export interface GmailMessage {
 // P1.11 — the adapter now states its contract instead of merely happening to satisfy one.
 // `implements` makes the compiler check it: an adapter that stops throwing ProviderError, or
 // starts inventing message ids, fails the build rather than the production send.
-export class GmailService implements EmailProvider, RefreshableCredential {
+export class GmailService implements EmailProvider, RefreshableCredential, SentMessageLookup {
   readonly providerName = 'gmail';
   readonly requiredCapabilities: readonly Capability[] = ['EMAIL_SEND'];
 
@@ -207,6 +217,72 @@ export class GmailService implements EmailProvider, RefreshableCredential {
     };
   }
 
+  /**
+   * S32 — the question reconciliation asks.
+   *
+   * `rfc822msgid:` is Gmail's exact-match operator on the RFC 5322 Message-ID, which is why
+   * the send stamps a deterministic one. `in:sent` scopes it to mail this mailbox actually
+   * transmitted: a message with the same id sitting in the inbox would be a copy we RECEIVED,
+   * and reading that as proof we sent it is how a reconciliation mistakes a bounce for a
+   * delivery.
+   *
+   * Absence is returned as `null` and failure is thrown, never the other way round. The two
+   * are different answers to the §32 question and `reconcileEmailSend` treats them completely
+   * differently — one can license a retry, the other never may.
+   */
+  async findSentMessageByRfc822MessageId(
+    rfc822MessageId: string
+  ): Promise<{ id: string; threadId: string } | null> {
+    if (!this.accessToken) {
+      throw new ProviderError({
+        provider: 'gmail',
+        operation: 'findSentMessageByRfc822MessageId',
+        kind: 'PERMISSION_DENIED',
+        signal: 'no access token set',
+      });
+    }
+    if (!isWellFormedMessageId(rfc822MessageId)) {
+      throw new ProviderError({
+        provider: 'gmail',
+        operation: 'findSentMessageByRfc822MessageId',
+        kind: 'INVALID_REQUEST',
+        signal: 'malformed Message-ID; refusing to build a provider query from it',
+      });
+    }
+
+    const q = encodeURIComponent(`in:sent rfc822msgid:${bareMessageId(rfc822MessageId)}`);
+    let res: Response;
+    try {
+      res = await fetchWithTimeout(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=2&q=${q}`,
+        { headers: { Authorization: `Bearer ${this.accessToken}` } }
+      );
+    } catch (e) {
+      throw classifyThrown(e, { provider: 'gmail', operation: 'findSentMessageByRfc822MessageId' });
+    }
+
+    if (!res.ok) {
+      throw classifyResponse(res, { provider: 'gmail', operation: 'findSentMessageByRfc822MessageId' });
+    }
+
+    const data: any = await res.json();
+    const messages = Array.isArray(data?.messages) ? data.messages : [];
+    if (messages.length === 0) return null;
+
+    const first = messages[0];
+    if (typeof first?.id !== 'string' || first.id === '') {
+      // A 200 whose body does not carry an id has not answered the question. Throwing keeps
+      // this in the STILL_UNKNOWN column rather than letting it read as a confirmed send.
+      throw new ProviderError({
+        provider: 'gmail',
+        operation: 'findSentMessageByRfc822MessageId',
+        kind: 'UNKNOWN',
+        signal: 'search matched but the result carried no message id',
+      });
+    }
+    return { id: first.id, threadId: typeof first.threadId === 'string' ? first.threadId : '' };
+  }
+
   async sendEmail(opts: SendEmailOptions): Promise<{ messageId: string, threadId: string }> {
     if (config.demoMode) {
       // P0.8 — This simulation is retained for local development, but its output is
@@ -228,14 +304,29 @@ export class GmailService implements EmailProvider, RefreshableCredential {
       throw new Error("Gmail credentials not configured");
     }
 
-    // Construct MIME message
+    // S16 — every header value is now checked before it becomes a header.
+    //
+    // This was raw interpolation: `Subject: ${opts.subject}`. The reply subject is derived
+    // from the INBOUND subject, so a customer who puts a CR-LF in theirs ended that header and
+    // made the remainder into headers of their own — `Bcc:` among them. Data became structure,
+    // which is the §18 failure in its most literal form. `headerLine` throws rather than
+    // stripping: silently deleting part of a subject changes what the recipient sees with no
+    // record, and a subject with a bare CR in it is an attack or a bug, never a typo.
+    //
+    // S32 — the Message-ID is stamped here. Deterministic, derived from the job's idempotency
+    // key, so the SAME send produces the SAME id on every attempt in every process. That is
+    // what `reconcileEmailSend` searches for afterwards. Without it a timed-out send could
+    // never be asked about, which is why §32 reconciliation stayed a comment for so long.
     const messageParts = [
-      `To: ${opts.to}`,
-      `Subject: ${opts.subject}`,
-      `Content-Type: text/html; charset=utf-8`,
+      headerLine('To', opts.to),
+      headerLine('Subject', opts.subject),
+      'Content-Type: text/html; charset=utf-8',
     ];
-    if (opts.inReplyTo) messageParts.push(`In-Reply-To: ${opts.inReplyTo}`);
-    if (opts.references) messageParts.push(`References: ${opts.references}`);
+    if (opts.rfc822MessageId) {
+      messageParts.push(headerLine('Message-ID', opts.rfc822MessageId));
+    }
+    if (opts.inReplyTo) messageParts.push(headerLine('In-Reply-To', opts.inReplyTo));
+    if (opts.references) messageParts.push(headerLine('References', opts.references));
     messageParts.push('', opts.bodyHtml || opts.bodyText || '');
 
     const rawMessage = Buffer.from(messageParts.join('\r\n'))

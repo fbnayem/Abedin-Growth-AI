@@ -1970,6 +1970,136 @@ section 1m, unchanged.
 
 ---
 
+## 1r. S32 — the reconciliation that was a comment, and the question it could not ask (2026-09-07)
+
+### What was there
+
+P1.11 built the whole apparatus. `providerError.ts` classifies TIMEOUT, CONNECTION_FAILED,
+PROVIDER_UNAVAILABLE and UNKNOWN as AMBIGUOUS; `requiresReconciliation(error, irreversible)` states
+the §32 gate in one line; the gateway calls it and logs `AMBIGUOUS_PROVIDER_RESULT`. Then the worker:
+
+    // It requires an operator or the reconciliation worker to resolve.
+    await outboxService.markFailed(orgId, job.id, "AMBIGUOUS_PROVIDER_RESULT: ...", true);
+
+There was no reconciliation worker. **Every ambiguous send was dead-lettered permanently.** That
+is fail-closed, so nothing was at risk — but it is not §32, and it has a real cost: a send that
+timed out and in fact never left is a message the customer is still waiting for, and the system
+had no way to tell it from one that arrived. The safe answer was the only answer available, so
+it was given to every case.
+
+### Why it stayed a comment
+
+Not in the worker. **Reconciliation needs a question you can ask,** and the outbound message
+carried no identity of our choosing:
+
+    const messageParts = [ `To: ${opts.to}`, `Subject: ${opts.subject}`, ... ];
+
+No Message-ID. After a timeout the only available query was "is there a message to this address
+with this subject?", which cannot distinguish the send that just timed out from the one that
+succeeded last week. An unanswerable question is not a reconciliation, and that is why three
+passes over this code left the branch as prose.
+
+### The identity
+
+Every outbound message now carries a Message-ID **derived from the job idempotency key** — the
+value the outbox already stored and already used as the document id. Same job, same id, on every
+attempt in every process. That determinism is the entire mechanism: `rfc822msgid:<id>` is then an
+exact provider-side search for "did THIS send happen".
+
+It is hashed rather than used raw, because a Message-ID travels in the clear to the recipient and
+every relay in between while an idempotency key can carry an email address or a conversation id.
+
+A send that cannot be given such an id is **refused before the network** (`UNRECONCILABLE_SEND`),
+not discovered to be unreconcilable after it has already timed out. The alternative — a random
+id — is stable within one attempt and different on the retry, so it would answer "did this send
+happen" with "no" every time and licence precisely the duplicate §32 exists to prevent.
+
+### One answer became three
+
+| Verdict | When | May retry? |
+|---|---|---|
+| `APPLIED` | the provider holds a sent message with that id | **no** — it already happened |
+| `NOT_APPLIED` | the provider does not, and the settle window has passed | **yes** |
+| `STILL_UNKNOWN` | anything else | **no** |
+
+STILL_UNKNOWN is returned generously: no identity to search on, the search itself failed, the
+search ran too soon to be trusted, or the provider returned something that does not prove what it
+appears to. Only NOT_APPLIED licenses a retry, and that predicate is written as an equality
+against the one permitting value rather than as a negation of the forbidding ones — so a verdict
+added to the union later is refused by default instead of inheriting permission.
+
+**"Too soon" is a distinct answer, and it is the one that matters most.** A mailbox index is
+eventually consistent. Asking Gmail one second after a timeout whether the message is in Sent
+will often say no even when the send succeeded. Reading that "no" as NOT_APPLIED would license a
+retry and deliver the message twice — the exact outcome §32 exists to prevent, reached through
+the machinery built to prevent it. So an absence observed inside the settle window is
+STILL_UNKNOWN. Waiting is cheap; a duplicate to a customer is not.
+
+The 30-second window is a judgement, not a measurement, and it is a parameter so a deployment
+that measures something different can say so.
+
+### The second defect in the same six lines (S16)
+
+Those headers were built by raw interpolation of values that arrive from outside the system. The
+reply subject is derived from the **inbound** subject, so a customer who puts a CR-LF in theirs
+ended that header and made the remainder into headers of their own — `Bcc:` among them. Data
+becoming structure is §18 in its most literal form, and it was reachable by writing an email.
+
+`headerLine()` refuses rather than strips: silently deleting part of a subject changes what the
+recipient sees with no record, and a subject containing a bare CR is an attack or a bug, never a
+typo.
+
+### Evidence
+
+Runtime, one ambiguous timeout in four situations:
+
+    provider holds the message                    APPLIED         retry refused
+    absent, 30000ms after the attempt             NOT_APPLIED     RETRY PERMITTED
+    absent, but only 1ms after the attempt        STILL_UNKNOWN   retry refused
+    the reconciliation query itself failed        STILL_UNKNOWN   retry refused
+
+And what the adapter actually put on the wire, decoded back out of the base64 it sent:
+
+    To: buyer@acme.example
+    Subject: Re: pricing
+    Content-Type: text/html; charset=utf-8
+    Message-ID: <ag.0fcb0247538a542ff48a58b941911f52a1e61f54@abedin.example>
+
+    subject with a CR-LF and a Bcc:  refused: UnsafeHeaderValueError
+
+`npm test`: **870 tests across 31 files**, up from 823 across 30. `tsc` exit 0, build clean, 10
+guardrails green. **Mutation-tested 33/33.**
+
+The one first-run survivor was deleting `rfc822MessageId` from the arguments of the send call. The
+assertion was `gateway.toContain('rfc822MessageId,')` — and the reconciliation call a hundred lines
+below contains that same text, so the needle matched somewhere else in the same file. A needle
+that can match elsewhere is a claim about the file, not about the call site; the assertion now
+slices the actual argument list.
+
+### Status
+
+**S32 stays PARTIAL, and S16 loses one of its four listed defects.** The loop is closed in code
+and proven against a stubbed transport: the identity is stamped, the question is asked, and three
+verdicts drive three different behaviours in the worker. Two things keep it from VERIFIED, and
+neither is a code gap I can close here:
+
+1. **It has never been run against a real Gmail account.** The reconciliation query is exercised
+   against a stub. Gmail is documented to preserve a client-supplied Message-ID on
+   `messages.send`, but that is documentation, not observation, and §2 forbids marking VERIFIED
+   on a claim I have not seen hold. If Gmail were to rewrite the id, reconciliation degrades to
+   STILL_UNKNOWN — fail-closed, and therefore safe — but it would be closed for the wrong reason.
+2. **Only EMAIL_SEND is reconcilable.** CALENDAR_CREATE, PAYMENT_CREATE and SIGNATURE_SEND are
+   all irreversible and all reach the same ambiguous branch, where they get STILL_UNKNOWN by
+   default. That default is deliberate — "we could not check, so assume it did not happen" is
+   §14 exactly, unknown becoming permission to repeat an irreversible action — but it means those
+   three action types are no better off than before, just honestly labelled.
+
+**Operator action:** set `OUTBOUND_MESSAGE_ID_DOMAIN` to the sending domain. Until it is set, every
+send is refused with `UNRECONCILABLE_SEND` rather than sent unreconcilably. That is the correct
+direction under §14 and it makes the missing configuration visible instead of latent.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -2075,7 +2205,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S13 | Provider capability model | PARTIAL | CRITICAL | `server/lib/capabilities.ts`; `actionGateway.ts` (`checkProviderCapability` pre-flight); `server.ts` (oauth record) | Scopes are recorded at consent and checked BEFORE dispatch; an unrecorded grant is refused, as is a datastore read that failed (§14). The Gmail/Calendar conflation is resolved by scopes rather than by provider name. Gmail refresh flow implemented. **Remainder: every existing connection has no scopes recorded and will be refused until reconnected** — deliberate, and an operator action |
 | S14 | UNKNOWN != PERMITTED (consent / jurisdiction defaults) | PARTIAL | CRITICAL | `actionGateway.ts:170-171`, `:177`, `:185`; `outreachPolicy.ts:20` | Unknown country → `'US'`, unknown consent → `true`; both block rules neutered by hardcoded `isB2B: true`; the only fail-closed policy file is dead |
 | S15 | Email threading, identity normalization, duplicate prevention | PARTIAL | HIGH | `inboundPipeline.ts:35`; `gmail.service.ts:106-119`; `db/schema.ts:104` | `providerThreadId` is written and never queried; `Message-ID` never parsed; outbound `In-Reply-To` carries a Gmail internal id; dedupe is a racy SELECT with no unique index. *Superseded by §1f: thread resolution, conversation creation and Message-ID parsing landed 2026-09-06; held at PARTIAL by outbound Message-ID handling and the MIME parser.* |
-| S16 | MIME parsing, encodings, what reaches the model | PARTIAL | HIGH | `gmail.service.ts:80-104`, `:136-143`; `inboundPipeline.ts:65` | Hardcoded utf8 decode ignores charset; no quoted-printable, no RFC 2047, no multipart/report; `sanitizedHtmlBody` stores raw HTML; outbound headers built by unescaped interpolation |
+| S16 | MIME parsing, encodings, what reaches the model | PARTIAL | HIGH | `gmail.service.ts:80-104`, `:136-143`; `inboundPipeline.ts:65` | Hardcoded utf8 decode ignores charset; no quoted-printable, no RFC 2047, no multipart/report; `sanitizedHtmlBody` stores raw HTML; outbound header injection **fixed 2026-09-07** (§1r) — every header value is refused if it carries CR, LF or NUL, so a reply subject derived from an inbound one can no longer smuggle a `Bcc:` |
 | S17 | Attachment handling (limits, allowlist, sniffing, scanning, retention) | NOT_STARTED | HIGH | `gmail.service.ts:84-94`, `:110`; `server.ts:58` | Attachments silently dropped by the MIME walk while the raw payload is retained; no size cap, allowlist, sniffing, scanning, storage or retention exists |
 | S18 | Indirect prompt injection via untrusted email | PARTIAL | CRITICAL | `aiSecurity.service.ts:3-15`; `geminiClient.ts:125`; `multiAgentReplySystem.ts:299-303`, `:445`; `firestore.rules:5` | **Both sanitizers are unreachable** — §6.3 concedes the text-channel exploit "is not executable on the live path" — so no defence exists on any live path; no authority separation; raw transcripts interpolated into prompts; the auditor is stubbed to PASS. The reachable injection channel is a **write** channel: the world-writable prompt corpus and outbox |
 | S19 | SSRF / outbound URL fetching | NOT_STARTED | MEDIUM | `gmail.service.ts:49,64,151`; `actionGateway.ts:272,287`; `calendar.service.ts:44`; grep `AbortController\|AbortSignal\|signal:\|setTimeout(` over `server/` → **zero hits** | Classic SSRF is **not reachable**: all 6 fetch hosts are string literals on `googleapis.com`, so there is no attacker-controlled host. The live defect is the absence of any request deadline — zero fetch timeouts anywhere in `server/`, on calls driven by an un-awaited 5s `setInterval` with no re-entrancy guard. Attacker-controlled `historyId` is still interpolated into a path without encoding via an unauthenticated webhook |
@@ -2092,7 +2222,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S29 | Contact/account dedup, normalization and merge | PARTIAL | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all**. *Superseded by §1f: derived ids, account creation and a transactional merge landed 2026-09-06; held at PARTIAL by the open Firestore rules and the absence of a backfill.* |
 | S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | PARTIAL | HIGH | `shared/domain/time.ts`; `schema.ts` (76 `timestamptz` cols); `server.ts` (`POST /api/meetings`); `multiAgentReplySystem.ts`; `ScheduleMeetingModal.tsx`; `calendar.service.ts` | Zone-aware hours, IANA validation (rejecting `BST`, which Intl resolves to Asia/Dhaka), `{startAtUtc, timeZone}` meetings, all 76 columns zoned, and the `datetime-local` round trip fixed — all verified at runtime. **Remainder: 99 direct wall-clock reads in `server/` are not yet routed through the injectable `Clock`,** which is injected only into the reply composer and the context bundle |
 | S31 | Calendar conflict invariant: busy → zero create requests | PARTIAL | CRITICAL | `outbox.worker.ts:78`, `:95` (the only `dispatchAction` call site, hardcoding `EMAIL_SEND`); `actionGateway.ts:247-252`, `:282`, `:287`, `:300`; `server.ts:672` | **There is no partial implementation.** `executeCalendarCreate` is unreachable — `dispatchAction` has exactly one call site repo-wide and it always passes `ActionType.EMAIL_SEND`. The live booking path (`server.ts:1496`, was `:672` before this branch moved it) performs a local overlap check and a bare `addDoc`, with no provider call. **P1.9 did not move this.** `checkFreeBusy` now reports `UNKNOWN` instead of `true`, removing a way a caller could be misled, but it still has no callers and `executeCalendarCreate` is still unreachable |
-| S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `server/lib/providerError.ts`; `actionGateway.ts` (single classifier); `providerError.invariant.test.ts` | Detection is fixed and structural. The old test (`e.message.includes('timeout')`) matched **none** of the errors this system actually raises — including its own `HttpTimeoutError`, whose message says "timed out", not "timeout" — so the AMBIGUOUS branch never fired and timed-out sends were retryable. Now classified by type/`code`/HTTP status, with UNKNOWN resolving to AMBIGUOUS (§14). **Remainder: reconciliation is still a comment** — an ambiguous action is logged and stopped, but nothing queries the provider to learn what happened |
+| S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `server/lib/providerError.ts`; `actionGateway.ts` (single classifier); `providerError.invariant.test.ts` | Detection is fixed and structural. The old test (`e.message.includes('timeout')`) matched **none** of the errors this system actually raises — including its own `HttpTimeoutError`, whose message says "timed out", not "timeout" — so the AMBIGUOUS branch never fired and timed-out sends were retryable. Now classified by type/`code`/HTTP status, with UNKNOWN resolving to AMBIGUOUS (§14). Reconciliation landed 2026-09-07 (§1r): sends carry a Message-ID derived from the idempotency key, the gateway queries the provider after an ambiguous outcome, and the three verdicts drive three behaviours — only NOT_APPLIED permits a retry. **Remainder: never exercised against a real Gmail account, and only EMAIL_SEND is reconcilable** — CALENDAR_CREATE, PAYMENT_CREATE and SIGNATURE_SEND reach the same branch and get STILL_UNKNOWN by default |
 | S33 | Webhook signature, dedupe and ordering | PARTIAL | CRITICAL | `server.ts:58`, `:62`, `:773`, `:781-782`, `:810-811`; `stripe.routes.ts:55,62-69` | Stripe verification never succeeds (body already parsed); DocuSign unverified and unauthenticated; no event ledger, no dedupe, no ordering watermark; Gmail acks 200 before processing |
 | S34 | CSV / spreadsheet formula injection on export | PARTIAL | HIGH | `src/utils/exportUtils.ts:39-40`, `:18`; `LeadsView.tsx:198`; `server.ts:112-119` | Only `"` is doubled; no neutralisation of `=`, `+`, `-`, `@`, tab or CR; columns derived from `Object.keys(data[0])`, so attacker-injected keys become columns |
 | S35 | Frontend HTML safety / rendering untrusted provider HTML | NOT_STARTED | HIGH | zero `dangerouslySetInnerHTML` in `src/`; `inboundPipeline.ts:65`; `db/schema.ts:116`; `index.html`; `gmailWorkspaceService.ts:44,71,161` | **No control exists.** "Safe today only by absence of a sink" is the "nothing broke yet" reasoning the grading standard forbids — no sanitizer dependency, no CSP, and a column named `sanitizedHtmlBody` storing raw attacker HTML. Severity is HIGH, not MEDIUM: the stored-XSS sink would exfiltrate the live Gmail **send** credential sitting in `localStorage` |

@@ -174,6 +174,11 @@ export class OutboxWorker {
               inReplyTo: job.payload.inReplyTo,
               references: job.payload.references,
               threadId: job.payload.threadId,
+              // S32 — the job's idempotency key is what the outbound Message-ID is derived
+              // from, and therefore what makes this send reconcilable after an ambiguous
+              // outcome. The gateway refuses to send without it rather than sending something
+              // it could never afterwards ask the provider about.
+              idempotencyKey: job.idempotencyKey,
             }
           };
 
@@ -228,23 +233,63 @@ export class OutboxWorker {
              await outboxService.markProcessed(orgId, job.id, providerMsgId);
           } else {
              if (result.isAmbiguousResult) {
-                // Addendum §32 — An ambiguous provider result is NOT a failure. The provider
-                // may have delivered the message and only the response was lost. This is
-                // marked TERMINAL so the retry path cannot pick it up: retrying an
-                // irreversible action without first reconciling against the provider is how
-                // duplicate emails reach a customer. It requires an operator or the
-                // reconciliation worker to resolve.
-                console.warn(
-                  `Ambiguous provider result for job ${job.id}. Dead-lettering to prevent an ` +
-                  `un-reconciled retry; the message may or may not have been delivered.`
-                );
-                await outboxService.markFailed(orgId, job.id, "AMBIGUOUS_PROVIDER_RESULT: requires reconciliation before any retry", true);
+                // Addendum §32 — an ambiguous provider result is NOT a failure. The provider
+                // may have delivered the message and only the response been lost.
+                //
+                // This branch used to end here, with an unconditional terminal dead-letter and
+                // a comment saying it "requires an operator or the reconciliation worker to
+                // resolve". There was no reconciliation worker, so EVERY ambiguous send was
+                // dead-lettered — including the ones that genuinely never left, which the
+                // customer is still waiting for. Safe, and wrong about half the time.
+                //
+                // The gateway now asks the provider before returning, and the verdict decides
+                // which of two different things this is. Note what is NOT here: a branch for
+                // APPLIED. An applied send comes back with `success: true` and the provider's
+                // own id, so it is recorded as SENT by the path above — where a delivered
+                // message belongs.
+                const verdict = result.reconciliation?.verdict ?? 'STILL_UNKNOWN';
+                const evidence = result.reconciliation?.evidence ?? 'no reconciliation was attempted';
+
+                if (verdict === 'NOT_APPLIED') {
+                  // Asked, and answered: the provider does not have it, and the settle window
+                  // has passed. The ambiguity is resolved to an ordinary failure, so this goes
+                  // back through backoff and retry like any other — which is the point of
+                  // reconciling rather than dead-lettering everything.
+                  console.warn(
+                    `[OutboxWorker] Job ${job.id} was ambiguous and reconciled to NOT_APPLIED. ` +
+                    `Retryable. ${evidence}`
+                  );
+                  await outboxService.markFailed(
+                    orgId,
+                    job.id,
+                    `RECONCILED_NOT_APPLIED: ${evidence}`
+                  );
+                } else {
+                  // STILL_UNKNOWN. Terminal, as before: retrying an irreversible action whose
+                  // outcome we could not establish is how duplicate emails reach a customer.
+                  console.warn(
+                    `[OutboxWorker] Job ${job.id} is ambiguous and reconciliation could not ` +
+                    `resolve it. Dead-lettering to prevent an un-reconciled retry. ${evidence}`
+                  );
+                  await outboxService.markFailed(
+                    orgId,
+                    job.id,
+                    `AMBIGUOUS_PROVIDER_RESULT: reconciliation returned ${verdict}. ${evidence}`,
+                    true
+                  );
+                }
              } else if (result.blockedReason) {
                 // Policy/flag block. Terminal: retrying cannot change a policy decision.
                 await outboxService.markFailed(orgId, job.id, `POLICY_BLOCKED: ${result.blockedReason}`, true);
              } else if (result.errorCode === 'PROVIDER_NOT_CONFIGURED') {
                 // Terminal: no amount of retrying creates a credential.
                 await outboxService.markFailed(orgId, job.id, `PROVIDER_NOT_CONFIGURED: ${result.error}`, true);
+             } else if (result.errorCode === 'UNRECONCILABLE_SEND') {
+                // S32 — terminal. The send was refused because it could not be given an
+                // identity the provider could later be asked about, and retrying reproduces
+                // that refusal exactly. It needs a deployment change (OUTBOUND_MESSAGE_ID_DOMAIN),
+                // not another attempt.
+                await outboxService.markFailed(orgId, job.id, `UNRECONCILABLE_SEND: ${result.error}`, true);
              } else {
                 throw new Error(result.error || "Gateway execution failed");
              }
