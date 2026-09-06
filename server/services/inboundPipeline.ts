@@ -17,6 +17,8 @@ import { referencedMessageIds, resolveThread, type ThreadCandidate } from '../do
 import { inArray } from 'drizzle-orm';
 import { evaluateEmailUnderstandingRuleBased, determineNextBestAction, composeAutonomousSalesReply } from '../agents/salesDecisionEngine';
 import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
+import { recordFacts } from '../lib/factStore';
+import { observationsFromMemory } from '../domain/memoryFacts';
 
 type AuditDecision = 'PASS' | 'BLOCK' | 'HUMAN_REVIEW_REQUIRED';
 
@@ -277,27 +279,39 @@ export class InboundPipeline {
 
       const memory = await extractAndSynthesizeMemory(convData);
 
-      // Update memory in DB - clear old facts and insert new
-      // The tenant predicate belongs on DELETE most of all: without it a conversation id
-      // belonging to another organisation would delete that organisation's facts.
-      await db
-        .delete(conversationFacts)
-        .where(
-          and(
-            eq(conversationFacts.organizationId, organizationId),
-            eq(conversationFacts.conversationId, conversationId)
-          )
+      // P1.6 — Record what this message told us, WITHOUT destroying what we already knew.
+      //
+      // This was a hard DELETE of every fact for the conversation, followed by a loop over
+      // `(memory as any).facts` — a member `ConversationMemory` does not have. So the loop
+      // threw on `undefined` AFTER the delete had already run: an inbound message erased the
+      // conversation history and wrote nothing back. Every provenance column was left unset,
+      // and it all executed against the throwing Drizzle proxy in any case.
+      //
+      // Facts are now superseded rather than replaced. A repeated value is a CONFIRMATION
+      // (the customer said the same thing again), a changed value CLOSES the old fact with a
+      // `validUntil` and opens a new one. "Their budget was 5k, then 15k" and "their budget
+      // is 15k" are different claims and only the first can be audited.
+      //
+      // Every observation names the message it came from, and every one derived from the
+      // model reading a customer email is marked AGENT_SYNTHESIS — the LOWEST authority tier.
+      // That label is load-bearing: these facts re-enter later prompts, and without a tier a
+      // model’s summary of a stranger’s email would rank alongside something an operator
+      // entered, which is how one injected sentence becomes a durable instruction (§18).
+      const observations = observationsFromMemory(memory, messageId);
+      const factOutcome = await recordFacts(organizationId, conversationId, observations);
+      if (factOutcome.rejected.length > 0) {
+        // Logged rather than thrown: a malformed fact from a model is routine, and it must
+        // not discard the well-formed ones alongside it.
+        console.warn(
+          `[InboundPipeline] ${factOutcome.rejected.length} observation(s) rejected for ` +
+            `conversation ${conversationId}:`,
+          factOutcome.rejected
         );
-      for (const fact of (memory as any).facts) {
-         await db.insert(conversationFacts).values({
-            id: `fact_${Date.now()}_${Math.random()}`,
-            organizationId,
-            conversationId,
-            key: 'synthesized_fact',
-            value: fact,
-            sourceType: 'AGENT_SYNTHESIS'
-         });
       }
+      console.log(
+        `[InboundPipeline] recorded ${factOutcome.recorded} fact observation(s) for ` +
+          `conversation ${conversationId}.`
+      );
 
 
       // 5. Email Understanding & Intent

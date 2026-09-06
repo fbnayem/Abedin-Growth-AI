@@ -239,6 +239,9 @@ export const InboxView: React.FC<InboxViewProps> = ({
   const [expandedThreadModalOpen, setExpandedThreadModalOpen] = useState(false);
   const [auditModalOpen, setAuditModalOpen] = useState(false);
   const [runningAudit, setRunningAudit] = useState(false);
+  // P1.13 — Why the audit produced nothing, when it produced nothing. Without this the
+  // panel is blank on failure, and a blank safety panel reads the same as a clean one.
+  const [auditUnavailable, setAuditUnavailable] = useState<string | null>(null);
   const [auditReport, setAuditReport] = useState<{
     timestamp?: string;
     totalConversationsAudited?: number;
@@ -392,6 +395,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
 
   const handleRunDeepAudit = async () => {
     setRunningAudit(true);
+    setAuditUnavailable(null);
     try {
       const res = await diagnosticFetch("/api/inbox/deep-audit", {
         method: "POST",
@@ -404,6 +408,16 @@ export const InboxView: React.FC<InboxViewProps> = ({
         await fetchOutbox();
         if (onRefreshOutbox) onRefreshOutbox();
         if (onRefreshConversations) onRefreshConversations();
+      } else {
+        // P1.13 — The endpoint behind this button returned `{ audit: "Clean" }` without
+        // auditing anything, and has been deleted. The failure is surfaced rather than
+        // swallowed: an audit panel that silently shows nothing is the same misleading
+        // signal in a quieter form, because a reader cannot tell "clean" from "never ran".
+        setAuditUnavailable(
+          "The deep audit is not implemented. The endpoint behind this button previously " +
+            "reported a clean result without examining anything, and has been removed rather " +
+            "than left in place."
+        );
       }
     } catch (e) {
       console.error("Deep audit error:", e);
@@ -2142,6 +2156,15 @@ export const InboxView: React.FC<InboxViewProps> = ({
                   <span>{runningAudit ? "Auditing System..." : "Run Deep Audit & Clean All"}</span>
                 </button>
               </div>
+
+              {auditUnavailable && (
+                <div
+                  role="alert"
+                  className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-900"
+                >
+                  {auditUnavailable}
+                </div>
+              )}
 
               {/* Audit Summary KPI Badges if available */}
               {auditReport && (

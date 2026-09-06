@@ -465,6 +465,183 @@ the datastore itself enforces what the application now checks.
 
 ---
 
+## 1g. Remediation progress — P1.6 and P1.13 (landed 2026-09-06)
+
+### An inbound message used to erase the conversation's history
+
+The only fact write in the repository was this:
+
+    await db.delete(conversationFacts).where(... conversationId ...);
+    for (const fact of (memory as any).facts) {
+      await db.insert(conversationFacts).values({
+        key: 'synthesized_fact', value: fact, sourceType: 'AGENT_SYNTHESIS'
+      });
+    }
+
+Three disqualifying things at once. It **hard-deletes every prior fact** before inserting, so
+supersession was not merely unimplemented — it was inverted into destruction. It left every
+provenance column unset: `sourceMessageId`, `observedAt`, `confidence`, `validFrom`,
+`validUntil`, all null. And `ConversationMemory` has no `facts` member, so the loop threw on
+`undefined` **after the delete had already run**.
+
+The net effect of processing an inbound message was to erase the conversation's facts and write
+nothing back. The `as any` is why the compiler never mentioned the missing member. There was
+also no fact collection on Firestore at all, so none of this ran on the datastore that this
+deployment actually uses.
+
+A fact is now never deleted and never overwritten. A repeated value is a **confirmation** — the
+customer said the same thing again, which increments an observation count rather than writing a
+second row that would make the history claim they changed their mind. A changed value
+**supersedes**: the old fact gets a `validUntil` and a pointer to its successor, and stays.
+"Their budget was £5k, then £15k" and "their budget is £15k" are different claims, and only the
+first can be audited.
+
+### Provenance is a tier, not a label
+
+This is the part that matters beyond bookkeeping. Model output derived from a customer's email
+was being written back with `sourceType: 'AGENT_SYNTHESIS'` and then read into later prompts.
+A label that *reads* like provenance made a model's paraphrase of a stranger's email
+indistinguishable from something we hold on record. That is a persistent, second-order
+injection channel (§18): text arrives once, becomes a "fact", and acquires an authority it
+never had — and unlike a prompt-injection attempt that must be repeated, this one persists.
+
+So the source types are **ordered**, and a lower tier cannot supersede a higher one:
+
+    AGENT_SYNTHESIS < CUSTOMER_ASSERTION < SYSTEM_DERIVED < PROVIDER_RECORD < OPERATOR_ENTRY
+
+A model's summary can no longer rewrite what an operator entered or what a provider returned —
+which is exactly the shape an injected "correction" would take. Untrusted origin also travels
+*with* the fact rather than being recomputed from the source type at read time, because a fact
+derived from an untrusted fact is still untrusted: authority is not restored by a hop.
+
+Two smaller rules follow from §14 and §21. Anything originating outside must name the message
+it was observed in — an unattributable claim about a customer is not a fact, and the schema
+declared that column for exactly this reason. And confidence is `null` when nothing computed
+one, never a default number, because inventing 50 gives a paraphrase a precision it never had.
+
+Fact ids are derived from (conversation, key, source message, value), so **reprocessing the
+same message is idempotent**. That matters more than it looks: a provider redelivery or a
+worker restart mid-run would otherwise write a fresh "the customer changed their mind" entry on
+every retry.
+
+### Lists become one fact, not many
+
+Supersession needs a stable key, and "pain point #2" is not one — the model may reorder, and the
+second element changing would read as the customer revising something they never said. The
+stable claim is the set, so `pain_points` supersedes as a whole. `keyFactsExtracted` is the one
+genuinely per-key structure in a ConversationMemory, so each of its entries supersedes
+independently: a changed renewal date does not disturb a stored headcount.
+
+### P1.13 — sixteen endpoints reported success for work they did not do
+
+    app.post("/api/inbox/:id/reply", (req, res) => res.json({ success: true }));
+
+Sixteen of these. They mutated nothing, called nothing, and answered 200. Nine claimed an
+**external** side effect: a reply sent to a customer, a contract signed, five auto-replies, ten
+follow-ups. `/api/meetings/:id/sign-contract` is the sharpest — it reported a contract signed
+while doing nothing at all.
+
+A fabricated success is worse than an error, and the reason is not subtle: a failure gets
+investigated. An operator told that ten follow-ups went out has no reason to look again.
+
+Four more claimed to persist settings and persisted nothing. `/api/settings/autopilot` is worth
+naming: an operator who turned autopilot off was told it had been turned off. Nothing reads
+those settings in any case, so the control does not exist in any form — which is now what the
+endpoint says, rather than the opposite.
+
+All sixteen answer **501** with a message explaining what the endpoint used to claim and what
+would have to exist for it to work. Every external one names the Production Action Gateway,
+because §C requires that path and these endpoints bypassed it entirely.
+
+**The kill switch was checked and left alone.** `/api/inbox/circuit-breaker` and its toggle do
+real work and still do; the verification below confirms both, and confirms that autonomous
+sending remains disabled by configuration.
+
+### Evidence
+
+`npm test`: **444 tests across 17 files**, up from 417. The 27 new ones are invariants and were
+**mutation-tested** — thirteen deliberate breakages (supersession inverted, the closed fact left
+open, a repeat duplicating instead of confirming, a model summary permitted to overwrite an
+operator entry, an unattributed claim accepted, untrusted origin no longer propagating,
+confidence invented, a closed fact still reported as current, memory observations losing their
+source or claiming a higher tier, fact ids made random) — and **all thirteen were caught**.
+
+Two guardrail failures are worth recording, because they are the same failure.
+
+`check-no-fabricated-success` **missed the arrow form on its first run.** The pattern used
+`[^)]*?` between the route and `res.json`, and `[^)]*?` cannot cross the `)` that closes
+`(req: Request, res: Response)`. It caught the block form by accident of a different shape and
+reported "ok" against the exact stub it exists to forbid. This is the **third** occurrence of
+this precise mistake — the P1.5 contact guardrail failed the same way on `orgPath(orgScope(req)`,
+and the P1.12 envelope guardrail failed by scanning line-by-line. The route and its parameter
+list are now matched explicitly, and the check is verified against six cases including two that
+must NOT fire.
+
+`server/lib/factStore.ts` **was written containing a raw NUL byte**, where a NUL is the correct
+delimiter for the id-hash input (it cannot occur in a fact key or value, so it cannot be used to
+make two observations collide). The raw byte makes the file binary to git and grep — no diff in
+review, no match in any other guardrail — and `check-no-nul-bytes` caught it. Replaced with the
+escape sequence, which is the same delimiter in a text file.
+
+Runtime, against Firestore:
+
+| Probe | Result |
+|---|---|
+| a new key | `CREATE` |
+| the same value again | `CONFIRM`, still one row, `observationCount=2` |
+| a changed value | `SUPERSEDE`; two rows stored, one active, **the old one still present** |
+| the closed fact | carries `validUntil` and `supersededBy` = the successor's id |
+| every stored fact | carries `sourceMessageId`, `sourceType`, `observedAt`, `validFrom` |
+| `AGENT_SYNTHESIS` against an `OPERATOR_ENTRY` | refused `LOWER_AUTHORITY`; operator value intact |
+| a customer assertion with no source message | refused `UNATTRIBUTED` |
+| reprocessing the same message | no new rows |
+| a ConversationMemory | 3 facts recorded, 0 rejected — previously a crash |
+| model-derived facts | every one marked `derivedFromUntrusted` |
+| the sixteen retired endpoints | `501 NOT_IMPLEMENTED`, each with a `requestId` and a reason |
+| the kill switch, readiness, the breaker toggle | still `200`, still functioning |
+| autonomous sending after the probe | still disabled by configuration |
+
+Every fact created was deleted afterwards and its absence confirmed, and the operator pause the
+probe left on the circuit breaker was cleared.
+
+### What changed status
+
+**S20 `NOT_STARTED -> PARTIAL`.** There is now a fact store on the datastore that actually
+runs, facts are superseded rather than deleted, every fact carries attribution and temporal
+validity, and provenance is an ordered tier rather than a label. PARTIAL rather than higher:
+only the inbound pipeline writes facts, nothing yet *reads* them back into a prompt (so the
+fencing that `derivedFromUntrusted` enables is available and unused), the PostgreSQL
+`conversation_facts` table remains unwritten, and there is no backfill.
+
+**S21 `PARTIAL`, unchanged in state but materially advanced** — confidence is no longer
+invented and every fact names its source message. It stays PARTIAL because verification status
+is still `UNVERIFIED` for everything: nothing re-checks a fact against the world.
+
+**S39 stays PARTIAL, and the reason is worth stating.** P1.13 maps to S39, S49, S1 and S3.
+Of the four, only S39 lists the stubs as a named finding ("~30 hardcoded success stubs"), and
+sixteen of them are now honest with a mutation-tested guardrail holding the line. S39 does not
+move because its primary finding is structural and untouched: ~70 of ~75 endpoints are still
+inline in `server.ts`, and the controller and repository layers are still 100% dead code.
+Retiring stubs does not decompose a monolith.
+
+**I promoted S45 in error and reverted it.** S45 is "Service level objectives: defined and
+measured" — nothing to do with fabricated success. It was promoted on an assumption about what
+the section covered rather than by reading it, which is precisely the failure mode §2 warns
+about: a status is a claim about evidence, and I had not looked at the evidence. It is back at
+NOT_STARTED.
+
+**One cost of this change should be recorded rather than glossed.** The roadmap asks for
+"honest empty states instead of 501s where a surface is still in use", and sixteen 501s is not
+that. Four buttons in the console now surface an error where they previously appeared to work.
+They never did work — but a reader of this document should know the UI is noisier than it was,
+and that the empty-state work the roadmap asks for has not been done.
+
+**S18 does not move.** Provenance tiers close the *second-order* channel — a model's summary can
+no longer be rewritten into the record as though attested — but the first-order finding stands:
+sixteen of eighteen model call sites are unmigrated and `firestore.rules` is still open.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -473,11 +650,11 @@ the datastore itself enforces what the application now checks.
 |---|---:|---|
 | `VERIFIED` | **0** | — |
 | `IMPLEMENTED_UNVERIFIED` | **1** | S1 |
-| `PARTIAL` | **29** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S18, S21, S29, S30, S31, S32, S33, S34, S36, S37, S39, S40, S43, S46, S47 |
-| `NOT_STARTED` | **19** | S11, S17, S19, S20, S22, S23, S24, S25, S26, S27, S28, S35, S38, S41, S42, S44, S45, S48, S49 |
+| `PARTIAL` | **30** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S18, S20, S21, S29, S30, S31, S32, S33, S34, S36, S37, S39, S40, S43, S46, S47 |
+| `NOT_STARTED` | **18** | S11, S17, S19, S22, S23, S24, S25, S26, S27, S28, S35, S38, S41, S42, S44, S45, S48, S49 |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-0 + 1 + 29 + 19 + 0 = **49 rows**.
+0 + 1 + 30 + 18 + 0 = **49 rows**.
 
 | Severity | Count |
 |---|---:|
@@ -574,7 +751,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S17 | Attachment handling (limits, allowlist, sniffing, scanning, retention) | NOT_STARTED | HIGH | `gmail.service.ts:84-94`, `:110`; `server.ts:58` | Attachments silently dropped by the MIME walk while the raw payload is retained; no size cap, allowlist, sniffing, scanning, storage or retention exists |
 | S18 | Indirect prompt injection via untrusted email | PARTIAL | CRITICAL | `aiSecurity.service.ts:3-15`; `geminiClient.ts:125`; `multiAgentReplySystem.ts:299-303`, `:445`; `firestore.rules:5` | **Both sanitizers are unreachable** — §6.3 concedes the text-channel exploit "is not executable on the live path" — so no defence exists on any live path; no authority separation; raw transcripts interpolated into prompts; the auditor is stubbed to PASS. The reachable injection channel is a **write** channel: the world-writable prompt corpus and outbox |
 | S19 | SSRF / outbound URL fetching | NOT_STARTED | MEDIUM | `gmail.service.ts:49,64,151`; `actionGateway.ts:272,287`; `calendar.service.ts:44`; grep `AbortController\|AbortSignal\|signal:\|setTimeout(` over `server/` → **zero hits** | Classic SSRF is **not reachable**: all 6 fetch hosts are string literals on `googleapis.com`, so there is no attacker-controlled host. The live defect is the absence of any request deadline — zero fetch timeouts anywhere in `server/`, on calls driven by an un-awaited 5s `setInterval` with no re-entrancy guard. Attacker-controlled `historyId` is still interpolated into a path without encoding via an unauthenticated webhook |
-| S20 | Fact provenance, temporal validity, supersession | NOT_STARTED | CRITICAL | `db/schema.ts:127-145`; `inboundPipeline.ts:88-101`; `models.ts:401-412` | **Nothing on a live path writes provenance.** The only fact write hard-deletes all prior facts, sets no provenance column, and hits the throwing Drizzle proxy; the live memory object is a flat key→value map; no Firestore fact collection exists. The declared bitemporal schema is aspirational, which the rubric grades NOT_STARTED |
+| S20 | Fact provenance, temporal validity, supersession | PARTIAL | CRITICAL | `db/schema.ts:127-145`; `inboundPipeline.ts:88-101`; `models.ts:401-412` | **Nothing on a live path writes provenance.** The only fact write hard-deletes all prior facts, sets no provenance column, and hits the throwing Drizzle proxy; the live memory object is a flat key→value map; no Firestore fact collection exists. The declared bitemporal schema is aspirational, which the rubric grades NOT_STARTED |
 | S21 | Deterministic context selection and context-ID recording | PARTIAL | HIGH | `multiAgentReplySystem.ts:296`, `:319`; `salesDecisionEngine.ts:584`, `:604-607`; `db/schema.ts:221-228` | Live path concatenates the entire thread with no bound; `knownRelevantFacts` is a 2-item literal; the one ledger read passes an email as a contactId and is wrapped in `catch(e){}`; no context ids recorded |
 | S22 | AI run reproducibility (`ai_run_logs`) | NOT_STARTED | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | No writer exists; `agentName` is a dead parameter; model id unrecoverable across the failover loop; no tokens, cost, prompt/schema/policy version, or fallback flag |
 | S23 | Agent abstention | NOT_STARTED | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | No abstention member in any response schema; fallback data is fabricated content, not an abstention; `shouldBook` hardcoded `true`; the confidence gate is unreachable |
@@ -864,7 +1041,7 @@ The same primitive reaches further than the outbox. Anyone can set `autonomyPaus
 
 ---
 
-### S20 — Fact provenance, temporal validity, supersession · NOT_STARTED · CRITICAL
+### S20 — Fact provenance, temporal validity, supersession · PARTIAL · CRITICAL
 
 **Status correction (second pass).** Downgraded from PARTIAL. The table declares almost exactly the right bitemporal contract, but a schema is not an implementation. The only fact write (`inboundPipeline.ts:92-101`) does three disqualifying things at once: it **hard-deletes every prior fact** before inserting (so supersession is not merely unimplemented, it is inverted into destruction), it leaves **every provenance column unset**, and it executes against the throwing Drizzle proxy — and would throw before inserting anyway, because it iterates `(memory as any).facts` on a type with no `facts` member. There is no fact collection on the datastore that actually runs. Nothing on a live path writes provenance, temporal validity or supersession, so there is no partial implementation to credit; an aspirational schema is explicitly listed in the rubric as `NOT_STARTED`.
 

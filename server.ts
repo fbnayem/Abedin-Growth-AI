@@ -724,10 +724,39 @@ app.get("/api/health", (req: Request, res: Response) => {
   app.post("/api/campaigns/:id/status", setCampaignStatus);
   app.post("/api/campaigns/:id/toggle", setCampaignStatus);
 
-  app.post("/api/settings/token", (req: Request, res: Response) => res.json({ success: true }));
+  app.post("/api/settings/token", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // This claimed to store an API token and stored nothing, so an operator who rotated
+    // a credential had no way to discover the old one was still in use.
+    //
+    // A false success on a settings write is quieter and no less wrong: the operator
+    // believes a value is in force that was never stored.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This claimed to store an API token and stored nothing, so an operator who rotated a credential had no way to discover the old one was still in use."
+    );
+  });
   app.post("/api/autopilot/run-cycle-now", (req: Request, res: Response) => res.json({ status: "success" }));
   app.post("/api/leads/research", (req: Request, res: Response) => res.json({ notes: "Research complete: High intent detected." }));
-  app.post("/api/inbox/:id/reply", (req: Request, res: Response) => res.json({ success: true }));
+  app.post("/api/inbox/:id/reply", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // Replying to a customer is an external send. It must go through the Production
+    // Action Gateway, which enforces consent, suppression and Safe Rebuild Mode; this
+    // endpoint bypassed all of it and reported success without sending anything.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "Replying to a customer is an external send. It must go through the Production Action Gateway, which enforces consent, suppression and Safe Rebuild Mode; this endpoint bypassed all of it and reported success without sending anything."
+    );
+  });
   app.post("/api/inbox/:id/classify", (req: Request, res: Response) => res.json({ intentConfidence: 0.9 }));
 
   /**
@@ -787,8 +816,39 @@ app.get("/api/health", (req: Request, res: Response) => {
   app.post("/api/pipeline/:id/stage", setOpportunityStage);
 
   app.post("/api/meetings/brief", (req: Request, res: Response) => res.json({ brief: "Meeting brief generated." }));
-  app.post("/api/settings/autopilot", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/meetings/:id/sign-contract", (req: Request, res: Response) => res.json({ success: true }));
+  app.post("/api/settings/autopilot", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // This claimed to save autopilot settings and saved nothing. An operator who turned
+    // autopilot off was told it had been turned off. Nothing currently reads these
+    // settings either, so the control does not exist in any form — which is what this
+    // now says.
+    //
+    // A false success on a settings write is quieter and no less wrong: the operator
+    // believes a value is in force that was never stored.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This claimed to save autopilot settings and saved nothing. An operator who turned autopilot off was told it had been turned off. Nothing currently reads these settings either, so the control does not exist in any form — which is what this now says."
+    );
+  });
+  app.post("/api/meetings/:id/sign-contract", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // Signature is an external action gated by REAL_SIGNATURE_ENABLED. This endpoint
+    // reported a contract signed while doing nothing, which is the most consequential
+    // false claim in this group.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "Signature is an external action gated by REAL_SIGNATURE_ENABLED. This endpoint reported a contract signed while doing nothing, which is the most consequential false claim in this group."
+    );
+  });
   // P0.15 — Was `res.json({ success: true })`. This is the endpoint the UI calls to take
   // payment, and it reported success without contacting any payment provider, creating any
   // record, or moving any state. An operator watching the screen would believe a customer had
@@ -803,15 +863,100 @@ app.get("/api/health", (req: Request, res: Response) => {
         'success without taking payment. Use the Stripe checkout flow (/api/stripe/create-checkout-session).'
     )
   );
-  app.post("/api/meetings/:id/send-recovery-email", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/inbox/auto-reply-all", (req: Request, res: Response) => res.json({ success: true, count: 5 }));
-  app.post("/api/leads/batch-followup", (req: Request, res: Response) => res.json({ success: true, count: 10 }));
+  app.post("/api/meetings/:id/send-recovery-email", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // A recovery email is an external send and must go through the Production Action
+    // Gateway. This endpoint sent nothing and said it had.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "A recovery email is an external send and must go through the Production Action Gateway. This endpoint sent nothing and said it had."
+    );
+  });
+  app.post("/api/inbox/auto-reply-all", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true, count: 5 })`.
+    //
+    // This reported five replies sent. It sent none, and a bulk reply is exactly the
+    // operation that must go through the Production Action Gateway one recipient at a
+    // time so consent and suppression are checked for each.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This reported five replies sent. It sent none, and a bulk reply is exactly the operation that must go through the Production Action Gateway one recipient at a time so consent and suppression are checked for each."
+    );
+  });
+  app.post("/api/leads/batch-followup", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true, count: 10 })`.
+    //
+    // This reported ten follow-ups sent. It sent none. A batch send must go through the
+    // Production Action Gateway per recipient.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This reported ten follow-ups sent. It sent none. A batch send must go through the Production Action Gateway per recipient."
+    );
+  });
   app.post("/api/leads/:id/simulate-reply", (req: Request, res: Response) => res.json({ reply: "Simulated reply from lead." }));
-  app.post("/api/linkedin/send-message", (req: Request, res: Response) => res.json({ success: true }));
+  app.post("/api/linkedin/send-message", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // Sending a LinkedIn message is an external action gated by
+    // REAL_LINKEDIN_SEND_ENABLED and the Production Action Gateway. This endpoint sent
+    // nothing and said it had.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "Sending a LinkedIn message is an external action gated by REAL_LINKEDIN_SEND_ENABLED and the Production Action Gateway. This endpoint sent nothing and said it had."
+    );
+  });
   app.get("/api/sender-identity", (req: Request, res: Response) => res.json({ name: "AI Agent", email: "agent@example.com" }));
-  app.post("/api/sender-identity", (req: Request, res: Response) => res.json({ success: true }));
+  app.post("/api/sender-identity", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // This claimed to save the sender identity and saved nothing, so outbound mail
+    // would not have used what the operator configured.
+    //
+    // A false success on a settings write is quieter and no less wrong: the operator
+    // believes a value is in force that was never stored.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This claimed to save the sender identity and saved nothing, so outbound mail would not have used what the operator configured."
+    );
+  });
   app.get("/api/linkedin-config", (req: Request, res: Response) => res.json({ enabled: true }));
-  app.post("/api/linkedin-config", (req: Request, res: Response) => res.json({ success: true }));
+  app.post("/api/linkedin-config", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // This claimed to save the LinkedIn configuration and saved nothing.
+    //
+    // A false success on a settings write is quieter and no less wrong: the operator
+    // believes a value is in force that was never stored.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This claimed to save the LinkedIn configuration and saved nothing."
+    );
+  });
   app.get("/api/inbox/sales-decision-engine/inspect", (req: Request, res: Response) => res.json({ decision: "Proceed" }));
   // P0.3 — Was `res.json({ success: true })`: it mutated nothing and returned no
   // `circuitBreaker` field, so the console set its state to `undefined` and crashed on the
@@ -837,13 +982,108 @@ app.get("/api/health", (req: Request, res: Response) => {
       });
     }
   });
-  app.post("/api/inbox/deep-audit", (req: Request, res: Response) => res.json({ audit: "Clean" }));
-  app.post("/api/inbox/:id/auto-reply", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/inbox/:id/memory/refresh", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/inbox/:id/follow-up", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/inbox/:id/generate-multi-agent-reply", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/meetings/:id/send-reminder", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/leads/:id/email", (req: Request, res: Response) => res.json({ success: true }));
+  // P1.13 — `/api/inbox/deep-audit` is DELETED, not stubbed.
+  //
+  // It was `res.json({ audit: "Clean" })` — an unconditional clean verdict from a safety
+  // audit that never ran. That is worse than an absent endpoint and worse than a failing
+  // one: it is an actively misleading safety signal, and the whole point of such a signal
+  // is that somebody trusts it.
+  //
+  // A 501 would be honest, but the addendum roadmap asks for deletion specifically here,
+  // and it is right to: leaving the route registered invites someone to "finish" it later
+  // by filling in the body, whereas its absence forces the audit to be designed.
+  //
+  // The console reads `data.auditReport`, which this endpoint never returned, so no audit
+  // figure in the UI has ever come from here.
+  app.post("/api/inbox/:id/auto-reply", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // An automatic reply is an external send and must go through the Production Action
+    // Gateway. This endpoint sent nothing and said it had.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "An automatic reply is an external send and must go through the Production Action Gateway. This endpoint sent nothing and said it had."
+    );
+  });
+  app.post("/api/inbox/:id/memory/refresh", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // This claimed to recompute conversation memory and recomputed nothing. Memory is
+    // now derived and stored as attributed facts by the inbound pipeline (P1.6); a
+    // manual refresh endpoint has not been wired to it.
+    //
+    // A false success on a settings write is quieter and no less wrong: the operator
+    // believes a value is in force that was never stored.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This claimed to recompute conversation memory and recomputed nothing. Memory is now derived and stored as attributed facts by the inbound pipeline (P1.6); a manual refresh endpoint has not been wired to it."
+    );
+  });
+  app.post("/api/inbox/:id/follow-up", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // This claimed to generate a follow-up and generated nothing.
+    //
+    // A false success on a settings write is quieter and no less wrong: the operator
+    // believes a value is in force that was never stored.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This claimed to generate a follow-up and generated nothing."
+    );
+  });
+  app.post("/api/inbox/:id/generate-multi-agent-reply", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // This claimed to generate a multi-agent reply draft and generated nothing.
+    //
+    // A false success on a settings write is quieter and no less wrong: the operator
+    // believes a value is in force that was never stored.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "This claimed to generate a multi-agent reply draft and generated nothing."
+    );
+  });
+  app.post("/api/meetings/:id/send-reminder", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // A meeting reminder is an external send and must go through the Production Action
+    // Gateway. This endpoint sent nothing and said it had.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "A meeting reminder is an external send and must go through the Production Action Gateway. This endpoint sent nothing and said it had."
+    );
+  });
+  app.post("/api/leads/:id/email", (req: Request, res: Response) => {
+    // P1.13 — Was `res.json({ success: true })`.
+    //
+    // Emailing a lead is an external send and must go through the Production Action
+    // Gateway. This endpoint sent nothing and said it had.
+    //
+    // A false success on an external action is the worst shape this defect takes: the
+    // operator believes a customer received something, so nobody looks again.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      "Emailing a lead is an external send and must go through the Production Action Gateway. This endpoint sent nothing and said it had."
+    );
+  });
 
   app.get("/api/dashboard", async (req: Request, res: Response) => {
     try {
