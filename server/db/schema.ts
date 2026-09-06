@@ -425,11 +425,36 @@ export const aiRunLogs = pgTable(
     actionType: varchar('action_type', { length: 50 }),
     summary: text('summary'),
     status: varchar('status', { length: 50 }),
+
+    /**
+     * P1.8 — What the model was actually shown, and what it cost (§21).
+     *
+     * Without these a bad reply cannot be explained. "Why did it say that?" has no answer
+     * when the prompt was assembled by concatenating whatever happened to be in scope and
+     * then discarded. `contextIds` is the manifest from buildContextBundle: every record that
+     * went in, addressable, so the exact input can be reconstructed afterwards.
+     *
+     * `promptHash` and `contextHash` are separate on purpose. The same context can produce a
+     * different prompt if the template changes, and the same prompt can be built from
+     * different context if selection changes — telling those two apart is the difference
+     * between "we changed the wording" and "we showed it different facts".
+     */
+    model: varchar('model', { length: 100 }),
+    promptHash: varchar('prompt_hash', { length: 64 }),
+    contextHash: varchar('context_hash', { length: 64 }),
+    contextIds: text('context_ids'),
+    promptTokens: integer('prompt_tokens'),
+    completionTokens: integer('completion_tokens'),
+    /** Cost in minor units, so a fraction of a penny cannot drift a total (see P1.7). */
+    costMinor: integer('cost_minor'),
+    currency: varchar('currency', { length: 3 }),
+
     createdAt: timestamp('created_at').defaultNow().notNull(),
   },
-  // Per-tenant cost and usage attribution is impossible without this column; that it was
-  // missing is part of why S46 (budgets) has nothing to enforce against. The remaining
-  // reproducibility fields — model id, prompt version, tokens, cost — are P3.5.
+  // Per-tenant cost and usage attribution is impossible without organization_id; that it was
+  // missing is part of why S46 (budgets) has nothing to enforce against. The reproducibility
+  // fields above landed with P1.8; what remains for P3.5 is the prompt VERSION (the template
+  // identity, as distinct from the hash of one rendering of it).
   (t) => [index('ai_run_logs_org_idx').on(t.organizationId, t.createdAt)]
 );
 

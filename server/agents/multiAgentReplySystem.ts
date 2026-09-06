@@ -1,4 +1,5 @@
 import { pricingContextFor } from '../../shared/domain/quote';
+import { buildContextBundle } from '../domain/contextBundle';
 import { STANDARD_TIER } from '../../shared/domain/pricing';
 import { safeGenerateJSON } from "../geminiClient";
 import { Conversation, ConversationMemory, CompanyBrain, EmailMessage, Meeting } from "../../shared/domain/models";
@@ -301,15 +302,46 @@ export async function executeMultiAgentReplyPipeline(
   const lastMsg = thread[thread.length - 1];
   const firstName = conversation.contactName.replace(/^Dr\.\s+/i, "").split(" ")[0] || conversation.contactName;
 
-  // Build full chronological transcript
-  const fullTranscript = thread
-    .map(
-      (m, idx) =>
-        `[Message #${idx + 1}] ${
-          m.sender === "PROSPECT" ? `${conversation.contactName} (PROSPECT)` : "Nayem Abedin (FOUNDER)"
-        } (${m.sentAt}):\nSubject: ${m.subject}\nBody:\n${m.bodyText}`
-    )
-    .join("\n\n---\n\n");
+  // P1.8 — This was the whole thread, every message, unbounded:
+  //
+  //     const fullTranscript = thread.map((m, idx) => `[Message #${idx+1}] ...`)
+  //                                  .join("\n\n---\n\n");
+  //
+  // A long thread silently exceeded the context window, so the model saw a truncation nobody
+  // chose the shape of; cost grew without limit on a path with no budget check; and nothing
+  // recorded what the model was shown, so a bad reply could not be explained afterwards.
+  //
+  // Selection is now an explicit rule in server/domain/contextBundle.ts, and it emits a
+  // manifest of exactly which records went in. Superseded facts and lapsed quotes are
+  // excluded by that rule rather than by anyone remembering to filter them here.
+  const contextBundle = buildContextBundle({
+    thread: thread.map((m, idx) => ({
+      id: (m as any).id ?? `turn_${idx + 1}`,
+      sender: m.sender === "PROSPECT" ? "PROSPECT" : "AGENT",
+      subject: m.subject ?? null,
+      bodyText: m.bodyText ?? null,
+      sentAt: m.sentAt ?? null,
+    })),
+    // These arrive empty until the pipeline passes them in; the bundle reports what it was
+    // given rather than inventing a default, so an empty section means "nothing was loaded"
+    // and not "there is nothing".
+    facts: (conversation as any).selectedFacts ?? [],
+    openQuestions: (conversation as any).openQuestions ?? [],
+    unresolvedObjections: (conversation as any).unresolvedObjections ?? [],
+    outstandingCommitments: (conversation as any).outstandingCommitments ?? [],
+    quotes: (conversation as any).quotes ?? [],
+    companyFacts: (conversation as any).companyFacts ?? [],
+    now: new Date().toISOString(),
+  });
+
+  const fullTranscript = contextBundle.promptBlock;
+
+  // Recorded so the exact input can be reconstructed from the run log (§21).
+  console.log(
+    `[multiAgentReply] context ${contextBundle.contextHash}: ` +
+      `${contextBundle.contextIds.length} record(s), ${contextBundle.totalChars} chars, ` +
+      `${contextBundle.excluded.length} excluded.`
+  );
 
   // -------------------------------------------------------------
   // AGENT 1 & 2: Prospect Persona Classifier & Questions Extractor

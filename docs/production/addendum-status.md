@@ -801,6 +801,134 @@ section is untouched.
 
 ---
 
+## 1i. Remediation progress — P0.0 (rules) and P1.8 (landed 2026-09-06)
+
+### P0.0 — I had been calling all of this the user's to do, and only part of it is
+
+`firestore.rules` said `allow read, write: if true`. Every document was readable and writable
+by anyone holding the public API key committed to this repository. That is the reachable
+prompt-injection channel S4 and S18 describe — the knowledge and company-brain documents are
+stringified into every outbound prompt — and it is how the send-mode switch is flipped, since
+`oauth_connections` is a top-level collection and the gateway takes the last matching row's
+token.
+
+The rules file is code, and writing it was mine to do. The browser bundle imports
+`firebase/auth` and never `firebase/firestore`: every read and write goes through the Express
+API. So no legitimate *client* touches Firestore, and **deny-all is the correct rule** rather
+than a conservative one — anything narrower would permit access nobody uses.
+
+**They are not deployable yet, and the file says so at the top.** The server reaches Firestore
+with the *client* SDK, unauthenticated: `server/firebase.ts` imports `signInAnonymously` and
+never calls it, with a comment recording that anonymous auth was removed *because* the rules
+were open. Rules apply to the client SDK, so deploying this before the server moves to
+firebase-admin would deny the server and stop the application.
+
+**That reorders the roadmap: P0.6 blocks P0.0 rather than following it.** And P0.6 is itself
+blocked — firebase-admin has no credentials in this environment. Measured, not assumed: no
+`GOOGLE_APPLICATION_CREDENTIALS`, no service-account file, no ADC, and
+`applicationDefault()` fails with "Could not load the default credentials". So the migration of
+~102 call sites across 14 files can be *written* but not *verified*, and an unverified rewrite of
+every datastore call site is exactly the change a clean compile fails to justify.
+
+What unblocks it is one thing: a service account JSON at `GOOGLE_APPLICATION_CREDENTIALS`, or
+`gcloud auth application-default login`.
+
+### P1.8 — the prompt was assembled and then thrown away
+
+    const fullTranscript = thread.map((m, idx) => `[Message #${idx+1}] ... ${m.bodyText}`)
+                                 .join("\n\n---\n\n");
+
+The entire thread, every message, unbounded. A long thread silently exceeded the context window,
+so the model saw a truncation nobody chose the shape of. Cost grew without limit on a path with
+no budget check. And nothing recorded what the model was shown — which is why this is a
+correctness section rather than a performance one. "Why did it say that?" has no answer when the
+input was assembled implicitly and discarded.
+
+Context is now **selected by explicit rule from addressable records**, and the ids of the
+records selected are recorded. Every item in the prompt can be named, and the same inputs
+produce the same bundle. That last property is what makes a prompt hash mean anything, and it is
+a property the module has to work for: no wall-clock read, and ordering ties broken by id so two
+records observed in the same second cannot come back in whatever order the datastore returned.
+
+The selection rules connect the last two tranches. A **superseded fact** is excluded (§20) —
+including it would put a value the customer has since corrected back into the prompt as current.
+A **withdrawn or expired quote** is excluded (§24) — a lapsed offer must not be restated as
+though it were still open. Both exclusions are *reported* with a reason, because a record dropped
+silently is indistinguishable from one that was never there.
+
+Untrusted records are labelled where they render. That does not replace the structural fencing
+in `lib/promptAssembly` — that is what actually separates authority — but a bundle that rendered
+a model's paraphrase of a customer email indistinguishably from an operator-entered fact would
+undo the provenance tiering P1.6 established (§18).
+
+### Four defects in four lines of ledger code
+
+    try {
+      const quotes = await ledgerService.getQuotes ? await ledgerService.getQuotes(input.identity.email) : [];
+      ...
+    } catch(e){}
+
+`getQuotes(contactId: string)` was passed an **email**, so the query was
+`where(contactId == "alice@example.com")` and matched nothing — **the quote lookup has never
+returned a row in the life of this code**. The `await ledgerService.getQuotes` ternary awaits a
+method *reference*, which is always truthy, so the guard checked nothing. And the empty catch
+made a datastore failure indistinguishable from "this customer has no quote".
+
+That last one is the dangerous one, and it is §14 again: unknown is not permission. If we cannot
+establish whether a customer has a negotiated price, we must not proceed to send them list
+pricing. A customer being quoted the rack rate because a database was briefly down is a
+commercial error nobody would ever find. The failure is now recorded rather than swallowed.
+
+`knownRelevantFacts` was two hardcoded sentences about latency and calendar sync — identical for
+every customer, in a field the type describes as the facts relevant to *this* conversation. It is
+now whatever the caller selected, and **empty when nothing was selected**, which is honest.
+
+The three ledger reads that existed and were called by nothing — open questions, unresolved
+objections, outstanding commitments — now have somewhere to go.
+
+`ai_run_logs` gains `model`, `prompt_hash`, `context_hash`, `context_ids`, token counts and
+cost in minor units. `prompt_hash` and `context_hash` are separate deliberately: the same
+context can produce a different prompt if the template changes, and the same prompt can be built
+from different context if selection changes. Telling those apart is the difference between "we
+changed the wording" and "we showed it different facts".
+
+### Evidence
+
+`npm test`: **508 tests across 20 files**, up from 480. The 29 new ones are invariants and were
+**mutation-tested** — nine deliberate breakages (superseded facts re-entering the prompt, a
+lapsed quote included, the thread bound removed, the character budget disabled, ordering ties no
+longer broken by id, the hash covering ids only, untrusted material unlabelled, a model-derived
+fact treated as attested, exclusions no longer reported) — and **all nine were caught**.
+
+The fixture the addendum names specifically is implemented as written: *a superseded fact and a
+withdrawn quote yield a manifest excluding the superseded id and including the current quote id*.
+
+Two things worth recording about the work itself. `contextBundle.ts` was written **containing a
+raw NUL byte** — the second time in this branch — where a NUL is the correct hash delimiter but
+the raw byte makes the file binary to git and grep. `check-no-nul-bytes` caught it both times,
+which is the clearest evidence so far that the guardrail earns its place. And a test of mine
+failed for the right reason and the wrong cause: I asserted the superseded value `5000` was
+absent from the prompt, but `"15000"` contains `"5000"` — the identical substring trap that made
+the old pricing check accept `£4,499` as `£499`, reproduced by me one tranche later.
+
+### What changed status
+
+**S21 stays PARTIAL, and the reason is precise.** The builder, the manifest, the hash, the
+bounds and the run-log columns are real, and the composer uses them. What holds it short: the
+inbound pipeline does not yet *populate* the bundle — facts, ledgers and quotes arrive empty on
+the live path, so today the bundle carries the thread and nothing else. The selection rules are
+therefore proven by test and not yet exercised by data. Nothing writes an `ai_run_logs` row with
+the new columns either.
+
+**S20 stays PARTIAL.** Supersession is now respected by a *reader* as well as a writer, which is
+the half that was missing, but the PostgreSQL fact table remains unwritten and nothing re-checks
+a fact against the world.
+
+**S4 and S18 do not move.** The rules file is correct and undeployed; an undeployed rule is not a
+control. This document does not credit intent.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally

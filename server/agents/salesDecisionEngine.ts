@@ -602,6 +602,16 @@ export async function composeAutonomousSalesReply(input: {
   nextBestAction: NextBestActionResult;
   buyingStage: BuyingStage;
   rawInboundText: string;
+  /**
+   * P1.8 — Facts selected for THIS conversation, supplied by the caller.
+   *
+   * Passed in rather than looked up here, so the selection rule lives in one place
+   * (server/domain/contextBundle.ts) and this planner stays a function of its inputs. Absent
+   * means no selection was made and the plan carries no facts — which is honest — rather than
+   * the two hardcoded sentences about latency and calendar sync it used to carry for every
+   * customer regardless of who they were.
+   */
+  knownRelevantFacts?: string[];
   threadHistory?: EmailMessage[];
 }): Promise<{ subject: string; body: string; replyPlan: ReplyPlan }> {
   // S. AI SECURITY / RED TEAM TESTS
@@ -632,11 +642,46 @@ export async function composeAutonomousSalesReply(input: {
   }
 
   // F. FACT FRESHNESS & K. QUOTE SNAPSHOT
+  //
+  // P1.8 — This was:
+  //
+  //     try {
+  //       const quotes = await ledgerService.getQuotes ? await ledgerService.getQuotes(input.identity.email) : [];
+  //       ...
+  //     } catch(e){}
+  //
+  // Three defects in four lines. `getQuotes(contactId: string)` was passed an EMAIL, so the
+  // query was `where(contactId == "alice@example.com")` and matched nothing — the quote
+  // lookup has never returned a row in the life of this code. The `await ledgerService.getQuotes`
+  // ternary awaits a method REFERENCE, which is always truthy, so the guard checked nothing.
+  // And the empty catch meant that when the datastore was unavailable, the failure was
+  // indistinguishable from "this customer has no quote".
+  //
+  // That last one is the dangerous one. §14: unknown is not permission. If we cannot
+  // establish whether a customer has a negotiated price, we must not proceed to send them
+  // list pricing — so a lookup failure now BLOCKS rather than silently degrading to the
+  // default. A customer being quoted the rack rate because a database was briefly down is a
+  // commercial error nobody would ever find.
   let dynamicFacts = "";
-  try {
-     const quotes = await ledgerService.getQuotes ? await ledgerService.getQuotes(input.identity.email) : [];
-     if (quotes && quotes.length > 0) dynamicFacts += "Active Quote: " + JSON.stringify(quotes) + "\n";
-  } catch(e){}
+  let quoteLookupFailed: string | null = null;
+
+  const contactId = input.identity.contactId ?? null;
+  if (contactId === null) {
+    // No resolved contact means no quote can be looked up. Recorded, not swallowed.
+    quoteLookupFailed =
+      "No contact id resolved for this sender, so their quote history could not be read.";
+  } else {
+    try {
+      const quotes = await ledgerService.getQuotes(contactId);
+      if (quotes.length > 0) {
+        dynamicFacts += "Active Quote: " + JSON.stringify(quotes) + "\n";
+      }
+    } catch (e: any) {
+      quoteLookupFailed =
+        `Quote lookup failed for contact ${contactId}: ${e?.message ?? "unknown error"}.`;
+      console.error("[salesDecisionEngine] " + quoteLookupFailed);
+    }
+  }
 
   const firstName = input.identity.name?.replace(/^Dr\.\s+/i, "").split(" ")[0] || "there";
   const companyName = input.identity.company || "your team";
@@ -654,10 +699,12 @@ export async function composeAutonomousSalesReply(input: {
     purchaseReadiness: input.nextBestAction.pricingAllowed ? 70 : 40,
     meetingReadiness: input.nextBestAction.meetingLinkAllowed ? 80 : 35,
     questionsToAnswer: input.nextBestAction.questionsToAnswer,
-    knownRelevantFacts: [
-      `Abedin Voice AI operates at sub-500ms latency for natural phone conversations`,
-      `Syncs directly with Google Calendar and CRM systems`,
-    ],
+    // P1.8 — Was two hardcoded sentences about latency and calendar sync, identical for every
+    // customer, in a field the type describes as the facts relevant to THIS conversation. Real
+    // per-conversation facts now exist (P1.6) with provenance and supersession; selecting them
+    // is server/domain/contextBundle.ts. Until this planner is given a bundle it stays EMPTY
+    // rather than carrying a literal that reads as knowledge about the customer.
+    knownRelevantFacts: input.knownRelevantFacts ?? [],
     objections: input.emailUnderstanding.objections,
     missingInformation: input.nextBestAction.missingInformation,
     specialistsRequired: [
