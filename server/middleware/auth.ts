@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { firebaseAuth } from '../firebase';
+import { sendError, type ErrorCode } from '../lib/errors';
 
 declare global {
   namespace Express {
@@ -44,8 +45,8 @@ function devAuthAllowed(): boolean {
   );
 }
 
-function unauthorized(res: Response, message: string, code = 'AUTH_REQUIRED') {
-  return res.status(401).json({ error: { code, message } });
+function unauthorized(req: Request, res: Response, message: string, code = 'AUTH_REQUIRED') {
+  return sendError(req, res, code as ErrorCode, message, { status: 401 });
 }
 
 export const requireAuth = async (req: Request, res: Response, next: NextFunction) => {
@@ -61,13 +62,13 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       };
       return next();
     }
-    return unauthorized(res, 'A Bearer token is required.');
+    return unauthorized(req, res, 'A Bearer token is required.');
   }
 
   const token = authHeader.split('Bearer ')[1];
 
   if (!token || token.trim() === '') {
-    return unauthorized(res, 'Malformed Authorization header.');
+    return unauthorized(req, res, 'Malformed Authorization header.');
   }
 
   // P0.4 — The hardcoded "demo_bary" bearer token was removed. It minted a named user session
@@ -82,12 +83,12 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       '[auth] Firebase Auth is not initialised; refusing to verify tokens. ' +
         'This is a server misconfiguration, not a client error.'
     );
-    return res.status(503).json({
-      error: {
-        code: 'AUTH_UNAVAILABLE',
-        message: 'Authentication is not available on this server. Refusing to accept unverified credentials.',
-      },
-    });
+    return sendError(
+      req,
+      res,
+      'AUTH_UNAVAILABLE',
+      'Authentication is not available on this server. Refusing to accept unverified credentials.'
+    );
   }
 
   try {
@@ -96,6 +97,6 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
     next();
   } catch (error) {
     console.error('[auth] Token verification failed:', error);
-    return unauthorized(res, 'Invalid or expired token.', 'AUTH_INVALID');
+    return unauthorized(req, res, 'Invalid or expired token.', 'AUTH_INVALID');
   }
 };

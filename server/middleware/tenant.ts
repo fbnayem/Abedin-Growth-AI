@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { doc, getDoc } from 'firebase/firestore';
 import { firestore } from '../firebase';
+import { sendError, type ErrorCode } from '../lib/errors';
 import {
   attachTenant,
   isValidOrgId,
@@ -29,9 +30,9 @@ import {
  * say ACTIVE, the request is refused regardless of what the claim said.
  */
 
-/** Structured refusal. Never leaks the offending value back to the caller. */
-function denyTenant(res: Response, code: string, message: string) {
-  return res.status(403).json({ error: { code, message } });
+/** Structured refusal, through the one error function. Never leaks the offending value. */
+function denyTenant(req: Request, res: Response, code: string, message: string) {
+  return sendError(req, res, code as ErrorCode, message, { status: 403 });
 }
 
 let devBootstrapWarned = false;
@@ -214,15 +215,13 @@ export const resolveTenant = async (req: Request, res: Response, next: NextFunct
     // resolveTenant must be mounted after requireAuth. Reaching here without a user means the
     // chain is wired wrong; refusing is the only safe response.
     console.error('[tenant] resolveTenant reached without an authenticated user.');
-    return res.status(401).json({
-      error: { code: 'AUTH_REQUIRED', message: 'Authentication is required.' },
-    });
+    return sendError(req, res, 'AUTH_REQUIRED', 'Authentication is required.');
   }
 
   const outcome = resolveFromClaims(req);
   if (outcome.ok === false) {
     console.warn(`[tenant] ${outcome.code} for uid=${user.uid}: ${outcome.message}`);
-    return denyTenant(res, outcome.code, outcome.message);
+    return denyTenant(req, res, outcome.code, outcome.message);
   }
 
   const { orgId, source } = outcome.value;
@@ -230,7 +229,7 @@ export const resolveTenant = async (req: Request, res: Response, next: NextFunct
   const revocation = await checkMembershipRevoked(orgId, user.uid);
   if (revocation.revoked) {
     console.warn(`[tenant] ${revocation.code} for uid=${user.uid} org=${orgId}`);
-    return denyTenant(res, revocation.code, revocation.message);
+    return denyTenant(req, res, revocation.code, revocation.message);
   }
 
   attachTenant(req, { orgId, source, uid: user.uid });

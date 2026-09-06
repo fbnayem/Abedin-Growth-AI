@@ -158,3 +158,11 @@ jobs:
       # without blocking on doing all of them at once.
       - name: Prompt authority separation (ratchet)
         run: node scripts/check-prompt-authority.mjs
+
+      # P1.12 (§12) — One error envelope. A hand-built { error: ... } body looks identical to
+      # the real one and is not: it has no requestId, because only sendError knows about it,
+      # and it may echo an internal message the envelope would have kept in the log. That drift
+      # happened once already, WHILE removing it, and was caught by comparing actual HTTP
+      # responses rather than by reading the code.
+      - name: All errors go through the one envelope
+        run: node scripts/check-error-envelope.mjs

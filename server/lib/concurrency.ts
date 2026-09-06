@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { runTransaction, type DocumentReference } from 'firebase/firestore';
 import { firestore } from '../firebase';
+import { sendError } from './errors';
 
 /**
  * P1.3 — OPTIMISTIC CONCURRENCY.
@@ -211,7 +212,11 @@ export async function mutateWithVersion<T extends Record<string, unknown>>(
  * Translate an outcome into an HTTP response. One place, so every endpoint answers the same
  * way and a client can branch on `error.code` rather than on prose.
  */
-export function sendMutationOutcome(res: Response, outcome: MutationOutcome): Response {
+export function sendMutationOutcome(
+  req: Request,
+  res: Response,
+  outcome: MutationOutcome
+): Response {
   // Written as `=== false` first, deliberately. `if (outcome.ok)` does not narrow the negative
   // branch of this union for TypeScript, and the failure mode is that the error cases silently
   // stop being type-checked.
@@ -220,19 +225,13 @@ export function sendMutationOutcome(res: Response, outcome: MutationOutcome): Re
       case 'VERSION_CONFLICT':
         // 409 with the current version: the error carries what the caller needs to recover.
         if (outcome.currentVersion >= 0) res.setHeader('ETag', `"${outcome.currentVersion}"`);
-        return res.status(409).json({
-          error: {
-            code: 'VERSION_CONFLICT',
-            message: outcome.message,
-            details: { currentVersion: outcome.currentVersion },
-          },
+        return sendError(req, res, 'VERSION_CONFLICT', outcome.message, {
+          details: { currentVersion: outcome.currentVersion },
         });
       case 'NOT_FOUND':
-        return res.status(404).json({ error: { code: 'NOT_FOUND', message: outcome.message } });
+        return sendError(req, res, 'NOT_FOUND', outcome.message);
       case 'STORE_UNAVAILABLE':
-        return res
-          .status(503)
-          .json({ error: { code: 'STORE_UNAVAILABLE', message: outcome.message } });
+        return sendError(req, res, 'STORE_UNAVAILABLE', outcome.message);
     }
   }
 
@@ -242,16 +241,20 @@ export function sendMutationOutcome(res: Response, outcome: MutationOutcome): Re
 
 /** Refusal for a write that did not state a version. 428, with the current version attached. */
 export function sendVersionRequired(
+  req: Request,
   res: Response,
   problem: Extract<ExpectedVersion, { ok: false }>,
   currentVersion: number | null
 ): Response {
   if (currentVersion !== null) res.setHeader('ETag', `"${currentVersion}"`);
-  return res.status(428).json({
-    error: {
-      code: problem.code,
-      message: problem.message,
+  return sendError(
+    req,
+    res,
+    problem.code === 'VERSION_MALFORMED' ? 'VALIDATION_ERROR' : 'VERSION_REQUIRED',
+    problem.message,
+    {
+      status: 428,
       details: currentVersion === null ? undefined : { currentVersion },
-    },
-  });
+    }
+  );
 }

@@ -67,9 +67,16 @@ describe('§36 — the limit is actually enforced', () => {
     call(mw, req);
     const { res } = call(mw, req);
 
+    // P1.12 — The recovery hints live under `details`, which is where the shared envelope puts
+    // structured data. They were previously siblings of `code` and `message`, a second shape
+    // that a client would have had to special-case for this one endpoint.
     expect(res.body.error.code).toBe('PROVIDER_RATE_LIMITED');
-    expect(res.body.error.retryable).toBe(true);
-    expect(typeof res.body.error.retryAfterSeconds).toBe('number');
+    expect(res.body.error.details.retryable).toBe(true);
+    expect(typeof res.body.error.details.retryAfterSeconds).toBe('number');
+
+    // And the envelope's own guarantee: a failure is traceable to a log line.
+    expect(res.body.error).toHaveProperty('requestId');
+    expect(res.body.error).toHaveProperty('message');
   });
 
   it('sets Retry-After and the standard rate-limit headers', () => {

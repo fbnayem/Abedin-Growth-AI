@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { outboxService } from '../services/outbox.service.ts';
 import { orgScope } from '../tenancy/orgScope.ts';
+import { sendCaught, sendError, type ErrorCode } from '../lib/errors.ts';
 
 /**
  * P1.2 — The human review console.
@@ -63,8 +64,7 @@ outboxRouter.get('/', async (req, res) => {
 
     res.json(items);
   } catch (e: any) {
-    console.error('[outbox] list failed:', e?.message);
-    res.status(500).json({ error: { code: 'OUTBOX_LIST_FAILED', message: 'Failed to fetch outbox.' } });
+    sendCaught(req, res, e);
   }
 });
 
@@ -73,12 +73,11 @@ outboxRouter.get('/:id', async (req, res) => {
     const orgId = orgScope(req);
     const job = await outboxService.getJob(orgId, req.params.id);
     if (!job) {
-      return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such outbox job.' } });
+      return sendError(req, res, 'NOT_FOUND', 'No such outbox job.');
     }
     res.json(job);
   } catch (e: any) {
-    console.error('[outbox] get failed:', e?.message);
-    res.status(500).json({ error: { code: 'OUTBOX_GET_FAILED', message: 'Failed to fetch outbox job.' } });
+    sendCaught(req, res, e);
   }
 });
 
@@ -88,14 +87,14 @@ outboxRouter.post('/:id/approve', async (req, res) => {
     const result = await outboxService.approveForSending(orgId, req.params.id, actorOf(req));
 
     if (result.ok === false) {
-      const status = result.code === 'NOT_FOUND' ? 404 : 409;
-      return res.status(status).json({ error: { code: result.code, message: result.message } });
+      return sendError(req, res, result.code as ErrorCode, result.message, {
+        status: result.code === 'NOT_FOUND' ? 404 : 409,
+      });
     }
 
     res.json({ success: true, message: 'Outbox item approved for sending.' });
   } catch (e: any) {
-    console.error('[outbox] approve failed:', e?.message);
-    res.status(500).json({ error: { code: 'OUTBOX_APPROVE_FAILED', message: 'Approval failed.' } });
+    sendCaught(req, res, e);
   }
 });
 
@@ -106,13 +105,13 @@ outboxRouter.post('/:id/reject', async (req, res) => {
     const result = await outboxService.cancelJob(orgId, req.params.id, actorOf(req), reason);
 
     if (result.ok === false) {
-      const status = result.code === 'NOT_FOUND' ? 404 : 409;
-      return res.status(status).json({ error: { code: result.code, message: result.message } });
+      return sendError(req, res, result.code as ErrorCode, result.message, {
+        status: result.code === 'NOT_FOUND' ? 404 : 409,
+      });
     }
 
     res.json({ success: true, message: 'Outbox item cancelled.' });
   } catch (e: any) {
-    console.error('[outbox] reject failed:', e?.message);
-    res.status(500).json({ error: { code: 'OUTBOX_REJECT_FAILED', message: 'Rejection failed.' } });
+    sendCaught(req, res, e);
   }
 });

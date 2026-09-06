@@ -23,6 +23,7 @@ import {
   parseOrRespond,
 } from "./server/lib/validation";
 import { normalizeEmailKey } from "./server/lib/emailKey";
+import { requestId, sendCaught, sendError, terminalErrorHandler } from "./server/lib/errors";
 import {
   expectedVersionFrom,
   mutateWithVersion,
@@ -91,6 +92,11 @@ async function startServer() {
   // Ordering note: this parser fix is landing TOGETHER with the HMAC verification below.
   // Fixing the parser on its own would convert a permanently-failing endpoint into a working
   // unauthenticated one that any caller could use to mark meetings CONFIRMED.
+  // P1.12 — Before everything: an id on every request, echoed in the response header and in
+  // every error body, so a user reporting a failure can be traced to a log line without being
+  // asked to reproduce it.
+  app.use(requestId);
+
   app.use('/api/signature/webhook', express.raw({ type: '*/*' }));
   app.use(express.json());
 
@@ -209,7 +215,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       snap.forEach((d: any) => items.push(d.data()));
       // filter for leads
       res.json(items.filter(i => i.type === 'LEAD' || !i.type));
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   /**
@@ -267,7 +273,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const payload = buildContactDocument(input, 'lead', 'LEAD', 'NEW');
       await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
       res.json(payload);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.get("/api/inbox", async (req: Request, res: Response) => {
@@ -276,7 +282,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -301,7 +307,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       };
       await addDoc(collection(firestore, orgPath(orgScope(req), 'knowledge')), payload);
       res.json(payload);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.get("/api/knowledge", async (req: Request, res: Response) => {
@@ -310,7 +316,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.get("/api/logs", async (req: Request, res: Response) => {
@@ -319,7 +325,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.get("/api/pipeline", async (req: Request, res: Response) => {
@@ -329,7 +335,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -366,7 +372,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       // Tell the caller the current version in the same response that refuses the write, so
       // recovering from the error is one retry rather than a second round trip.
       const snap = await getDoc(ref);
-      return sendVersionRequired(res, expected, versionOf(snap.exists() ? snap.data() : null, snap.exists()));
+      return sendVersionRequired(req, res, expected, versionOf(snap.exists() ? snap.data() : null, snap.exists()));
     }
 
     // `version` and `expectedVersion` are transport, not content: they must not be persisted
@@ -374,32 +380,32 @@ app.get("/api/health", (req: Request, res: Response) => {
     const { expectedVersion: _ignored, version: _alsoIgnored, ...body } = payload as any;
 
     const outcome = await mutateWithVersion(ref, expected.value, () => body);
-    return sendMutationOutcome(res, outcome);
+    return sendMutationOutcome(req, res, outcome);
   }
 
   app.get("/api/company-brain", async (req: Request, res: Response) => {
     try {
       return await readSingleton(req, res, 'company_brain');
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.post("/api/company-brain", async (req: Request, res: Response) => {
     try {
       return await writeSingleton(req, res, 'company_brain', req.body || {});
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
   app.get("/api/settings", async (req: Request, res: Response) => {
     try {
       return await readSingleton(req, res, 'settings');
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.post("/api/settings", async (req: Request, res: Response) => {
     try {
       return await writeSingleton(req, res, 'settings', req.body || {});
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -407,7 +413,7 @@ app.get("/api/health", (req: Request, res: Response) => {
     try {
       const result = await simulatePitchBattle(req.body);
       res.json(result);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -420,7 +426,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const expected = expectedVersionFrom(req);
       if (expected.ok === false) {
         const snap = await getDoc(ref);
-        return sendVersionRequired(res, expected, versionOf(snap.exists() ? snap.data() : null, snap.exists()));
+        return sendVersionRequired(req, res, expected, versionOf(snap.exists() ? snap.data() : null, snap.exists()));
       }
 
       // Generated BEFORE the transaction: it is an external model call, and produceNext runs
@@ -428,8 +434,8 @@ app.get("/api/health", (req: Request, res: Response) => {
       const result = await generateCompanyBrain(req.body);
 
       const outcome = await mutateWithVersion(ref, expected.value, () => result as any);
-      return sendMutationOutcome(res, outcome);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+      return sendMutationOutcome(req, res, outcome);
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -453,7 +459,7 @@ app.get("/api/health", (req: Request, res: Response) => {
         results.push(payload);
       }
       res.json(results);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.post("/api/investors/batch-generate", async (req: Request, res: Response) => {
@@ -476,7 +482,7 @@ app.get("/api/health", (req: Request, res: Response) => {
         results.push(payload);
       }
       res.json(results);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.post("/api/partners/batch-generate", async (req: Request, res: Response) => {
@@ -499,7 +505,7 @@ app.get("/api/health", (req: Request, res: Response) => {
         results.push(payload);
       }
       res.json(results);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -512,7 +518,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       // impossible to use correctly rather than merely easy to use incorrectly.
       snap.forEach((d: any) => items.push({ ...d.data(), version: versionOf(d.data(), true) }));
       res.json(items);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   /**
@@ -533,7 +539,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const docRef = doc(firestore, orgPath(orgScope(req), 'campaigns'), req.params.id);
       const snap = await getDoc(docRef);
       if (!snap.exists()) {
-        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such campaign.' } });
+        return sendError(req, res, 'NOT_FOUND', 'No such campaign.');
       }
 
       const current: any = snap.data();
@@ -544,7 +550,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       // rule was expressible when this was a toggle.
       const verdict = assertTransition(CAMPAIGN, current.status, desired);
       if (verdict.ok === false) {
-        return res.status(422).json({ error: { code: verdict.code, message: verdict.message } });
+        return sendError(req, res, verdict.code, verdict.message, { status: 422 });
       }
       if (verdict.changed === false) {
         res.setHeader('ETag', `"${currentVersion}"`);
@@ -552,15 +558,15 @@ app.get("/api/health", (req: Request, res: Response) => {
       }
 
       const expected = expectedVersionFrom(req);
-      if (expected.ok === false) return sendVersionRequired(res, expected, currentVersion);
+      if (expected.ok === false) return sendVersionRequired(req, res, expected, currentVersion);
 
       const outcome = await mutateWithVersion(docRef, expected.value, (existing: any) => ({
         ...existing,
         status: desired,
         statusChangedAt: new Date().toISOString(),
       }));
-      return sendMutationOutcome(res, outcome);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+      return sendMutationOutcome(req, res, outcome);
+    } catch(e: any) { sendCaught(req, res, e); }
   };
 
   // Both spellings: /status is what it does, /toggle is what existing callers send.
@@ -596,7 +602,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       // tenant.
       const snap = await getDoc(docRef);
       if (!snap.exists()) {
-        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such opportunity.' } });
+        return sendError(req, res, 'NOT_FOUND', 'No such opportunity.');
       }
 
       const current: any = snap.data();
@@ -607,7 +613,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       if (verdict.ok === false) {
         // 422, not 400: the request is well-formed, it is the state change that is not
         // permitted. A client can tell "you sent nonsense" from "you may not do that".
-        return res.status(422).json({ error: { code: verdict.code, message: verdict.message } });
+        return sendError(req, res, verdict.code, verdict.message, { status: 422 });
       }
       if (verdict.changed === false) {
         res.setHeader('ETag', `"${currentVersion}"`);
@@ -615,15 +621,15 @@ app.get("/api/health", (req: Request, res: Response) => {
       }
 
       const expected = expectedVersionFrom(req);
-      if (expected.ok === false) return sendVersionRequired(res, expected, currentVersion);
+      if (expected.ok === false) return sendVersionRequired(req, res, expected, currentVersion);
 
       const outcome = await mutateWithVersion(docRef, expected.value, (existing: any) => ({
         ...existing,
         stage: desired,
         stageChangedAt: new Date().toISOString(),
       }));
-      return sendMutationOutcome(res, outcome);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+      return sendMutationOutcome(req, res, outcome);
+    } catch(e: any) { sendCaught(req, res, e); }
   };
 
   app.put("/api/pipeline/:id/stage", setOpportunityStage);
@@ -638,14 +644,13 @@ app.get("/api/health", (req: Request, res: Response) => {
   // paid. A stub that fabricates success for a FINANCIAL action is worse than a missing
   // endpoint, so it now refuses honestly. Real payments go through /api/stripe.
   app.post("/api/meetings/:id/process-payment", (req: Request, res: Response) =>
-    res.status(501).json({
-      error: {
-        code: 'NOT_IMPLEMENTED',
-        message:
-          'Payment processing is not implemented on this endpoint. It previously returned ' +
-          'success without taking payment. Use the Stripe checkout flow (/api/stripe/create-checkout-session).',
-      },
-    })
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      'Payment processing is not implemented on this endpoint. It previously returned ' +
+        'success without taking payment. Use the Stripe checkout flow (/api/stripe/create-checkout-session).'
+    )
   );
   app.post("/api/meetings/:id/send-recovery-email", (req: Request, res: Response) => res.json({ success: true }));
   app.post("/api/inbox/auto-reply-all", (req: Request, res: Response) => res.json({ success: true, count: 5 }));
@@ -665,9 +670,7 @@ app.get("/api/health", (req: Request, res: Response) => {
     try {
       const { enabled, reason } = req.body || {};
       if (typeof enabled !== 'boolean') {
-        return res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: '`enabled` must be a boolean.' },
-        });
+        return sendError(req, res, 'VALIDATION_ERROR', '`enabled` must be a boolean.');
       }
       // Actor attribution. requireAuth currently admits anonymous callers (fixed in P0.4), so
       // record what we actually know rather than inventing an operator identity.
@@ -675,8 +678,11 @@ app.get("/api/health", (req: Request, res: Response) => {
       const { state, accepted, message } = await setCircuitBreaker(enabled, reason, actor);
       res.json({ success: accepted, message, circuitBreaker: state });
     } catch (e: any) {
-      res.status(500).json({
-        error: { code: 'KILL_SWITCH_FAILED', message: e.message },
+      // The kill switch failing to record a decision is the failure mode P0.3 exists to
+      // remove, so it is logged in full — but e.message is the datastore's text and stays
+      // server-side.
+      sendError(req, res, 'INTERNAL_ERROR', 'The kill switch decision could not be recorded.', {
+        cause: e,
       });
     }
   });
@@ -690,7 +696,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/dashboard", async (req: Request, res: Response) => {
     try {
-      if (!firestore) return res.status(500).json({ error: "Firebase not initialized" });
+      if (!firestore) return sendError(req, res, 'STORE_UNAVAILABLE', 'The datastore is not available.');
       const orgId = orgScope(req);
 
       const contactsSnap = await getDocs(collection(firestore, orgPath(orgId, 'contacts')));
@@ -735,7 +741,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       });
     } catch (e) {
       console.error(e);
-      res.status(500).json({ error: "Failed to load dashboard" });
+      sendCaught(req, res, e);
     }
   });
 
@@ -798,7 +804,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.post("/api/investors", async (req: Request, res: Response) => {
@@ -808,7 +814,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const payload = buildContactDocument(input, 'inv', 'INVESTOR', 'DISCOVERED');
       await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
       res.json(payload);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -823,7 +829,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.post("/api/partners", async (req: Request, res: Response) => {
@@ -833,7 +839,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const payload = buildContactDocument(input, 'part', 'PARTNER', 'DISCOVERED');
       await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
       res.json(payload);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -856,14 +862,14 @@ app.get("/api/health", (req: Request, res: Response) => {
     const { accessToken, expiresIn, accountEmail } = req.body || {};
 
     if (typeof accessToken !== 'string' || accessToken.trim() === '' || isFabricatedProviderId(accessToken) || accessToken === 'mock_token') {
-      return res.status(400).json({
-        error: {
-          code: 'PROVIDER_NOT_CONFIGURED',
-          message:
-            'A real Gmail access token is required. Refusing to store a placeholder credential, ' +
-            'which would make the gateway report sends that never happened.',
-        },
-      });
+      return sendError(
+        req,
+        res,
+        'PROVIDER_UNAVAILABLE',
+        'A real Gmail access token is required. Refusing to store a placeholder credential, ' +
+          'which would make the gateway report sends that never happened.',
+        { status: 400 }
+      );
     }
 
     // TODO(P1 — tenant resolution): org is hardcoded here as everywhere else in this file.
@@ -894,7 +900,8 @@ app.get("/api/health", (req: Request, res: Response) => {
       res.json({ success: true });
     } catch(e) {
       console.error("Token sync error:", e);
-      res.status(500).json({ error: { code: 'PROVIDER_UNAVAILABLE', message: e.message } });
+      // e.message here is the provider's own text; it goes to the log, not to the caller.
+      sendError(req, res, 'PROVIDER_UNAVAILABLE', 'The provider could not be reached.', { cause: e });
     }
   });
 
@@ -914,7 +921,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       const result = validateAndEnforceNoPhonePolicy(text || "");
       res.json(result);
     } catch (error: any) {
-      res.status(500).json({ error: error.message || "Failed to validate text" });
+      sendCaught(req, res, error);
     }
   });
 
@@ -965,7 +972,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       res.json({ success: true, report });
     } catch (error: any) {
       console.error("Run test matrix error:", error);
-      res.status(500).json({ error: error.message || "Failed to run test matrix" });
+      sendCaught(req, res, error);
     }
   });
 
@@ -1034,7 +1041,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
 
       await addDoc(collection(firestore, orgPath(orgScope(req), 'campaigns')), newCampaign);
       res.json(newCampaign);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
 
@@ -1075,7 +1082,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       res.json(payload);
     } catch(e: any) {
       console.error(e);
-      res.status(500).json({error: e.message});
+      sendCaught(req, res, e);
     }
   });
 
@@ -1102,15 +1109,11 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
 
       const startMs = new Date(scheduledTime).getTime();
       if (!scheduledTime || !Number.isFinite(startMs)) {
-        return res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: '`scheduledTime` must be a valid date-time.' },
-        });
+        return sendError(req, res, 'VALIDATION_ERROR', '`scheduledTime` must be a valid date-time.');
       }
       const duration = Number.isFinite(Number(durationMinutes)) ? Number(durationMinutes) : 30;
       if (duration <= 0 || duration > 480) {
-        return res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: '`durationMinutes` must be between 1 and 480.' },
-        });
+        return sendError(req, res, 'VALIDATION_ERROR', '`durationMinutes` must be between 1 and 480.');
       }
       const endMs = startMs + duration * 60_000;
 
@@ -1131,13 +1134,13 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         // The invariant: on a confirmed conflict, do NOT create. Zero provider requests, and
         // zero local records that would later be treated as a real booking.
         console.warn(`[meetings] Refused booking: ${conflicts.length} overlapping meeting(s).`);
-        return res.status(409).json({
-          error: {
-            code: 'SCHEDULE_CONFLICT',
-            message: `Requested slot overlaps ${conflicts.length} existing meeting(s).`,
-            details: { conflicts },
-          },
-        });
+        return sendError(
+          req,
+          res,
+          'VERSION_CONFLICT',
+          `Requested slot overlaps ${conflicts.length} existing meeting(s).`,
+          { status: 409, details: { conflicts } }
+        );
       }
 
       const payload = {
@@ -1155,7 +1158,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       };
       await addDoc(collection(firestore, orgPath(orgScope(req), 'meetings')), payload);
       res.json(payload);
-    } catch(e: any) { res.status(500).json({error: { code: 'MEETING_CREATE_FAILED', message: e.message }}); }
+    } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.get("/api/meetings", async (req: Request, res: Response) => {
@@ -1172,7 +1175,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         meetLink: m.meetUrl,
       }));
       res.json(mapped);
-    } catch(e) { console.error(e); res.status(500).json({error: e.message}); }
+    } catch(e) { console.error(e); sendCaught(req, res, e); }
   });
 
 
@@ -1200,7 +1203,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       res.json(result);
     } catch(e: any) {
       console.error(e);
-      res.status(500).json({ error: e.message });
+      sendCaught(req, res, e);
     }
   });
 
@@ -1253,9 +1256,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
   const verification = verifyDocuSignSignature(req, req.body as unknown as Buffer);
   if (!verification.ok) {
     console.warn(`[signature/webhook] Rejected unverified webhook: ${verification.reason}`);
-    return res.status(401).json({
-      error: { code: 'WEBHOOK_VERIFICATION_FAILED', message: verification.reason },
-    });
+    return sendError(req, res, 'WEBHOOK_VERIFICATION_FAILED', verification.reason);
   }
 
   try {
@@ -1314,7 +1315,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
     res.status(200).send("OK");
   } catch(e) {
     console.error("DocuSign webhook error", e);
-    res.status(500).json({ error: { code: 'WEBHOOK_PROCESSING_FAILED', message: 'Error' } });
+    sendError(req, res, 'INTERNAL_ERROR', 'The webhook could not be processed.', { cause: e });
   }
 });
 
@@ -1327,9 +1328,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
     const verification = verifyPubSubToken(req);
     if (!verification.ok) {
       console.warn(`[webhooks/gmail] Rejected unverified push: ${verification.reason}`);
-      return res.status(401).json({
-        error: { code: 'WEBHOOK_VERIFICATION_FAILED', message: verification.reason },
-      });
+      return sendError(req, res, 'WEBHOOK_VERIFICATION_FAILED', verification.reason);
     }
 
     try {
@@ -1373,6 +1372,12 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
   }
 
   outboxWorker.start();
+
+  // P1.12 — Terminal error handler. Mounted LAST so nothing gets past it, including an
+  // async rejection Express would otherwise leave as an unhandled promise with the request
+  // hanging until the client times out. An unrecognised error becomes a generic 500 carrying
+  // the requestId; the original goes to the log and never to the caller.
+  app.use(terminalErrorHandler);
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Abedin Growth AI] Server running at http://0.0.0.0:${PORT}`);

@@ -86,6 +86,11 @@ const {
 
 const ref = (path: string) => ({ path }) as any;
 
+/** Minimal Express request double. requestId is what the error envelope reports back. */
+function makeReq(over: Record<string, unknown> = {}) {
+  return { headers: {}, body: {}, method: 'POST', originalUrl: '/api/thing', requestId: 'req-test', ...over } as any;
+}
+
 /** Minimal Express response double: status code, body and headers are what a caller sees. */
 function makeRes() {
   const captured: { status: number; body: any; headers: Record<string, string> } = {
@@ -179,7 +184,7 @@ describe('§14 — a write without an expected version is refused', () => {
 
   it('answers 428 with the current version, so recovery is one retry', () => {
     const { res, captured } = makeRes();
-    sendVersionRequired(res, { ok: false, code: 'VERSION_REQUIRED', message: 'x' }, 4);
+    sendVersionRequired(makeReq(), res, { ok: false, code: 'VERSION_REQUIRED', message: 'x' }, 4);
     expect(captured.status).toBe(428);
     expect(captured.body.error.details.currentVersion).toBe(4);
     expect(captured.headers.ETag).toBe('"4"');
@@ -299,7 +304,7 @@ describe('§12 — the outcome maps to one HTTP shape', () => {
   it('success carries the new version in the body and the ETag', async () => {
     const outcome = await mutateWithVersion(ref('d/1'), 0, () => ({ n: 1 }));
     const { res, captured } = makeRes();
-    sendMutationOutcome(res, outcome);
+    sendMutationOutcome(makeReq(), res, outcome);
     expect(captured.status).toBe(200);
     expect(captured.body.version).toBe(1);
     expect(captured.headers.ETag).toBe('"1"');
@@ -310,7 +315,7 @@ describe('§12 — the outcome maps to one HTTP shape', () => {
     const stale = await mutateWithVersion(ref('d/1'), 0, () => ({ n: 2 }));
 
     const { res, captured } = makeRes();
-    sendMutationOutcome(res, stale);
+    sendMutationOutcome(makeReq(), res, stale);
     expect(captured.status).toBe(409);
     expect(captured.body.error.code).toBe('VERSION_CONFLICT');
     expect(captured.body.error.details.currentVersion).toBe(1);
@@ -319,11 +324,11 @@ describe('§12 — the outcome maps to one HTTP shape', () => {
   it('a missing document is 404 and an unavailable store is 503', async () => {
     const notFound = await mutateWithVersion(ref('d/x'), 0, () => ({}), { requireExisting: true });
     const a = makeRes();
-    sendMutationOutcome(a.res, notFound);
+    sendMutationOutcome(makeReq(), a.res, notFound);
     expect(a.captured.status).toBe(404);
 
     const b = makeRes();
-    sendMutationOutcome(b.res, {
+    sendMutationOutcome(makeReq(), b.res, {
       ok: false,
       code: 'STORE_UNAVAILABLE',
       message: 'x',

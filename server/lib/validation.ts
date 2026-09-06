@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Request, Response } from 'express';
+import { sendError } from './errors';
 
 /**
  * P1.10 — INPUT VALIDATION AND MASS ASSIGNMENT (addendum §11, §16).
@@ -117,17 +118,21 @@ export function parseBody<S extends z.ZodTypeAny>(
   };
 }
 
-/** 400 with the specific problems, in the shared error envelope. */
+/**
+ * 400 with the specific problems, through the ONE error function.
+ *
+ * This originally built its own `{ error: { code, message, details } }` object, which looked
+ * identical — and was not: it had no requestId, because only sendError knows about it. That is
+ * the same "second shape drifts from the first" failure P1.12 exists to remove, reintroduced
+ * while removing it. Caught by comparing actual HTTP responses rather than by reading the code.
+ */
 export function sendValidationError(
+  req: Request,
   res: Response,
   issues: { path: string; message: string }[]
 ): Response {
-  return res.status(400).json({
-    error: {
-      code: 'VALIDATION_ERROR',
-      message: 'The request body is not valid.',
-      details: { issues },
-    },
+  return sendError(req, res, 'VALIDATION_ERROR', 'The request body is not valid.', {
+    details: { issues },
   });
 }
 
@@ -141,7 +146,7 @@ export function parseOrRespond<S extends z.ZodTypeAny>(
 ): z.infer<S> | null {
   const parsed = parseBody(schema, req.body);
   if (parsed.ok === false) {
-    sendValidationError(res, parsed.issues);
+    sendValidationError(req, res, parsed.issues);
     return null;
   }
   return parsed.value;

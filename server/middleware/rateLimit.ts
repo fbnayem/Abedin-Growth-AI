@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { sendError } from '../lib/errors';
 
 /**
  * P0.5 — Tiered rate limiting.
@@ -95,14 +96,13 @@ export function rateLimit(opts: RateLimitOptions) {
       res.setHeader('Retry-After', String(retryAfter));
       console.warn(`[rateLimit] ${name} limit exceeded for ${key} (${bucket.count}/${max})`);
       // Structured error, per the S12 envelope, so clients branch on a code rather than prose.
-      return res.status(429).json({
-        error: {
-          code: 'PROVIDER_RATE_LIMITED',
-          message: `Rate limit exceeded for ${name}. Retry in ${retryAfter}s.`,
-          retryable: true,
-          retryAfterSeconds: retryAfter,
-        },
-      });
+      return sendError(
+        req,
+        res,
+        'PROVIDER_RATE_LIMITED',
+        `Rate limit exceeded for ${name}. Retry in ${retryAfter}s.`,
+        { details: { retryable: true, retryAfterSeconds: retryAfter } }
+      );
     }
 
     return next();
