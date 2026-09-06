@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   Clock,
   DEFAULT_BUSINESS_HOURS,
@@ -605,12 +606,36 @@ describe('P1.9 — time correctness', () => {
       expect(server).toContain('timeZone: timeZone');
     });
 
-    it('the reply composer proposes a business slot instead of setHours', () => {
+    it('nextBusinessSlot has NO live caller, and that is recorded rather than disguised', () => {
+      // This asserted that the reply composer proposed a slot with `nextBusinessSlot`. It did —
+      // inside `executeMultiAgentReplyPipeline`, which nothing called. P1.9's slotting was a
+      // capability the repository held and the running system did not have, and this test read
+      // as proof that it did.
+      //
+      // The dead composer is removed (S21), so the function now has no caller at all. Inventing
+      // one to keep a green test would be worse than the original defect: it would put a
+      // proposed meeting time in front of a customer that nothing downstream honours.
+      //
+      // `nextBusinessSlot` keeps its own invariant tests above — the DST, lookahead and
+      // business-hours behaviour is still fully covered — and waits for a caller that means it.
       const composer = strip(readFileSync('server/agents/multiAgentReplySystem.ts', 'utf8'));
-      expect(composer).toContain('const proposedSlot = nextBusinessSlot(clock.now(), {');
-      expect(composer).toContain('clock: Clock = systemClock');
+      expect(composer).not.toContain('nextBusinessSlot(');
       expect(composer).not.toMatch(/targetDate\.setHours\(/);
       expect(composer).not.toMatch(/targetDate\.setDate\(/);
+
+      // The claim above, checked rather than asserted in prose: if something starts calling it,
+      // this fails and whoever wired it must replace this test with a real behavioural one.
+      const callers: string[] = [];
+      for (const file of productionSourceFiles()) {
+        // The declaration is not a call. Removing it first is what makes the count mean
+        // "somebody uses this" rather than "this exists".
+        const text = strip(readFileSync(file, 'utf8')).replace(
+          /export function nextBusinessSlot\s*\(/g,
+          'DECLARATION('
+        );
+        if (/\bnextBusinessSlot\s*\(/.test(text)) callers.push(file);
+      }
+      expect(callers).toEqual([]);
     });
 
     it('the modal resolves the civil time in a named zone before submitting', () => {
@@ -650,3 +675,20 @@ describe('P1.9 — time correctness', () => {
     });
   });
 });
+
+/** Every production .ts under server/ and shared/ — tests and build output excluded. */
+function productionSourceFiles(): string[] {
+  const out: string[] = [];
+  const skip = new Set(['node_modules', 'dist', 'build', '.git', 'coverage', 'tests']);
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir)) {
+      if (skip.has(entry)) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/.ts$/.test(entry) && !/.test.ts$/.test(entry)) out.push(full);
+    }
+  };
+  walk('server');
+  walk('shared');
+  return out;
+}

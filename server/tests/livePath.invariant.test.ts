@@ -172,13 +172,18 @@ describe('the live inbound drafting path', () => {
 
     it('reads facts back and gives them to the planner', () => {
       // listActiveFacts had ZERO callers: facts were written on every inbound message and read
-      // by nothing.
+      // by nothing. The facts now travel inside the context bundle rather than as a bare
+      // string[], so the planner gets a manifest and a hash with them (S21).
       expect(source).toContain('listActiveFacts(organizationId, conversationId)');
-      expect(source).toContain('knownRelevantFacts,');
+      expect(source).toContain('facts: activeFactRecords,');
+      expect(source).toContain('contextBundle,');
     });
 
-    it('a fact-store failure is reported, not read as "no facts"', () => {
-      expect(source).toMatch(/catch[\s\S]{0,200}?Could not read facts/);
+    it('a fact-store failure is reported as UNAVAILABLE, not read as "no facts"', () => {
+      // The distinction the whole bundle change exists for: an empty fact list and an
+      // unreadable fact store are different states (§14).
+      expect(source).toMatch(/catch[\s\S]{0,120}?noteUnavailable\('FACT'/);
+      expect(source).toContain("unavailable.push(kind)");
     });
 
     it('the NBA call no longer passes empty objects behind a cast', () => {

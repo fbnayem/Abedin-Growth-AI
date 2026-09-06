@@ -2,6 +2,8 @@ import { CanaryRolloutService } from './canary.service';
 import { BudgetTracker } from '../policies/workflowBudgets';
 import { withModelCallCollector, type ModelCallRecord } from '../lib/modelCallLog';
 import { runLogFieldsFor, writeRunLog } from '../lib/runLog';
+import { buildContextBundle, type ContextKind } from '../domain/contextBundle';
+import { adaptLedgers } from '../domain/ledgerAdapters';
 import { MetricsService } from './metrics.service';
 import { LedgerService } from './ledgers.service';
 import { BuyingStage, suppressesReply } from "../../shared/domain/models";
@@ -28,6 +30,8 @@ import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
 import { recordFacts, listActiveFacts } from '../lib/factStore';
 import { observationsFromMemory } from '../domain/memoryFacts';
 
+const ledgerService = new LedgerService();
+
 type AuditDecision = 'PASS' | 'BLOCK' | 'HUMAN_REVIEW_REQUIRED';
 
 /**
@@ -48,6 +52,9 @@ export type InboundOutcome =
       modelCalls: ModelCallRecord[];
       conversationId?: string | null;
       messageId?: string | null;
+      /** §21 — the manifest of what the model was shown, for the run log. */
+      contextHash?: string | null;
+      contextIds?: string[];
     }
   | {
       ok: false;
@@ -57,6 +64,8 @@ export type InboundOutcome =
       modelCalls?: ModelCallRecord[];
       conversationId?: string | null;
       messageId?: string | null;
+      contextHash?: string | null;
+      contextIds?: string[];
     };
 
 /**
@@ -277,6 +286,8 @@ export class InboundPipeline {
         stage,
         conversationId: outcome.conversationId ?? null,
         messageId: outcome.messageId ?? email?.id ?? null,
+        contextHash: outcome.contextHash ?? null,
+        contextIds: outcome.contextIds ?? null,
         durationMs: Date.now() - startedAt,
         modelCalls,
         budget: budgetTracker.snapshot(),
@@ -501,23 +512,101 @@ export class InboundPipeline {
       // was carefully maintaining reached no prompt. Superseded facts are excluded by
       // `activeFacts` (§20), so a value the customer has since corrected cannot come back as
       // current.
-      let knownRelevantFacts: string[] = [];
+      //
+      // S21 — every source is loaded into the SAME bundle, and a source that could not be read
+      // is named. Three of the five live in PostgreSQL, which this deployment cannot reach, so
+      // "no open questions" and "the open-questions table threw" would otherwise be the same
+      // empty array reaching the same prompt (§14).
+      const unavailable: ContextKind[] = [];
+      const noteUnavailable = (kind: ContextKind, what: string, e: unknown) => {
+        unavailable.push(kind);
+        console.error(
+          `[InboundPipeline] ${what} could not be read for conversation ${conversationId}; ` +
+            'recorded as UNAVAILABLE rather than as empty:',
+          (e as any)?.message ?? e
+        );
+      };
+
+      let activeFactRecords: Awaited<ReturnType<typeof listActiveFacts>> = [];
       try {
-        const active = await listActiveFacts(organizationId, conversationId);
-        knownRelevantFacts = active.map((f) => `${f.key}: ${f.value}`);
+        activeFactRecords = await listActiveFacts(organizationId, conversationId);
         console.log(
-          `[InboundPipeline] ${knownRelevantFacts.length} active fact(s) supplied to the planner ` +
-            `for conversation ${conversationId}.`
+          `[InboundPipeline] ${activeFactRecords.length} active fact(s) selected for ` +
+            `conversation ${conversationId}.`
         );
       } catch (e: any) {
-        // Recorded, not swallowed. An empty fact list and an unreadable fact store are
-        // different states, and only one of them means "we know of nothing" (§14).
-        console.error(
-          `[InboundPipeline] Could not read facts for conversation ${conversationId}; the ` +
-            `planner will run without them:`,
-          e?.message ?? e
+        noteUnavailable('FACT', 'the fact store', e);
+      }
+
+      // Raw rows in, adapted records out. `adaptLedgers` had ZERO callers: it exists because
+      // the tables name their columns `questionText` and `statement` while the bundle needs
+      // `question` and `objection`, and because it re-checks the tenant, drops superseded and
+      // expired rows, and REPORTS what it dropped. Passing raw rows here would have been a
+      // type error, which is how this was found.
+      let questionRows: Record<string, unknown>[] = [];
+      try {
+        questionRows = (await ledgerService.getOpenQuestions(
+          organizationId,
+          conversationId
+        )) as unknown as Record<string, unknown>[];
+      } catch (e: any) {
+        noteUnavailable('OPEN_QUESTION', 'the question ledger', e);
+      }
+
+      let objectionRows: Record<string, unknown>[] = [];
+      try {
+        objectionRows = (await ledgerService.getUnresolvedObjections(
+          organizationId,
+          conversationId
+        )) as unknown as Record<string, unknown>[];
+      } catch (e: any) {
+        noteUnavailable('UNRESOLVED_OBJECTION', 'the objection ledger', e);
+      }
+
+      const adapted = adaptLedgers(
+        { questions: questionRows, objections: objectionRows },
+        organizationId,
+        new Date().toISOString()
+      );
+      if (adapted.rejected.length > 0) {
+        // A row refused is not a row absent. Reported so a ledger that is silently discarding
+        // half its contents cannot look like a customer with nothing outstanding.
+        console.warn(
+          `[InboundPipeline] ${adapted.rejected.length} ledger row(s) refused for conversation ` +
+            `${conversationId}:`,
+          adapted.rejected
         );
       }
+
+      const contextBundle = buildContextBundle({
+        // The thread as this pipeline knows it. The inbound message is always included by the
+        // selection rule; earlier turns are bounded by it rather than concatenated wholesale.
+        thread: [
+          {
+            id: messageId,
+            sender: 'PROSPECT',
+            subject: email.subject ?? null,
+            bodyText: email.textBody || email.htmlBody || '',
+            sentAt: new Date().toISOString(),
+          },
+        ],
+        facts: activeFactRecords,
+        openQuestions: adapted.openQuestions,
+        unresolvedObjections: adapted.unresolvedObjections,
+        // Not loaded on this path yet, and said so rather than passed as empty: neither has a
+        // reachable reader here, so claiming "there are none" would be an invention.
+        outstandingCommitments: adapted.outstandingCommitments,
+        quotes: [],
+        companyFacts: [],
+        unavailable: [...unavailable, 'OUTSTANDING_COMMITMENT', 'QUOTE', 'COMPANY_FACT'],
+        now: new Date().toISOString(),
+      });
+
+      console.log(
+        `[InboundPipeline] context ${contextBundle.contextHash}: ` +
+          `${contextBundle.contextIds.length} record(s), ${contextBundle.totalChars} chars, ` +
+          `${contextBundle.unavailable.length} source(s) unavailable.`
+      );
 
       // P1.8 remainder — the call that has never once produced a draft.
       //
@@ -548,7 +637,7 @@ export class InboundPipeline {
         nextBestAction: nbaResult,
         buyingStage: BuyingStage.DISCOVERY,
         rawInboundText: email.textBody || email.htmlBody || '',
-        knownRelevantFacts,
+        contextBundle,
       });
 
       // 7b. The planner can suppress too, and until now nothing listened.
@@ -564,7 +653,7 @@ export class InboundPipeline {
           `[InboundPipeline] Planner suppressed the reply: ${draft.replyPlan.nextBestAction} — ` +
             draft.replyPlan.reason
         );
-        return { ok: true, disposition: 'SUPPRESSED', detail: `${draft.replyPlan.nextBestAction}: ${draft.replyPlan.reason}`, modelCalls, conversationId, messageId };
+        return { ok: true, disposition: 'SUPPRESSED', detail: `${draft.replyPlan.nextBestAction}: ${draft.replyPlan.reason}`, modelCalls, conversationId, messageId, contextHash: contextBundle.contextHash, contextIds: contextBundle.contextIds };
       }
 
       // 8. Independent Audit
@@ -590,7 +679,7 @@ export class InboundPipeline {
 
       if (auditDecision === 'BLOCK') {
          console.error("Draft blocked by auditor:", auditReason);
-         return { ok: true, disposition: 'BLOCKED', detail: auditReason, modelCalls, conversationId, messageId };
+         return { ok: true, disposition: 'BLOCKED', detail: auditReason, modelCalls, conversationId, messageId, contextHash: contextBundle.contextHash, contextIds: contextBundle.contextIds };
       }
 
       // 9. Transactional Outbox Insert
@@ -654,7 +743,7 @@ export class InboundPipeline {
           `${spend.elapsedMs}ms. Models: ${modelCalls.map((c) => c.model ?? 'NONE(fallback)').join(', ') || 'none'}`
       );
 
-      return { ok: true, disposition: 'QUEUED', detail: `outbox=${outboxStatus}`, modelCalls, conversationId, messageId };
+      return { ok: true, disposition: 'QUEUED', detail: `outbox=${outboxStatus}`, modelCalls, conversationId, messageId, contextHash: contextBundle.contextHash, contextIds: contextBundle.contextIds };
 
     } catch (e) {
       // This was `console.error(...)` and nothing else — no rethrow, no durable record, no

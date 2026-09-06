@@ -20,6 +20,9 @@ import { assemblePrompt } from "../lib/promptAssembly";
 import { CALENDAR_BOOKING_URL, GOOGLE_MEET_URL, WEBSITE_URL, ONBOARDING_URL } from "./trustedCtaRegistry";
 import { aiSecurityService } from '../services/aiSecurity.service';
 import { LedgerService } from '../services/ledgers.service';
+import { type ContextBundle } from '../domain/contextBundle';
+import { pricingContextFor, type Quote } from '../../shared/domain/quote';
+import { systemClock, type Clock } from '../../shared/domain/time';
 const ledgerService = new LedgerService();
 
 // ==========================================
@@ -652,6 +655,29 @@ export async function composeAutonomousSalesReply(input: {
    * customer regardless of who they were.
    */
   knownRelevantFacts?: string[];
+  /**
+   * S21 — the selected context, with its manifest, hash and character budget.
+   *
+   * `buildContextBundle` existed and was wired only into `executeMultiAgentReplyPipeline`,
+   * which nothing calls. The live planner received a bare `string[]` of facts: no manifest, so
+   * a bad reply could not be traced to what it was shown; no hash, so two runs could not be
+   * compared; no budget, so a long thread would silently overrun the context window.
+   *
+   * Optional, because the bundle needs stores this deployment cannot always reach. Absent means
+   * no selection was made — which is honest — and the planner then carries only what it was
+   * given directly.
+   */
+  contextBundle?: ContextBundle;
+  /**
+   * The quote in force for this customer, if the caller established one.
+   *
+   * Decides whether the model is shown list pricing at all (§24). Absent is NOT "no quote" —
+   * it is "the caller did not establish one" — which is why a failed quote lookup blocks a
+   * pricing reply above rather than falling through to here.
+   */
+  activeQuote?: Quote | null;
+  /** Injected so a proposed meeting slot is testable on a DST boundary (§30). */
+  clock?: Clock;
   threadHistory?: EmailMessage[];
 }): Promise<{ subject: string; body: string; replyPlan: ReplyPlan }> {
   // S. AI SECURITY / RED TEAM TESTS
@@ -776,6 +802,24 @@ export async function composeAutonomousSalesReply(input: {
     };
   }
 
+  const clock = input.clock ?? systemClock;
+  const nowIso = clock.now().toISOString();
+
+  // The selected context, rendered. An absent bundle contributes nothing rather than a
+  // placeholder: the model must not be told there is no history when nobody looked.
+  const contextBlock = input.contextBundle ? input.contextBundle.promptBlock : '';
+  if (input.contextBundle) {
+    console.log(
+      `[SalesDecisionEngine] context ${input.contextBundle.contextHash}: ` +
+        `${input.contextBundle.contextIds.length} record(s), ${input.contextBundle.totalChars} chars, ` +
+        `${input.contextBundle.excluded.length} excluded, ` +
+        `${input.contextBundle.unavailable.length} source(s) unavailable` +
+        (input.contextBundle.unavailable.length > 0
+          ? `: ${input.contextBundle.unavailable.join(', ')}`
+          : '.')
+    );
+  }
+
   const firstName = input.identity.name?.replace(/^Dr\.\s+/i, "").split(" ")[0] || "there";
   const companyName = input.identity.company || "your team";
 
@@ -795,9 +839,16 @@ export async function composeAutonomousSalesReply(input: {
     // P1.8 — Was two hardcoded sentences about latency and calendar sync, identical for every
     // customer, in a field the type describes as the facts relevant to THIS conversation. Real
     // per-conversation facts now exist (P1.6) with provenance and supersession; selecting them
-    // is server/domain/contextBundle.ts. Until this planner is given a bundle it stays EMPTY
-    // rather than carrying a literal that reads as knowledge about the customer.
-    knownRelevantFacts: input.knownRelevantFacts ?? [],
+    // is server/domain/contextBundle.ts. It no longer carries a literal that reads as
+    // knowledge about the customer.
+    //
+    // S21 — taken FROM the bundle when there is one, because the bundle is the selection rule
+    // and a second list beside it is a second answer to the same question. The plain array
+    // remains for callers that have facts but no bundle, and is not consulted when a bundle
+    // exists, so the two cannot disagree about what the model was shown.
+    knownRelevantFacts: input.contextBundle
+      ? input.contextBundle.records.filter((r) => r.kind === 'FACT').map((r) => r.content)
+      : input.knownRelevantFacts ?? [],
     objections: input.emailUnderstanding.objections,
     missingInformation: input.nextBestAction.missingInformation,
     specialistsRequired: [
@@ -833,6 +884,16 @@ export async function composeAutonomousSalesReply(input: {
      //
      // The regex sanitiser runs as a tripwire and its hits are recorded — it is not the
      // boundary, and an empty result is not evidence of safety.
+     // S21 — the pricing the model is ALLOWED to see, decided by `pricingContextFor`.
+     //
+     // This block used to be `JSON.stringify(CANONICAL_KNOWLEDGE)`, which contains list
+     // pricing, shown unconditionally. P1.7 built the mechanism that withholds list pricing
+     // when a customer has a binding quote — so that a model cannot state a number it was
+     // never shown — and wired it into `executeMultiAgentReplyPipeline`, which nothing calls.
+     // The live path had the capability in the repository and none of it in the prompt.
+     const pricingContext = pricingContextFor(input.activeQuote ?? null, nowIso);
+     const knowledgeWithoutPricing = { ...CANONICAL_KNOWLEDGE, pricing: undefined };
+
      const assembled = assemblePrompt({
        instruction: `
 You are an expert, professional founder doing B2B sales for Abedin Voice AI.
@@ -841,7 +902,11 @@ Our intent for this reply: ${input.nextBestAction.action}
 Strategy: ${input.nextBestAction.reason}
 
 Use these canonical facts if relevant:
-${JSON.stringify(CANONICAL_KNOWLEDGE)}
+${JSON.stringify(knowledgeWithoutPricing)}
+
+${pricingContext.promptBlock}
+
+${contextBlock}
 ${dynamicFacts}
 
 Address the prospect by the first name given in the PROSPECT_NAME block, and refer to their

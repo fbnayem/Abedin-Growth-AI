@@ -1859,6 +1859,117 @@ success anybody vouched for.
 
 ---
 
+## 1q. S21 — one drafting path, and three capabilities that were never in the product (2026-09-07)
+
+### The finding that made this worth doing
+
+`executeMultiAgentReplyPipeline` had two occurrences in the repository: its own definition and
+an unused import. Section 1l already recorded that P1.8 wired the context bundle into it. What
+the scouting for this change found is that **three separate hardening passes had each done the
+same thing**:
+
+| Pass | Capability | Only call site |
+|---|---|---|
+| P1.7 | `pricingContextFor` — withhold list pricing when a quote binds (§24) | the dead composer |
+| P1.8 | `buildContextBundle` — selection by rule, with a manifest and a hash (§21) | the dead composer |
+| P1.9 | `nextBusinessSlot` — propose a slot inside real business hours (§30) | the dead composer |
+
+Each was built, tested, documented and landed. **None of them was in the product.** Worse, three
+invariant tests asserted their presence — against that file — so the suite reported all three as
+wired. A test that reads the right source for the right string is still only a claim about a
+file, and the claim it makes is not the one its title makes (§50).
+
+### What moved
+
+`composeAutonomousSalesReply` — the path that actually runs — now:
+
+- receives a `ContextBundle` and renders `promptBlock` into the instruction, so the prompt is
+  a bounded selection with an addressable manifest rather than whatever was in scope;
+- applies `pricingContextFor`, and emits `{ ...CANONICAL_KNOWLEDGE, pricing: undefined }`
+  rather than the whole object. Withholding list pricing means the model cannot see it — showing
+  it alongside a "use this instead" block would defeat the mechanism entirely;
+- takes `knownRelevantFacts` **from the bundle** when there is one. Two lists answering "what
+  was the model shown" is two answers to one question.
+
+`nextBusinessSlot` did **not** move. Nothing on the live path proposes a meeting time, and
+inventing a consumer to keep a green test would be worse than the original defect: it would put
+a time in front of a customer that nothing downstream honours. It has no caller, its own
+invariant tests still cover the DST, lookahead and business-hours behaviour, and a test now
+**asserts that it has no caller** — so if somebody wires it, that test fails and they must
+replace it with a real behavioural one.
+
+The dead function is deleted: 434 lines, plus its import.
+
+### An unreadable source is not an empty one
+
+Every input to `buildContextBundle` is an array, and an empty array says "there are none".
+Three of the five sources live in PostgreSQL, which this deployment cannot reach — so "this
+customer has raised no objections" and "the objections table threw" were the same empty array
+reaching the same prompt (§14).
+
+`ContextBundleInputs` now takes `unavailable`, and the pipeline loads each source in its own
+`try` and names the ones that fail. Sources with no reader at all on this path
+(`OUTSTANDING_COMMITMENT`, `QUOTE`, `COMPANY_FACT`) are declared unavailable rather than
+passed as empty, because claiming "there are none" about a store nobody queried is an invention.
+
+**Unavailability is part of the context hash.** Two runs that select the same records render the
+same prompt block, and are not the same context if one of them could not read five stores. §21
+asks the hash exactly one question — "was this the same context?" — and two runs that differ in
+what could be READ must not answer it identically. Measured:
+
+    all sources readable      3 records, 75 chars, unavailable: (none)      hash 38ea552f4ff4b2ee…
+    as this deployment runs   3 records, 75 chars, unavailable: 5 sources   hash 24f5f1b29f216c0d…
+
+    same prompt block? true      same hash? false
+
+Unavailability stays **out** of the prompt. It is metadata about our infrastructure, and a model
+asked to reason about which of our tables were up is being given the wrong job.
+
+### A third module with no callers
+
+Wiring the ledgers exposed that the raw rows name their columns `questionText` and
+`statement` while the bundle needs `question` and `objection` — a type error, which is how it
+was found. The adapter for exactly this, `adaptLedgers`, **had zero callers**: built last
+session with 32 invariant tests, never called. It also re-checks the tenant, drops superseded and
+expired rows, and reports what it dropped, so refused rows are now logged rather than becoming
+indistinguishable from absence.
+
+### The manifest reaches the run log
+
+`contextHash` and `contextIds` now travel on the outcome and into the row, filling the two
+schema columns that P1.8 added and nothing had ever written. §21 reproducibility for a reply is
+now: which models answered, the hash of each prompt, the hash of the context, and the manifest
+of every record in it — with the customer's words in none of them.
+
+### Evidence
+
+`npm test`: **823 tests across 30 files**, up from 797 across 29. `tsc` exit 0, build clean,
+10 guardrails green. **Mutation-tested 19/19.**
+
+The one first-run survivor was the middle of a three-link chain: bundle → outcome →
+`writeRunLog` → row. Tests asserted the first and third links, so hardcoding the middle to
+`null` passed everything. This is the third time on this branch that a chain has been verified
+at both ends and not in the middle.
+
+The prompt-authority ratchet **fell from 16 to 14** when the dead function went, and refused to
+proceed until `BASELINE` was lowered so it cannot creep back — a ratchet doing the one thing a
+ratchet is for.
+
+While rewriting the hash I wrote four raw NUL bytes into the source. `check-no-nul-bytes`
+caught it on the next run; without it, git would have treated the file as binary and the change
+would have had no reviewable diff.
+
+### Status
+
+**S21 stays PARTIAL, and the reason is smaller again.** The live planner now has selection, a
+manifest, a hash and a budget, and the run log records them. What remains is not wiring: the
+prompt VERSION (the template's identity, as distinct from the hash of one rendering) is still
+absent, and three of the bundle's sources have no reachable reader in this deployment — so the
+bundle is honest about being mostly empty rather than full. That is the datastore decision from
+section 1m, unchanged.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally

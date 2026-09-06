@@ -305,10 +305,30 @@ describe('P1.7 — every surface reads the module rather than a literal', () => 
   });
 
   it('the composer no longer hardcodes a price in its prompt', () => {
-    const source = read('server/agents/multiAgentReplySystem.ts');
+    // Was asserted against multiAgentReplySystem.ts, which held `${pricingBlock}` inside
+    // `executeMultiAgentReplyPipeline` — a function nothing called. P1.7's precedence rule was
+    // in the repository and absent from every prompt the system actually sent. The live
+    // planner now applies it (S21).
+    const source = read('server/agents/salesDecisionEngine.ts');
     expect(source).not.toContain('Pricing is £499/mo per clinic');
-    expect(source).toContain('${pricingBlock}');
+    expect(source).toContain('${pricingContext.promptBlock}');
+    expect(source).toContain('pricingContextFor(input.activeQuote ?? null, nowIso)');
+  });
+
+  it('the live prompt does not carry list pricing alongside the decided pricing block', () => {
+    // `CANONICAL_KNOWLEDGE` contains list pricing. Emitting it whole would defeat
+    // `pricingContextFor` entirely: withholding list pricing means the model cannot see it,
+    // not that it is shown twice with one copy deprioritised.
+    const source = read('server/agents/salesDecisionEngine.ts');
+    expect(source).toContain('const knowledgeWithoutPricing = { ...CANONICAL_KNOWLEDGE, pricing: undefined }');
+    expect(source).toContain('${JSON.stringify(knowledgeWithoutPricing)}');
+    expect(source).not.toContain('${JSON.stringify(CANONICAL_KNOWLEDGE)}');
+  });
+
+  it('the removed composer is gone rather than merely unused', () => {
+    const source = read('server/agents/multiAgentReplySystem.ts');
     expect(source).not.toContain('monthlyFee: conversation.category === "PARTNER" ? 1499 : 499');
+    expect(source).not.toContain('export async function executeMultiAgentReplyPipeline');
   });
 
   it('canonical knowledge is generated, not written beside the price book', () => {

@@ -48,6 +48,15 @@ export interface RunLogInput {
   conversationId?: string | null;
   messageId?: string | null;
   durationMs: number;
+  /**
+   * §21 — the identity of the context the model was shown, from `buildContextBundle`.
+   *
+   * `contextIds` is the manifest: every record that went in, addressable, so the exact input
+   * can be reconstructed. Null means no bundle was built, which is a different fact from an
+   * empty manifest and is recorded as such.
+   */
+  contextHash?: string | null;
+  contextIds?: string[] | null;
   modelCalls: readonly ModelCallRecord[];
   budget: BudgetSnapshot;
   /** ISO instant. Injected rather than read from the wall clock, so this is testable (§30). */
@@ -154,6 +163,8 @@ export function buildRunLog(input: RunLogInput): AIRunLog {
     // of successes.
     models: calls.map((c) => c.model),
     promptHashes: calls.map((c) => c.promptHash),
+    contextHash: input.contextHash ?? null,
+    contextIds: input.contextIds ?? null,
     modelCalls: input.budget.modelCalls,
     reportedTokens: input.budget.tokens,
     tokensArePartial: input.budget.tokensArePartial,

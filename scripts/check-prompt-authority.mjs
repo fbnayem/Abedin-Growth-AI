@@ -37,7 +37,7 @@ import { join, relative } from 'node:path';
  *   - conversationMemoryAgent.extractAndSynthesizeMemory — interpolated the ENTIRE conversation
  *     transcript, and runs on every inbound message with no feature flag.
  */
-const BASELINE = 16;
+const BASELINE = 14;
 
 const ROOT = 'server';
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'tests']);

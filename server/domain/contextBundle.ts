@@ -74,6 +74,17 @@ export interface ContextBundleInputs {
   quotes: readonly Quote[];
   /** Approved company-level knowledge. */
   companyFacts: readonly { id: string; content: string }[];
+  /**
+   * Kinds whose SOURCE COULD NOT BE READ, as distinct from kinds that are genuinely empty.
+   *
+   * Every field above is an array, and an empty array says "there are none". With three of the
+   * five stores behind an unreachable database, that is the wrong answer far more often than it
+   * is the right one — and "this customer has raised no objections" reads identically to
+   * "the objections table threw". §14: an unknown must not present itself as a known-empty.
+   *
+   * The caller is the only place that knows which it was, so the caller must say.
+   */
+  unavailable?: readonly ContextKind[];
   /** The clock, injected. A context builder that reads the wall clock is not deterministic. */
   now: string;
 }
@@ -100,7 +111,15 @@ export interface ContextBundle {
   contextIds: string[];
   /** Records that were selected by rule and then dropped for budget, with the reason. */
   excluded: { id: string; kind: ContextKind; reason: string }[];
-  /** A stable hash of the selected content. Same inputs, same hash. */
+  /**
+   * Kinds whose source could not be read, sorted and deduplicated.
+   *
+   * Distinct from a kind that is simply absent from `records`: absent means "there are none",
+   * this means "we do not know". A reader of the bundle that treats the two the same is making
+   * the §14 mistake the field exists to prevent.
+   */
+  unavailable: ContextKind[];
+  /** A stable hash of the selected content AND of what could not be read. Same inputs, same hash. */
   contextHash: string;
   /** Rendered block for the prompt. */
   promptBlock: string;
@@ -282,12 +301,16 @@ export function buildContextBundle(
   }
 
   const contextIds = kept.map((r) => r.id);
-  const contextHash = hashContext(kept);
+  // Deduplicated and ordered, so the hash below does not change with the caller's argument
+  // order for what is conceptually a set.
+  const unavailable = [...new Set(inputs.unavailable ?? [])].sort();
+  const contextHash = hashContext(kept, unavailable);
 
   return {
     records: kept,
     contextIds,
     excluded,
+    unavailable,
     contextHash,
     promptBlock: renderBundle(kept),
     totalChars: total,
@@ -300,9 +323,20 @@ export function buildContextBundle(
  * Over ids AND content, because either alone is insufficient: ids alone would not notice a
  * fact's value changing under a stable id, and content alone would not notice a reordering that
  * changes what the model reads first.
+ *
+ * UNAVAILABLE KINDS ARE PART OF THE HASH. A run where the objections table was unreachable
+ * and a run where the customer genuinely has no objections select the same records and render
+ * the same prompt block — but they are not the same context, and §21 asks the hash exactly one
+ * question: "was this the same context?" Two runs that differ in what could be READ must not
+ * answer it identically.
  */
-export function hashContext(records: readonly ContextRecord[]): string {
-  const material = records.map((r) => `${r.id}\u0000${r.content}`).join('');
+export function hashContext(
+  records: readonly ContextRecord[],
+  unavailable: readonly ContextKind[] = []
+): string {
+  const material =
+    records.map((r) => `${r.id}\u0000${r.content}`).join('') +
+    `\u0000UNAVAILABLE\u0000${[...unavailable].sort().join('\u0000')}`;
   return createHash('sha256').update(material, 'utf8').digest('hex').slice(0, 32);
 }
 

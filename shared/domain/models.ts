@@ -715,6 +715,13 @@ export interface AIRunLog {
   models?: (string | null)[];
   /** sha256 of what was sent to each model. The prompt itself is never stored. */
   promptHashes?: (string | null)[];
+  /**
+   * The identity of the selected context (§21). `contextIds` is the manifest — every record
+   * the model was shown, addressable — so the exact input can be reconstructed afterwards.
+   * Null means no bundle was built, which is not the same as an empty one.
+   */
+  contextHash?: string | null;
+  contextIds?: string[] | null;
   modelCalls?: number;
   /** Sum of PROVIDER-REPORTED tokens. A lower bound whenever `tokensArePartial` is true. */
   reportedTokens?: number;

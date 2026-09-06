@@ -293,14 +293,32 @@ describe('P1.8 — the defects this replaces are gone from the source', () => {
     expect(source).toContain('input.knownRelevantFacts ?? []');
   });
 
-  it('the COMPOSER actually uses the bundle — the module existing is not the same claim', () => {
+  it('the LIVE path builds the bundle — a module that exists is not a module that is called', () => {
     // S18 spent this entire document at NOT_STARTED with a sanitiser already in the repository:
-    // the function was there and nothing called it. The same distinction applies here.
-    const source = strip(readFileSync('server/agents/multiAgentReplySystem.ts', 'utf8'));
-    expect(source).toContain('buildContextBundle({');
-    expect(source).toContain('const fullTranscript = contextBundle.promptBlock;');
-    // The unbounded concatenation must be gone, not merely unused.
-    expect(source).not.toMatch(/thread\s*\n?\s*\.map\([\s\S]{0,400}?\.join\("\\n\\n---\\n\\n"\)/);
+    // the function was there and nothing called it. The same distinction applied here, one
+    // level up, and this test used to point at `multiAgentReplySystem.ts` — which held the only
+    // `buildContextBundle` call in the repository, inside a function NOTHING CALLED. The test
+    // was correct about its own claim and I had not asked whether anything used the composer.
+    //
+    // It now points at the pipeline that actually runs.
+    const pipeline = strip(readFileSync('server/services/inboundPipeline.ts', 'utf8'));
+    expect(pipeline).toContain('buildContextBundle({');
+    expect(pipeline).toMatch(/contextBundle,\s*\n\s*\}\);/);
+  });
+
+  it('...and the planner renders it into the prompt rather than accepting and ignoring it', () => {
+    const planner = strip(readFileSync('server/agents/salesDecisionEngine.ts', 'utf8'));
+    expect(planner).toContain('contextBundle?: ContextBundle');
+    // The value must reach the instruction text, not merely be destructured.
+    expect(planner).toMatch(/const contextBlock = input\.contextBundle \? input\.contextBundle\.promptBlock : ''/);
+    expect(planner).toContain('${contextBlock}');
+  });
+
+  it('the dead composer that held the only call site is gone', () => {
+    const composer = readFileSync('server/agents/multiAgentReplySystem.ts', 'utf8');
+    expect(composer).not.toContain('export async function executeMultiAgentReplyPipeline');
+    const server = readFileSync('server.ts', 'utf8');
+    expect(server).not.toContain('executeMultiAgentReplyPipeline');
   });
 
   it('the run log can record what the model was shown', () => {
