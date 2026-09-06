@@ -100,14 +100,45 @@ export function extractArray<T = any>(data: any): T[] | null {
 
 /**
  * Safe generation wrapper that handles transient 503s, 429s, and model failovers gracefully.
+ *
+ * P1.10 — TWO SHAPES, AND THE DIFFERENCE MATTERS (addendum §18).
+ *
+ *   - `{ prompt }` puts everything in one string with one level of authority. This is the
+ *     legacy form. It is safe ONLY when every part of the string was written by us.
+ *   - `{ systemInstruction, contents }` sends the instructions and the untrusted material as
+ *     different fields of the API request. Anything containing externally retrieved material —
+ *     a customer's email, a scraped page, an attachment — must use this form, built by
+ *     server/lib/promptAssembly.ts, which fences the untrusted part and refuses to build a
+ *     request whose instructions contain it.
+ *
+ * Passing both is refused rather than resolved by precedence: a caller that supplies both has
+ * a mistaken idea of which one is being sent, and guessing on their behalf is how untrusted
+ * text quietly ends up in the instruction field.
  */
 export async function safeGenerateJSON<T = any>(options: {
-  prompt: string;
+  /** Legacy single-string form. Trusted content only. */
+  prompt?: string;
+  /** Trusted instructions. Use with `contents`. */
+  systemInstruction?: string;
+  /** Untrusted material, already fenced by promptAssembly. Use with `systemInstruction`. */
+  contents?: string;
   category?: ModelCategory;
   temperature?: number;
   fallbackData: T;
   agentName?: string;
 }): Promise<T> {
+  const hasLegacy = typeof options.prompt === 'string';
+  const hasSeparated = typeof options.systemInstruction === 'string';
+
+  if (hasLegacy && hasSeparated) {
+    throw new Error(
+      '[geminiClient] Pass either `prompt` or `systemInstruction`+`contents`, not both. ' +
+        'Which one carries the untrusted material must be unambiguous.'
+    );
+  }
+  if (!hasLegacy && !hasSeparated) {
+    throw new Error('[geminiClient] Nothing to send: supply `prompt` or `systemInstruction`.');
+  }
   const ai = getGeminiAI();
   const primaryModel = getModelForCategory(options.category || "SMART");
   const candidateModels = Array.from(
@@ -120,14 +151,19 @@ export async function safeGenerateJSON<T = any>(options: {
     ])
   );
 
+  const agent = options.agentName ?? 'unnamed-agent';
+  const failures: string[] = [];
+
   for (const model of candidateModels) {
     try {
       const response = await ai.models.generateContent({
         model,
-        contents: options.prompt,
+        // The untrusted material travels here, as user content, never in systemInstruction.
+        contents: hasSeparated ? options.contents ?? '' : (options.prompt as string),
         config: {
           responseMimeType: "application/json",
           temperature: options.temperature ?? 0.2,
+          ...(hasSeparated ? { systemInstruction: options.systemInstruction } : {}),
         },
       });
 
@@ -136,11 +172,23 @@ export async function safeGenerateJSON<T = any>(options: {
         const parsed = extractCleanJSON<T>(rawText);
         return parsed;
       }
+      failures.push(`${model}: empty response`);
     } catch (err: any) {
-      // Model failed or unavailable (e.g. 503, 429, timeout), seamlessly shift to next candidate model
+      // P1.10 — This was a bare `continue`: no log, no error class, no attempt count. A model
+      // outage, a bad API key and a malformed request were indistinguishable from success,
+      // because the fallback that followed had the same type and shape as a real answer.
+      failures.push(`${model}: ${err?.message ?? err}`);
       continue;
     }
   }
+
+  // Returning the fallback is a FAILURE that happens to type-check. It must be visible: the
+  // caller receives a well-formed object and cannot tell it apart from a real answer, so the
+  // only place that can say so is here.
+  console.error(
+    `[geminiClient] All ${candidateModels.length} candidate models failed for ${agent}; ` +
+      `returning fallbackData. This is NOT a generated answer. Attempts: ${failures.join(' | ')}`
+  );
 
   return options.fallbackData;
 }

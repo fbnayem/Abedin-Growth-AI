@@ -150,3 +150,11 @@ jobs:
       # assumed. A guardrail that cannot fail is worse than none.
       - name: No NUL bytes in source files
         run: node scripts/check-no-nul-bytes.mjs
+
+      # P1.10 (§18) — Externally retrieved material must never gain system authority. A model
+      # call built as one string gives the customer's email the same authority as the
+      # instructions around it. This is a RATCHET rather than a ban: the count of legacy
+      # single-string call sites may fall and may not rise, so the migration is monotonic
+      # without blocking on doing all of them at once.
+      - name: Prompt authority separation (ratchet)
+        run: node scripts/check-prompt-authority.mjs

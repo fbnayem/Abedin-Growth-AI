@@ -17,6 +17,13 @@ import { resolveTenant } from "./server/middleware/tenant";
 import { orgScope, orgPath, isValidOrgId } from "./server/tenancy/orgScope";
 import { assertTransition, CAMPAIGN, MEETING, OPPORTUNITY } from "./server/domain/stateMachines";
 import {
+  createContactSchema,
+  createKnowledgeItemSchema,
+  createOpportunitySchema,
+  parseOrRespond,
+} from "./server/lib/validation";
+import { normalizeEmailKey } from "./server/lib/emailKey";
+import {
   expectedVersionFrom,
   mutateWithVersion,
   sendMutationOutcome,
@@ -205,10 +212,59 @@ app.get("/api/health", (req: Request, res: Response) => {
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
+  /**
+   * P1.10 — Build a contact from validated input.
+   *
+   * The three contact endpoints (leads, investors, partners) each did
+   * `{ ...req.body, id, type, status }`, so any field a caller sent was persisted. The one
+   * that matters is `consentGiven`: the action gateway reads it to decide whether a contact
+   * may be emailed, so spreading the body let a caller create a contact that was already
+   * consented to receive mail. `suppressed`, `organizationId` and `aiScore` were equally
+   * writable.
+   *
+   * Consent is not an input. It records something that happened in the world, and a request
+   * that creates a contact cannot also be evidence that the contact agreed to be contacted
+   * (§14). New contacts are created with consent explicitly ABSENT, which the gateway reads as
+   * "no consent record" and refuses to send to.
+   */
+  function buildContactDocument(
+    input: import("./server/lib/validation").CreateContactInput,
+    idPrefix: string,
+    type: 'LEAD' | 'INVESTOR' | 'PARTNER',
+    status: string
+  ) {
+    const emailKey = normalizeEmailKey(input.email);
+    return {
+      id: `${idPrefix}_${Date.now()}`,
+      type,
+      status,
+      // Server-controlled. Never taken from the request.
+      version: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // Caller-supplied, but only these fields, and only after parsing.
+      name: input.name ?? [input.firstName, input.lastName].filter(Boolean).join(' ') ?? '',
+      firstName: input.firstName ?? null,
+      lastName: input.lastName ?? null,
+      email: input.email,
+      emailKey,
+      title: input.title ?? null,
+      phone: input.phone ?? null,
+      linkedinUrl: input.linkedinUrl ?? null,
+      companyName: input.companyName ?? null,
+      companyWebsite: input.companyWebsite ?? null,
+      industry: input.industry ?? null,
+      country: input.country ?? null,
+      employeeCount: input.employeeCount ?? null,
+      notes: input.notes ?? null,
+    };
+  }
+
   app.post("/api/leads", async (req: Request, res: Response) => {
     try {
-      const id = "lead_" + Date.now();
-      const payload = { ...req.body, id, type: 'LEAD', status: 'NEW' };
+      const input = parseOrRespond(createContactSchema, req, res);
+      if (input === null) return;
+      const payload = buildContactDocument(input, 'lead', 'LEAD', 'NEW');
       await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
       res.json(payload);
     } catch(e: any) { res.status(500).json({error: e.message}); }
@@ -226,7 +282,23 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/knowledge", async (req: Request, res: Response) => {
     try {
-      const payload = { ...req.body, id: "kno_" + Date.now(), createdAt: new Date().toISOString() };
+      const input = parseOrRespond(createKnowledgeItemSchema, req, res);
+      if (input === null) return;
+
+      // P1.4 — Knowledge is stringified into outbound prompts, so it enters the approval
+      // lifecycle as DRAFT rather than as immediately usable text. Nothing may compose from it
+      // until it is APPROVED (see KNOWLEDGE_ITEM in server/domain/stateMachines.ts).
+      const payload = {
+        id: `kno_${Date.now()}`,
+        version: 0,
+        status: 'DRAFT',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        title: input.title,
+        content: input.content,
+        category: input.category ?? null,
+        tags: input.tags ?? [],
+      };
       await addDoc(collection(firestore, orgPath(orgScope(req), 'knowledge')), payload);
       res.json(payload);
     } catch(e: any) { res.status(500).json({error: e.message}); }
@@ -731,8 +803,9 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/investors", async (req: Request, res: Response) => {
     try {
-      const id = "inv_" + Date.now();
-      const payload = { ...req.body, id, type: 'INVESTOR', status: 'DISCOVERED' };
+      const input = parseOrRespond(createContactSchema, req, res);
+      if (input === null) return;
+      const payload = buildContactDocument(input, 'inv', 'INVESTOR', 'DISCOVERED');
       await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
       res.json(payload);
     } catch(e: any) { res.status(500).json({error: e.message}); }
@@ -755,8 +828,9 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/partners", async (req: Request, res: Response) => {
     try {
-      const id = "part_" + Date.now();
-      const payload = { ...req.body, id, type: 'PARTNER', status: 'DISCOVERED' };
+      const input = parseOrRespond(createContactSchema, req, res);
+      if (input === null) return;
+      const payload = buildContactDocument(input, 'part', 'PARTNER', 'DISCOVERED');
       await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
       res.json(payload);
     } catch(e: any) { res.status(500).json({error: e.message}); }
@@ -969,8 +1043,34 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
 
   app.post("/api/pipeline", async (req: Request, res: Response) => {
     try {
-      const newId = `opp_${Date.now()}`;
-      const payload = { ...req.body, id: newId, value: req.body.estimatedValue || req.body.value || 0 };
+      const input = parseOrRespond(createOpportunitySchema, req, res);
+      if (input === null) return;
+
+      // P1.4 — A new opportunity starts at an initial stage of the machine, not at whatever
+      // the caller sent. A supplied stage is honoured only if it is a legal starting point.
+      const requestedStage = input.stage;
+      const stage =
+        requestedStage && OPPORTUNITY.transitions[requestedStage] !== undefined
+          ? requestedStage
+          : OPPORTUNITY.initial[0];
+
+      const payload = {
+        id: `opp_${Date.now()}`,
+        version: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        stage,
+        // `value` was previously `req.body.estimatedValue || req.body.value || 0` with no type
+        // check, so a string produced NaN downstream and rendered as "NaN".
+        value: input.estimatedValue ?? input.value ?? 0,
+        currency: input.currency ?? 'GBP',
+        title: input.title ?? null,
+        companyName: input.companyName ?? null,
+        contactName: input.contactName ?? null,
+        contactEmail: input.contactEmail ?? null,
+        nextStep: input.nextStep ?? null,
+        expectedCloseDate: input.expectedCloseDate ?? null,
+      };
       await addDoc(collection(firestore, orgPath(orgScope(req), 'opportunities')), payload);
       res.json(payload);
     } catch(e: any) {
