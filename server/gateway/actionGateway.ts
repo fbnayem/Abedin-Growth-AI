@@ -13,6 +13,8 @@ import { FABRICATED_PROVIDER_ID, isFabricatedProviderId } from '../lib/providerI
 import { assertCapability, CapabilityError, normalizeScopes, type Capability } from '../lib/capabilities';
 import { assertTimeZone, isWithinBusinessHours, parseInstant, DEFAULT_BUSINESS_HOURS, systemClock, type Clock } from '../../shared/domain/time';
 import { outboundMessageId } from '../lib/messageIdentity';
+import { calendarService } from '../services/calendar.service';
+import type { Availability } from '../providers/types';
 import {
   reconcileEmailSend,
   mayRetryAfterReconciliation,
@@ -70,7 +72,18 @@ export interface ActionResult {
      * timed out we could never establish whether it had happened. Refused before the network
      * rather than after it.
      */
-    | 'UNRECONCILABLE_SEND';
+    | 'UNRECONCILABLE_SEND'
+    /**
+     * S31 — free/busy reported a definite conflict. The addendum's invariant is that this
+     * produces ZERO create requests, so this code is returned instead of an event id.
+     */
+    | 'CALENDAR_CONFLICT'
+    /**
+     * S31/§14 — free/busy was asked and the answer could not be read (a calendar the
+     * credential cannot see returns per-calendar `errors` inside a 200). Unknown availability
+     * is not availability, so no event is created.
+     */
+    | 'AVAILABILITY_UNKNOWN';
   /** P1.11 — the normalized provider failure kind, when the failure came from a provider. */
   errorKind?: ProviderErrorKind;
   /**
@@ -751,82 +764,134 @@ export class ActionGateway {
      }
 
      
-     if (process.env.REAL_CALENDAR_CREATE_ENABLED === 'true') {
-         if (!firestore) return { success: false, error: 'Firestore not initialized' };
-         // Fetch oauth token for organization
-         const q = query(collection(firestore, 'oauth_connections'), where('organizationId', '==', request.organizationId));
-         const oauthsSnap = await getDocs(q);
-         // P0.8 — Same fabricated-success defect as the email path: a missing credential
-         // returned SUCCESS with a locally-minted `sim_evt_<timestamp>` id, so a meeting could
-         // be recorded as booked when no calendar event existed. Creating a calendar event is
-         // an irreversible external action; it must fail loudly rather than be invented.
-         let accessToken: string | null = null;
-         oauthsSnap.forEach(doc => {
-             const d = doc.data();
-             if (d.provider === 'gmail' || d.provider === 'GMAIL') {
-                 accessToken = d.accessToken ?? null;
-             }
-         });
-
-         if (!accessToken || isFabricatedProviderId(accessToken) || accessToken === 'mock_token') {
-             const reason =
-                 'No usable Google credential is configured for this organization. ' +
-                 'Refusing to report a calendar event that was never created.';
-             console.warn(`[ActionGateway] CALENDAR_CREATE refused: ${reason}`);
-             return { success: false, error: reason, errorCode: 'PROVIDER_NOT_CONFIGURED' };
-         }
-
-         // 4. Check free/busy via Google Calendar API
-         const fbRes = await fetchWithTimeout('https://www.googleapis.com/calendar/v3/freeBusy', {
-             method: 'POST',
-             headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-             body: JSON.stringify({
-                 timeMin: request.payload.startTime,
-                 timeMax: request.payload.endTime,
-                 items: [{ id: 'primary' }]
-             })
-         });
-         const fbData = await fbRes.json();
-         const hasConflict = fbData.calendars?.primary?.busy?.length > 0;
-
-         
-         // Perform real Google Calendar API call
-         try {
-             const res = await fetchWithTimeout('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', {
-                 method: 'POST',
-                 headers: {
-                     'Authorization': `Bearer ${accessToken}`,
-                     'Content-Type': 'application/json'
-                 },
-                 body: JSON.stringify({
-                     summary: request.payload.title,
-                     start: { dateTime: request.payload.startTime, timeZone },
-                     end: { dateTime: request.payload.endTime, timeZone },
-                     attendees: request.payload.attendees ? request.payload.attendees.map((e: string) => ({ email: e })) : [],
-                     conferenceData: {
-                         createRequest: {
-                             requestId: "req_" + Date.now(),
-                             conferenceSolutionKey: { type: "hangoutsMeet" }
-                         }
-                     }
-                 })
-             });
-             
-             if (!res.ok) {
-                 const errorText = await res.text();
-                 throw new Error(`Calendar API Error: ${res.status} ${errorText}`);
-             }
-             
-             const data = await res.json();
-             return { success: true, providerResult: { eventId: data.id, meetLink: data.hangoutLink } };
-         } catch(err: any) {
-             throw new Error(err.message);
-         }
-     } else {
-         console.log('[ActionGateway] Mocking CALENDAR_CREATE due to SAFE REBUILD MODE');
-         return { success: true, providerResult: { eventId: 'mock_evt_123' } };
+     // S41/S31 — this whole block used to be inline HTTP against Google with a second
+     // reading of the same feature flag, and it contained the defect §31 exists to name:
+     //
+     //     const fbData = await fbRes.json();                         // no res.ok check
+     //     const hasConflict = fbData.calendars?.primary?.busy?.length > 0;
+     //     ... // hasConflict is never read again; the event is created regardless
+     //
+     // The free/busy call was made, parsed, and the answer discarded. And because there was
+     // no `res.ok` check, a 401 body parses to `{}`, so even had the answer been read it
+     // would have said `false` — free — for every failed lookup.
+     //
+     // The flag is not re-read here either. `checkFeatureFlag` already gated this dispatch
+     // through `isRealActionEnabled`; a second gate reading `process.env` directly is exactly
+     // the P0.2 defect (two readers of one flag, disagreeing about when it was loaded), and
+     // its `else` branch returned `{ success: true, providerResult: { eventId: 'mock_evt_123' } }`
+     // — a fabricated success for an irreversible external action.
+     const accessToken = await this.findGoogleAccessToken(request.organizationId);
+     if (accessToken === null) {
+         const reason =
+             'No usable Google credential is configured for this organization. ' +
+             'Refusing to report a calendar event that was never created.';
+         console.warn(`[ActionGateway] CALENDAR_CREATE refused: ${reason}`);
+         return { success: false, error: reason, errorCode: 'PROVIDER_NOT_CONFIGURED' };
      }
 
+     calendarService.setCredentials({ access_token: accessToken });
+
+     // §31 — the invariant. Availability is established BEFORE any create request, and the
+     // answer is read. Anything other than a definite FREE returns here, so the number of
+     // create requests issued against a busy or unreadable slot is zero.
+     let availability: { availability: Availability; reason: string };
+     try {
+       availability = await calendarService.checkAvailability({
+         startAtUtc: startInstant.toISOString(),
+         endAtUtc: endInstant.toISOString(),
+         timeZone,
+         attendees: Array.isArray(request.payload.attendees) ? request.payload.attendees : [],
+       });
+     } catch (e) {
+       // A failed free/busy READ is not an ambiguous WRITE. Nothing was created, so this must
+       // not reach the §32 reconciliation path and be recorded as 'this may have happened'.
+       const classified = classifyThrown(e, {
+         provider: 'google-calendar',
+         operation: 'checkAvailability',
+       });
+       const reason =
+         `Availability could not be checked (${classified.kind}: ${classified.signal}). ` +
+         'No event was created: an unchecked slot is not a free slot.';
+       console.warn(`[ActionGateway] CALENDAR_CREATE refused: ${reason}`);
+       return { success: false, error: reason, errorCode: 'AVAILABILITY_UNKNOWN', errorKind: classified.kind };
+     }
+
+     if (availability.availability === 'BUSY') {
+       const reason = `Schedule conflict. ${availability.reason} No create request was issued.`;
+       console.warn(`[ActionGateway] CALENDAR_CREATE refused: ${reason}`);
+       return { success: false, blockedReason: reason, error: reason, errorCode: 'CALENDAR_CONFLICT' };
+     }
+     if (availability.availability !== 'FREE') {
+       // §14 — UNKNOWN is not permission. Written as a check for the one permitting value
+       // rather than as `=== 'UNKNOWN'`, so a fourth availability value cannot slip through.
+       const reason = `Availability is not established. ${availability.reason} No create request was issued.`;
+       console.warn(`[ActionGateway] CALENDAR_CREATE refused: ${reason}`);
+       return { success: false, blockedReason: reason, error: reason, errorCode: 'AVAILABILITY_UNKNOWN' };
+     }
+
+     const created = await calendarService.createEvent({
+       title: request.payload.title,
+       description: request.payload.description,
+       startAtUtc: startInstant.toISOString(),
+       endAtUtc: endInstant.toISOString(),
+       timeZone,
+       attendees: Array.isArray(request.payload.attendees) ? request.payload.attendees : [],
+       // P0.13 — Google treats this as an idempotency key. It was `"req_" + Date.now()`, so a
+       // retried booking minted a SECOND Meet conference for one meeting.
+       idempotencyKey: request.payload.idempotencyKey,
+     });
+
+     // The calendar path had no equivalent of the outbox worker's fabricated-id guard, which
+     // is how `eventId: 'mock_evt_123'` could have become a booked meeting.
+     if (isFabricatedProviderId(created.eventId)) {
+       const reason =
+         `Refusing to record a calendar event with a locally-minted id (${created.eventId}). ` +
+         'A provider id must come from a provider.';
+       console.error(`[ActionGateway] ${reason}`);
+       return { success: false, error: reason, errorCode: 'FABRICATED_PROVIDER_ID' };
+     }
+
+     return {
+       success: true,
+       providerResult: {
+         eventId: created.eventId,
+         conferenceUrl: created.conferenceUrl,
+         availabilityReason: availability.reason,
+       },
+     };
+  }
+
+  /**
+   * The Google credential for an organisation.
+   *
+   * Both action paths need it and both used to inline the same loop, filtering on
+   * `d.provider === 'gmail' || d.provider === 'GMAIL'` — including the CALENDAR path, which
+   * reports its provider as 'google-calendar' everywhere else. One Google connection carries
+   * both scopes, so matching the row is a question about the connection, not about the action,
+   * and it belongs in one place where the accepted spellings are written down once.
+   */
+  private async findGoogleAccessToken(organizationId: string): Promise<string | null> {
+    if (!firestore) return null;
+    const q = query(
+      collection(firestore, 'oauth_connections'),
+      where('organizationId', '==', organizationId)
+    );
+    const snap = await getDocs(q);
+    let accessToken: string | null = null;
+    snap.forEach((d) => {
+      const row = d.data();
+      const provider = typeof row.provider === 'string' ? row.provider.toLowerCase() : '';
+      if (provider === 'gmail' || provider === 'google' || provider === 'google-calendar') {
+        accessToken = row.accessToken ?? null;
+      }
+    });
+    // P0.8 — a fabricated token is not a token. `'mock_token'` is named explicitly because
+    // server.ts wrote that exact literal on every 'connect' and it does not match the
+    // fabricated-id pattern.
+    if (!accessToken || isFabricatedProviderId(accessToken) || accessToken === 'mock_token') {
+      return null;
+    }
+    return accessToken;
   }
 
 }

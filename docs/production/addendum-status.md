@@ -2100,6 +2100,132 @@ direction under §14 and it makes the missing configuration visible instead of l
 
 ---
 
+## 1s. S41/S31/P0.13 — the calendar contract nothing implemented, and the conflict check that was computed and thrown away (2026-09-07)
+
+### Three pieces of calendar code, no contract between them
+
+`CalendarProvider` was declared in P1.11. A repo-wide search for `implements CalendarProvider` returned
+**zero hits**, so nothing could be checked against it by the compiler and nothing could be
+substituted for it in a test. Three disjoint implementations existed instead:
+
+| Where | Reachable? | What it did |
+|---|---|---|
+| `calendar.service.ts` | **no importers at all** | free/busy took four parameters, used one, contacted nothing, returned UNKNOWN |
+| `ActionGateway.executeCalendarCreate` | **no** — `dispatchAction` had one call site and it hardcoded EMAIL_SEND | the only real free/busy call, and its answer was discarded |
+| `POST /api/meetings` | **yes** | never contacted a provider |
+
+### The line §31 exists to name
+
+    const fbData = await fbRes.json();                       // no res.ok check
+    const hasConflict = fbData.calendars?.primary?.busy?.length > 0;
+    ...                                                      // never read again
+
+The call was made, the response parsed, the answer **assigned to a variable nothing reads**, and
+the event created regardless. And the missing `res.ok` check means a 401 body parses to `{}`,
+so `.calendars` is undefined and the discarded answer would have been `false` — free — for every
+failed lookup anyway. Two independent reasons the check could not work, stacked.
+
+It also asked only about `primary`. The prospect's calendar was never in the question.
+
+### Measured, on four answers Google actually gives
+
+    free/busy answer                 old hasConflict   now                     create requests
+    ------------------------------------------------------------------------------------------
+    both calendars clear             no conflict       FREE                    1
+    attendee is busy                 no conflict       BUSY                    0
+    attendee calendar not visible    no conflict       UNKNOWN                 0
+    the credential is dead (401)     no conflict       throws UNAUTHENTICATED  0
+
+The old column is not a bug in three of four rows and correct in one — it is the same value in
+all four, because the variable was never read. §31 asks how many create requests are issued when
+free/busy reports busy. The answer was "one, every time"; it is now zero.
+
+**UNKNOWN is the row that matters most.** Google returns per-calendar `errors` *inside a 200* for
+calendars the credential cannot see, which is the ordinary case for an attendee. Reporting that
+as FREE is a fabricated availability claim, and §14 forbids the unknown becoming permission.
+
+### What else was in there
+
+- `providerResult: { eventId: 'mock_evt_123' }` with `success: true` — a **fabricated success for an
+  irreversible external action**. The email path has had a fabricated-id guard since P0.8; the
+  calendar path had none, because it had no caller to need one.
+- A second read of `REAL_CALENDAR_CREATE_ENABLED`, taken straight from `process.env` while the rest
+  of the file used the lazy accessor. Two readers of one flag disagreeing about when it was
+  loaded is the P0.2 defect exactly.
+- `catch (err) { throw new Error(err.message); }` — which **destroys the classification**.
+  `classifyThrown` deliberately never reads `message` (§18: a customer once steered it by writing
+  a word in a subject line), so every calendar failure, including a clean 403, became UNKNOWN,
+  therefore AMBIGUOUS, therefore un-retryable.
+- `requestId: "req_" + Date.now()`. Google treats that as an idempotency key, so a retried
+  booking minted a **second Google Meet conference** for one meeting and the customer received
+  two links. It is now derived from the booking: same booking, same id, twice —
+  `ag-debe4e3adf3252916f0af76a48100d05` both times.
+- `let conferenceUrl = "https://meet.google.com/"` — the Meet **homepage** — as the fallback when
+  the provider returned no conference. A link to nothing, indistinguishable from a link to
+  something until somebody clicks it at the appointed hour. It is `null` now, which is what the
+  contract's `string | null` was for.
+- The calendar path looked up its credential with `d.provider === 'gmail'` while reporting its
+  provider as `google-calendar` everywhere else. One Google connection carries both scopes, so
+  the accepted spellings now live in one helper instead of being re-guessed per action.
+
+### P0.13 — dispatch gets its second call site
+
+Every §31 finding in this document has rested on one fact: `dispatchAction` had exactly one call
+site and it hardcoded EMAIL_SEND. `POST /api/meetings` now dispatches CALENDAR_CREATE, so the
+calendar branch is reachable and §31 has an enforcement point on the path that runs.
+
+The two refusals are deliberately different, and the distinction is the point:
+
+- **provider says BUSY, or cannot say** → no local record either. 409. We do not write down a
+  meeting we have been told clashes.
+- **provider unreachable, or the flag is off** → the local record stands as
+  `PENDING_CALENDAR_SYNC`, now carrying `providerSyncReason`. Our own meeting list is ours; the
+  Google event is a sync, and an unsynced meeting labelled as such is honest where a silently
+  unsynced one is not.
+
+### Evidence
+
+`npm test`: **904 tests across 32 files**, up from 870 across 31. `tsc` exit 0, build clean, 10
+guardrails green. **Mutation-tested 24/24** — against a gate of `tsc && vitest` rather than vitest
+alone, because a contract mutation is caught by the compiler and a runner-only gate would have
+reported it as a survivor and invited a pointless test.
+
+Two of the three first-run survivors were the same mistake in different clothes:
+
+1. Emptying the attendee list on the **availability** call survived, because the assertion
+   checked the attendees on the **create** call. The event was still created with the right
+   attendees, having been checked against a calendar set that did not include them. "Is this
+   slot free" answered about the wrong calendars is worse than not answered.
+2. Replacing the dispatch with `const _unused = () => actionGateway.dispatchAction({...})` — an
+   arrow function never invoked — survived an assertion looking for `actionGateway.dispatchAction({`.
+   The needle is now the awaited assignment.
+
+The third could not be caught by a test at all: making `idempotencyKey` **optional** on
+`CreateEventInput` broke nothing, because vitest's transform strips types without checking them
+and the runtime guard still threw. Being required IS the protection — a caller can otherwise
+omit the field and find out in production. It is now held by a `@ts-expect-error` line, which
+fails compilation when the error it expects does not occur.
+
+### Status
+
+**S41 and S31 stay PARTIAL.**
+
+- **S31** now has a real implementation on a reachable path, proven by counting create requests
+  rather than by reading code. It is not VERIFIED because it has never run against a real Google
+  Calendar: every free/busy answer above came from a stubbed transport.
+- **S41** has its first `CalendarProvider` implementation, and the compiler holds it (renaming a
+  method fails `tsc`, measured). Remainder: Stripe, DocuSign and LinkedIn have no adapter and no
+  interface, and `PAYMENT_CREATE` / `SIGNATURE_SEND` / `EXTERNAL_MESSAGE_SEND` still fall through
+  the dispatch switch to `'Unsupported action type'`. `CALENDAR_UPDATE` and `CALENDAR_CANCEL` have
+  no case either.
+
+**Operator action:** the Google connection must carry a calendar scope
+(`https://www.googleapis.com/auth/calendar` or `.../calendar.events`). Existing connections
+record no scopes at all, so until the account is reconnected every booking will refuse with
+`CAPABILITY_NOT_GRANTED` and be recorded as `PENDING_CALENDAR_SYNC` with that reason attached.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -2221,7 +2347,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S28 | Bounce, DSN and automated-mail classification before replying | NOT_STARTED | CRITICAL | `inboundPipeline.ts:112`; `models.ts:814-834`; `salesDecisionEngine.ts:133-134`; `schema.ts:122` | Zero classification of bounce/DSN/OOO/auto-reply; the one intent gate compares against strings the engine never returns; the address blacklist is unreachable; nothing writes `automationClassification` |
 | S29 | Contact/account dedup, normalization and merge | PARTIAL | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all**. *Superseded by §1f: derived ids, account creation and a transactional merge landed 2026-09-06; held at PARTIAL by the open Firestore rules and the absence of a backfill.* |
 | S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | PARTIAL | HIGH | `shared/domain/time.ts`; `schema.ts` (76 `timestamptz` cols); `server.ts` (`POST /api/meetings`); `multiAgentReplySystem.ts`; `ScheduleMeetingModal.tsx`; `calendar.service.ts` | Zone-aware hours, IANA validation (rejecting `BST`, which Intl resolves to Asia/Dhaka), `{startAtUtc, timeZone}` meetings, all 76 columns zoned, and the `datetime-local` round trip fixed — all verified at runtime. **Remainder: 99 direct wall-clock reads in `server/` are not yet routed through the injectable `Clock`,** which is injected only into the reply composer and the context bundle |
-| S31 | Calendar conflict invariant: busy → zero create requests | PARTIAL | CRITICAL | `outbox.worker.ts:78`, `:95` (the only `dispatchAction` call site, hardcoding `EMAIL_SEND`); `actionGateway.ts:247-252`, `:282`, `:287`, `:300`; `server.ts:672` | **There is no partial implementation.** `executeCalendarCreate` is unreachable — `dispatchAction` has exactly one call site repo-wide and it always passes `ActionType.EMAIL_SEND`. The live booking path (`server.ts:1496`, was `:672` before this branch moved it) performs a local overlap check and a bare `addDoc`, with no provider call. **P1.9 did not move this.** `checkFreeBusy` now reports `UNKNOWN` instead of `true`, removing a way a caller could be misled, but it still has no callers and `executeCalendarCreate` is still unreachable |
+| S31 | Calendar conflict invariant: busy → zero create requests | PARTIAL | CRITICAL | `server/services/calendar.service.ts` (`GoogleCalendarService implements CalendarProvider`); `actionGateway.ts` (`executeCalendarCreate`, `findGoogleAccessToken`); `server.ts` (`POST /api/meetings` -> `dispatchAction(CALENDAR_CREATE)`, the second call site); `calendarContract.invariant.test.ts` (create requests counted) | Landed 2026-09-07 (§1s). `GoogleCalendarService implements CalendarProvider` performs a real free/busy call; the gateway proceeds only on a definite `FREE`, so BUSY and UNKNOWN each produce **zero create requests** — counted at runtime, not read. `POST /api/meetings` now dispatches CALENDAR_CREATE, giving `dispatchAction` its second call site and §31 an enforcement point on the path that runs. The discarded `hasConflict`, the `mock_evt_123` fabricated success, the `"req_" + Date.now()` conference id and the Meet-homepage fallback link are all gone. **Remainder: never exercised against a real Google Calendar** — every free/busy answer tested came from a stubbed transport |
 | S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `server/lib/providerError.ts`; `actionGateway.ts` (single classifier); `providerError.invariant.test.ts` | Detection is fixed and structural. The old test (`e.message.includes('timeout')`) matched **none** of the errors this system actually raises — including its own `HttpTimeoutError`, whose message says "timed out", not "timeout" — so the AMBIGUOUS branch never fired and timed-out sends were retryable. Now classified by type/`code`/HTTP status, with UNKNOWN resolving to AMBIGUOUS (§14). Reconciliation landed 2026-09-07 (§1r): sends carry a Message-ID derived from the idempotency key, the gateway queries the provider after an ambiguous outcome, and the three verdicts drive three behaviours — only NOT_APPLIED permits a retry. **Remainder: never exercised against a real Gmail account, and only EMAIL_SEND is reconcilable** — CALENDAR_CREATE, PAYMENT_CREATE and SIGNATURE_SEND reach the same branch and get STILL_UNKNOWN by default |
 | S33 | Webhook signature, dedupe and ordering | PARTIAL | CRITICAL | `server.ts:58`, `:62`, `:773`, `:781-782`, `:810-811`; `stripe.routes.ts:55,62-69` | Stripe verification never succeeds (body already parsed); DocuSign unverified and unauthenticated; no event ledger, no dedupe, no ordering watermark; Gmail acks 200 before processing |
 | S34 | CSV / spreadsheet formula injection on export | PARTIAL | HIGH | `src/utils/exportUtils.ts:39-40`, `:18`; `LeadsView.tsx:198`; `server.ts:112-119` | Only `"` is doubled; no neutralisation of `=`, `+`, `-`, `@`, tab or CR; columns derived from `Object.keys(data[0])`, so attacker-injected keys become columns |
@@ -2231,7 +2357,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S38 | Recovery console / safe operator tooling | NOT_STARTED | CRITICAL | `outbox.routes.ts:13,20-38`; `server.ts:337` vs `:560`; `killSwitch.controller.ts:15`; live probe `GET /api/outbox` → 500 | **There is no operator tooling — there is operator-tooling-shaped UI.** The console reads a store the queue does not live in; the kill switch is a stub that returns no `circuitBreaker` field, so the panel crashes; there is no retry, requeue or dead-letter of any kind; operator actions are unaudited and unauthenticated |
 | S39 | Monolith: ~75 route registrations against empty decomposition folders | PARTIAL | CRITICAL | `server.ts:309-344`, `:760-826`, `:62`, `:193-195` | ~70 of ~75 endpoints inline; controller and repository layers are 100% dead; ~30 hardcoded success stubs; zero request validation; webhooks registered only in the production branch |
 | S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | PARTIAL | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | Four React modules value-import a server agent (only esbuild elision keeps `@google/genai` and the API-key read out of the bundle); two real cycles; no lint rule, no dependency-cruiser, no ESLint |
-| S41 | Adapter contracts | PARTIAL | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). **Remainder: `CalendarProvider` has no implementation** — calendar code is still inline in the gateway and in `calendar.service.ts`, neither declaring the interface |
+| S41 | Adapter contracts | PARTIAL | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). `CalendarProvider` implemented 2026-09-07 (§1s) by `GoogleCalendarService`, and the compiler holds it — renaming `checkAvailability` fails `tsc`, measured by mutation. **Remainder: Stripe, DocuSign and LinkedIn have no adapter and no interface**, and `PAYMENT_CREATE` / `SIGNATURE_SEND` / `EXTERNAL_MESSAGE_SEND` / `CALENDAR_UPDATE` / `CALENDAR_CANCEL` all still fall through the dispatch switch to `Unsupported action type` |
 | S42 | Chaos / fault-injection across the autonomous send path | NOT_STARTED | CRITICAL | `db/index.ts:48-51`; `outbox.worker.ts:49,134-137`; `gmail.service.ts:151-167`; `geminiClient.ts:139-145` | Zero fault-injection tests; every one of the 15 required failure modes is unhandled — DB down, mid-sequence commit failure, post-send crash, timeout, 401, 429, 500, malformed AI JSON, duplicate/out-of-order webhook, concurrent claim, concurrent human edit |
 | S43 | Outbox transaction boundaries: atomic claim, crash recovery, duplicates | PARTIAL | CRITICAL | `outbox.service.ts:47-62`; `outbox.worker.ts:23,95,120`; `schema.ts:147-156` | The "claim" is a read; no lease, no CAS, no transaction, no attempt counter, no re-entrancy guard; producer writes Postgres while consumer reads Firestore |
 | S44 | Alerting: thresholds and destinations | NOT_STARTED | HIGH | `metrics.service.ts:12-20`; `inboundPipeline.ts:147`; `salesDecisionEngine.ts:30-31`; case-insensitive grep `pagerduty\|slack\|sentry\|datadog\|prometheus\|opentelemetry\|cloudmonitoring\|webhookUrl\|alertTransport` over `server/ src/ package.json` → **one hit**, the comment `// In production, send to Datadog / Prometheus` at `metrics.service.ts:12` | One threshold (`>2000ms` → `console.warn`) on a line that never executes; `incrementCounter` has an empty body; zero of eleven required signals have a threshold or a destination; no alert client is a dependency |

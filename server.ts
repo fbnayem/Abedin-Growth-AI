@@ -5,7 +5,7 @@
 // Keeping this first guarantees .env is loaded before any other module body executes.
 import { safeModeSnapshot, isFullySafeMode } from './server/config/safeMode';
 import { getCircuitBreakerState, setCircuitBreaker } from './server/services/circuitBreaker.service';
-import { isFabricatedProviderId } from './server/gateway/actionGateway';
+import { isFabricatedProviderId, actionGateway, ActionType } from './server/gateway/actionGateway';
 import { verifyDocuSignSignature, verifyPubSubToken } from './server/services/webhookVerification.service';
 import { standardApiLimiter, aiOperationLimiter, webhookLimiter } from './server/middleware/rateLimit';
 import { collection, getDocs, getDoc, addDoc, doc, setDoc, updateDoc, query, where, orderBy, limit } from 'firebase/firestore';
@@ -1531,11 +1531,20 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
   // ("free/busy reports busy -> calendar create request count = 0") had no enforcement point
   // at all — this handler was a bare addDoc that accepted any body and always said SCHEDULED.
   //
-  // Two changes: the request is validated and projected (it previously spread `...req.body`
-  // straight into the document, a mass assignment), and an overlap check now runs before the
-  // write. This checks OUR OWN calendar; a real provider free/busy call additionally requires
-  // Google credentials, so a meeting created here is explicitly NOT marked as confirmed on
-  // the provider — it is PENDING_CALENDAR_SYNC until something actually books it.
+  // The request is validated and projected (it previously spread `...req.body` straight into
+  // the document, a mass assignment), an overlap check runs against OUR OWN records, and —
+  // as of 2026-09-07 — the booking is then dispatched through the ActionGateway as a real
+  // CALENDAR_CREATE. That gives `dispatchAction` its SECOND call site in the repository and
+  // gives §31 an enforcement point on the path that actually runs.
+  //
+  // The two refusals are not the same refusal, and the distinction is the whole point:
+  //
+  //   provider says BUSY / cannot say      -> NO local record either. Zero create requests,
+  //                                           and we do not record a meeting we know clashes.
+  //   provider unreachable / flag off      -> local record stands, PENDING_CALENDAR_SYNC.
+  //                                           Our own meeting list is ours; the Google event
+  //                                           is a sync, and an unsynced meeting is honest
+  //                                           where a silently-unsynced one is not.
   app.post("/api/meetings", async (req: Request, res: Response) => {
     try {
       const { contactId, scheduledTime, timeZone, durationMinutes, title, notes } = req.body || {};
@@ -1611,6 +1620,61 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         );
       }
 
+      // P0.13/S31 — free/busy on the live path.
+      //
+      // The idempotency key is derived from the booking itself, so retrying the same request
+      // asks Google for the SAME conference rather than minting a second Meet link for one
+      // meeting (the old `requestId: "req_" + Date.now()` did exactly that).
+      const idempotencyKey = [
+        orgScope(req),
+        contactId ?? "no-contact",
+        String(startMs),
+        String(duration),
+      ].join(":");
+
+      const dispatchResult = await actionGateway.dispatchAction({
+        actionType: ActionType.CALENDAR_CREATE,
+        organizationId: orgScope(req),
+        targetId: contactId ?? "unknown",
+        proposedBy: "POST /api/meetings",
+        payload: {
+          title: title ?? "Meeting",
+          description: notes ?? undefined,
+          startTime: startInstant.toISOString(),
+          endTime: new Date(endMs).toISOString(),
+          timezone: timeZone,
+          attendees: [],
+          idempotencyKey,
+        },
+      });
+
+      // A conflict the PROVIDER reported, or an availability we could not read, refuses the
+      // booking outright. §31 asks how many create requests are issued when free/busy says
+      // busy; the gateway issues zero, and this keeps the local record consistent with that.
+      if (dispatchResult.errorCode === 'CALENDAR_CONFLICT' || dispatchResult.errorCode === 'AVAILABILITY_UNKNOWN') {
+        return sendError(
+          req,
+          res,
+          'VERSION_CONFLICT',
+          dispatchResult.blockedReason ?? dispatchResult.error ?? "The slot is not available.",
+          { status: 409, details: { errorCode: dispatchResult.errorCode } }
+        );
+      }
+
+      // Anything else that failed leaves the meeting recorded but explicitly unsynced. The
+      // reason travels with the record so the operator sees WHY nothing was booked, rather
+      // than a status that merely says PENDING forever.
+      const providerEventId =
+        dispatchResult.success === true ? dispatchResult.providerResult?.eventId ?? null : null;
+      const meetUrl =
+        dispatchResult.success === true ? dispatchResult.providerResult?.conferenceUrl ?? null : null;
+      const providerSyncStatus =
+        dispatchResult.success === true ? 'SYNCED' : 'PENDING_CALENDAR_SYNC';
+      const providerSyncReason =
+        dispatchResult.success === true
+          ? null
+          : dispatchResult.blockedReason ?? dispatchResult.error ?? "Calendar sync did not run.";
+
       const payload = {
         id: "meet_" + Date.now(),
         contactId: contactId ?? null,
@@ -1622,9 +1686,12 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         timeZone: timeZone,
         durationMinutes: duration,
         status: 'SCHEDULED',
-        // Honest about provider state: nothing has been booked on a real calendar here.
-        providerSyncStatus: 'PENDING_CALENDAR_SYNC',
-        providerEventId: null,
+        // Honest about provider state, and now able to say something other than "pending":
+        // this reports what the dispatch actually returned rather than a constant.
+        providerSyncStatus,
+        providerEventId,
+        providerSyncReason,
+        meetUrl,
         createdAt: new Date(),
       };
       await addDoc(collection(firestore, orgPath(orgScope(req), 'meetings')), payload);

@@ -67,6 +67,16 @@ export interface CreateEventInput {
   /** IANA identifier. Never an abbreviation: "BST" resolves to Asia/Dhaka (P1.9). */
   timeZone: string;
   attendees: readonly string[];
+  /**
+   * P0.13 — the conference request id is derived from this, never from `Date.now()`.
+   *
+   * Google treats `conferenceData.createRequest.requestId` as an idempotency key: the same
+   * value returns the same conference, a new value mints a second one. The old code passed
+   * `"req_" + Date.now()`, so a retried booking produced a SECOND Google Meet for the same
+   * meeting and the customer received two links for one appointment. Required, not optional:
+   * an omitted key is how that defect comes back.
+   */
+  idempotencyKey: string;
 }
 
 export interface CreateEventOutput {

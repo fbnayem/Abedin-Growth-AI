@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { GoogleCalendarService } from '../services/calendar.service';
 import {
   Clock,
   DEFAULT_BUSINESS_HOURS,
@@ -649,17 +650,32 @@ describe('P1.9 — time correctness', () => {
     });
 
     it('validateBusinessHours no longer returns true for everything', () => {
-      const calendar = strip(readFileSync('server/services/calendar.service.ts', 'utf8'));
-      expect(calendar).toContain('isWithinBusinessHours(startTime, hours)');
-      expect(calendar).not.toMatch(/validateBusinessHours[\s\S]{0,200}?return true;/);
+      // Migrated 2026-09-07: this asserted the source text `isWithinBusinessHours(startTime,
+      // hours)`, which stopped matching when the adapter began forcing the caller's zone onto
+      // the hours (`{ ...hours, timeZone }`) — a change that makes the function MORE correct.
+      // A test pinned to an argument list fails when the argument list improves, so it now
+      // exercises the behaviour instead: the same instant is inside business hours in one zone
+      // and outside them in another, which no `return true` can produce.
+      const svc = new GoogleCalendarService();
+      const nineAmLondon = new Date('2026-07-01T09:00:00.000Z');
+      expect(svc.validateBusinessHours(nineAmLondon, 'Europe/London').valid).toBe(true);
+      expect(svc.validateBusinessHours(nineAmLondon, 'Asia/Tokyo').valid).toBe(false);
     });
 
-    it('checkFreeBusy reports UNKNOWN rather than claiming the slot is free', () => {
-      const calendar = strip(readFileSync('server/services/calendar.service.ts', 'utf8'));
+    it('availability is three-valued and UNKNOWN is reachable', () => {
       // Claiming "free" from a function that never contacted a provider is a fabricated
-      // success (§39) wearing a boolean.
-      expect(calendar).toContain("status: 'UNKNOWN'");
-      expect(calendar).not.toMatch(/checkFreeBusy[\s\S]{0,300}?return true;/);
+      // success (§39) wearing a boolean. `checkFreeBusy` used to return a hardcoded UNKNOWN
+      // because it contacted nothing; it is now a real free/busy call, so the assertion moved
+      // from "it says UNKNOWN" to "it says UNKNOWN when it cannot read the answer" — which is
+      // a claim about behaviour rather than about a string in the file.
+      const calendar = strip(readFileSync('server/services/calendar.service.ts', 'utf8'));
+      expect(calendar).toContain('implements CalendarProvider');
+      expect(calendar).toContain("availability: 'UNKNOWN'");
+      expect(calendar).toContain("availability: 'BUSY'");
+      expect(calendar).toContain("availability: 'FREE'");
+      // The runtime proof of the UNKNOWN branch lives in calendarContract.invariant.test.ts,
+      // which drives the adapter against a stubbed transport that returns per-calendar errors.
+      expect(calendar).not.toMatch(/checkAvailability[\s\S]{0,300}?return true;/);
     });
   });
 
