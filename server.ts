@@ -33,6 +33,7 @@ import {
   DEFAULT_BUSINESS_HOURS,
   toIsoOrNull,
 } from './shared/domain/time';
+import { normalizeScopes } from './server/lib/capabilities';
 import {
   expectedVersionFrom,
   mutateWithVersion,
@@ -1270,16 +1271,40 @@ app.get("/api/health", (req: Request, res: Response) => {
     const orgId = orgScope(req);
 
     try {
+      // P1.11 — the record now stores what the grant actually WAS.
+      //
+      // It previously held the token, the account and an expiry, and nothing about scopes or
+      // refresh. Two consequences followed. Nothing could check before sending whether this
+      // credential was ever permitted to send, so a `gmail.readonly` token reached the send
+      // path and was refused by Google after dispatch. And with no refresh token the
+      // connection died an hour later and stayed dead until a human reconnected.
+      //
+      // `scopes` is normalised to an array or to null. Null means "not recorded", which the
+      // capability check treats as a refusal rather than as a blank cheque: an unrecorded
+      // grant is not a grant (§14).
+      const recordedScopes = normalizeScopes(req.body?.scope ?? req.body?.scopes);
       const record: Record<string, unknown> = {
         organizationId: orgId,
         provider: 'gmail',
         accessToken,
+        refreshToken: typeof req.body?.refreshToken === 'string' && req.body.refreshToken.length > 0
+          ? req.body.refreshToken
+          : null,
+        scopes: recordedScopes,
         accountEmail: accountEmail || null,
         // Expiry is derived server-side; an absent expiresIn means "unknown", not "forever".
         expiresAt: typeof expiresIn === 'number' ? new Date(Date.now() + expiresIn * 1000) : null,
         status: 'ACTIVE',
         updatedAt: new Date(),
       };
+
+      if (recordedScopes === null) {
+        console.warn(
+          `[oauth] Gmail connection for ${orgId} stored WITHOUT scopes. Sends will be refused ` +
+            `by the capability pre-flight until the account is reconnected with a scope list. ` +
+            `This is deliberate: an unrecorded grant is not a grant.`
+        );
+      }
 
       const existing = await getDocs(query(collection(firestore, 'oauth_connections'), where('organizationId', '==', orgId), where('provider', '==', 'gmail')));
       if (!existing.empty) {

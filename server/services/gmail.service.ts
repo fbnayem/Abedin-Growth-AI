@@ -1,5 +1,8 @@
 import { config } from '../config/environment';
 import { fetchWithTimeout } from '../lib/httpClient';
+import { classifyResponse, classifyThrown, ProviderError } from '../lib/providerError';
+import type { EmailProvider, RefreshableCredential } from '../providers/types';
+import type { Capability } from '../lib/capabilities';
 
 export interface SendEmailOptions {
   to: string;
@@ -27,7 +30,13 @@ export interface GmailMessage {
   references?: string;
 }
 
-export class GmailService {
+// P1.11 — the adapter now states its contract instead of merely happening to satisfy one.
+// `implements` makes the compiler check it: an adapter that stops throwing ProviderError, or
+// starts inventing message ids, fails the build rather than the production send.
+export class GmailService implements EmailProvider, RefreshableCredential {
+  readonly providerName = 'gmail';
+  readonly requiredCapabilities: readonly Capability[] = ['EMAIL_SEND'];
+
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
 
@@ -42,6 +51,80 @@ export class GmailService {
     }
   }
 
+  /**
+   * P1.11 — the refresh flow.
+   *
+   * `refreshToken` was a private field that was written and never read: there was no refresh
+   * flow at all, and no refresh token was even persisted (the `oauth_connections` record
+   * stored `accessToken` and `expiresAt` only). A Google access token lasts an hour, so every
+   * connection failed with a 401 after an hour and stayed failed until a human reconnected.
+   *
+   * A 401 is `NOT_APPLIED` and retryable exactly once the credential is replaced — which is
+   * why the disposition table marks it retryable while `PERMISSION_DENIED` is not: one is
+   * fixable by us, the other needs a person to consent.
+   */
+  async refreshAccessToken(): Promise<{ accessToken: string; expiresAt: Date | null }> {
+    if (!this.refreshToken) {
+      throw new ProviderError({
+        provider: "gmail",
+        operation: "refreshAccessToken",
+        kind: "PERMISSION_DENIED",
+        signal: "no refresh token stored",
+      });
+    }
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    if (!clientId || !clientSecret) {
+      // Refusing loudly rather than attempting a call that cannot succeed: a request with no
+      // client credentials returns 400, which would classify as INVALID_REQUEST and read as
+      // "our payload is malformed" rather than "this deployment is not configured".
+      throw new ProviderError({
+        provider: "gmail",
+        operation: "refreshAccessToken",
+        kind: "PERMISSION_DENIED",
+        signal: "GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET not configured",
+      });
+    }
+
+    let res: Response;
+    try {
+      res = await fetchWithTimeout("https://oauth2.googleapis.com/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: this.refreshToken,
+          grant_type: "refresh_token",
+        }).toString(),
+      });
+    } catch (e) {
+      throw classifyThrown(e, { provider: "gmail", operation: "refreshAccessToken" });
+    }
+
+    if (!res.ok) {
+      // Refreshing is idempotent and has no external side effect, so an ambiguous outcome
+      // here is safe to retry — unlike a send.
+      throw classifyResponse(res, { provider: "gmail", operation: "refreshAccessToken" });
+    }
+
+    const data: any = await res.json();
+    if (typeof data?.access_token !== "string" || data.access_token.length === 0) {
+      throw new ProviderError({
+        provider: "gmail",
+        operation: "refreshAccessToken",
+        kind: "UNKNOWN",
+        signal: "200 response carried no access_token",
+      });
+    }
+    this.accessToken = data.access_token;
+    const expiresAt =
+      typeof data.expires_in === "number"
+        ? new Date(Date.now() + data.expires_in * 1000)
+        : null; // absent means unknown, never "forever"
+    return { accessToken: data.access_token, expiresAt };
+  }
+
   
   async getHistory(historyId: string, emailAddress: string): Promise<any[]> {
     if (!this.accessToken) throw new Error("Credentials not set");
@@ -52,8 +135,10 @@ export class GmailService {
     });
     
     if (!res.ok) {
-       console.error("Failed to fetch Gmail history", await res.text());
-       return [];
+       // P1.11 — this returned `[]`, which reads to every caller as "no new messages".
+       // A dead credential (401) and a quiet inbox became the same value, so a broken
+       // connection looked like a working one with nothing to do. Silence is not emptiness.
+       throw classifyResponse(res, { provider: "gmail", operation: "getHistory" });
     }
     const data = await res.json();
     return data.history || [];
@@ -67,8 +152,10 @@ export class GmailService {
     });
     
     if (!res.ok) {
-       console.error("Failed to fetch Gmail message", await res.text());
-       return null;
+       // Same defect as getHistory: `null` meant both "no such message" and "we could not
+       // ask". A 404 genuinely is absence; a 401 or a 503 is not.
+       if (res.status === 404) return null;
+       throw classifyResponse(res, { provider: "gmail", operation: "getMessage" });
     }
     const data = await res.json();
     return this.parseMessage(data);
@@ -170,9 +257,12 @@ export class GmailService {
     });
 
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error("Gmail API Error:", errorText);
-      throw new Error(`Failed to send email via Gmail API: ${res.status} ${res.statusText}`);
+      // P1.11 — this threw a bare Error with the status embedded in prose, which is what the
+      // gateway then tried to classify by substring. The status is now carried structurally,
+      // and the provider's own text is logged rather than put in the message: it quotes
+      // request content, and request content is untrusted (§18).
+      console.error("Gmail API Error:", await res.text());
+      throw classifyResponse(res, { provider: "gmail", operation: "sendEmail" });
     }
 
     const data = await res.json();

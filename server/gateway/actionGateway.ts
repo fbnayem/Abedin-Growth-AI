@@ -8,6 +8,9 @@ import { gmailService } from '../services/gmail.service';
 import { outreachPolicyService } from '../policies/outreachPolicy';
 import { fetchWithTimeout } from '../lib/httpClient';
 import { orgPath, isValidOrgId } from '../tenancy/orgScope';
+import { classifyThrown, requiresReconciliation, type ProviderErrorKind } from '../lib/providerError';
+import { assertCapability, CapabilityError, normalizeScopes, type Capability } from '../lib/capabilities';
+import { assertTimeZone, isWithinBusinessHours, parseInstant, DEFAULT_BUSINESS_HOURS } from '../../shared/domain/time';
 
 export enum ActionType {
   EMAIL_SEND = 'EMAIL_SEND',
@@ -47,7 +50,79 @@ export interface ActionResult {
     | 'PROVIDER_UNAVAILABLE'
     | 'POLICY_BLOCKED'
     | 'FABRICATED_PROVIDER_ID'
-    | 'UNSUPPORTED_ACTION';
+    | 'UNSUPPORTED_ACTION'
+    | 'INVALID_TIME_ZONE'
+    | 'INVALID_INSTANT'
+    | 'INVALID_DURATION'
+    | 'OUTSIDE_BUSINESS_HOURS'
+    | 'CAPABILITY_NOT_GRANTED';
+  /** P1.11 — the normalized provider failure kind, when the failure came from a provider. */
+  errorKind?: ProviderErrorKind;
+  /**
+   * P1.11 — set when an IRREVERSIBLE action failed ambiguously. A caller that retries while
+   * this is true may cause the side effect a second time (§32).
+   */
+  requiresReconciliation?: boolean;
+}
+
+/**
+ * Which actions cannot be undone by repeating them.
+ *
+ * This drives the §32 gate, so it is a closed switch rather than a list with a default: a new
+ * ActionType must be classified deliberately, and the fallback is `true` (treat it as
+ * irreversible) because assuming an unknown action is safe to repeat is the dangerous
+ * direction.
+ */
+export function isIrreversible(actionType: ActionType): boolean {
+  switch (actionType) {
+    case ActionType.EMAIL_SEND:
+    case ActionType.CALENDAR_CREATE:
+    case ActionType.CALENDAR_UPDATE:
+    case ActionType.CALENDAR_CANCEL:
+    case ActionType.PAYMENT_CREATE:
+    case ActionType.SIGNATURE_SEND:
+    case ActionType.EXTERNAL_MESSAGE_SEND:
+      return true;
+    case ActionType.CRM_UPDATE:
+      // An internal, idempotent write to our own store. Repeating it changes nothing.
+      return false;
+    default:
+      return true;
+  }
+}
+
+/** The provider an action talks to, for the error record. */
+export function providerFor(actionType: ActionType): string {
+  switch (actionType) {
+    case ActionType.EMAIL_SEND:
+      return 'gmail';
+    case ActionType.CALENDAR_CREATE:
+    case ActionType.CALENDAR_UPDATE:
+    case ActionType.CALENDAR_CANCEL:
+      return 'google-calendar';
+    case ActionType.PAYMENT_CREATE:
+      return 'stripe';
+    case ActionType.SIGNATURE_SEND:
+      return 'docusign';
+    case ActionType.EXTERNAL_MESSAGE_SEND:
+      return 'linkedin';
+    default:
+      return 'internal';
+  }
+}
+
+/** The capability an action requires, or null when it touches no provider. */
+export function capabilityFor(actionType: ActionType): Capability | null {
+  switch (actionType) {
+    case ActionType.EMAIL_SEND:
+      return 'EMAIL_SEND';
+    case ActionType.CALENDAR_CREATE:
+    case ActionType.CALENDAR_UPDATE:
+    case ActionType.CALENDAR_CANCEL:
+      return 'CALENDAR_WRITE';
+    default:
+      return null;
+  }
 }
 
 /**
@@ -111,6 +186,28 @@ export class ActionGateway {
       }
     }
 
+    // 2b. Capability pre-flight (P1.11).
+    //
+    // The only question asked before dispatch used to be "is there an access token?".
+    // Whether that token had ever been granted permission to send was never asked, because
+    // the granted scopes were never stored. A `gmail.readonly` token therefore reached the
+    // send path and failed at Google with a 403 — after the action was dispatched, logged as
+    // attempted, and counted against the outbox. A 403 for missing scope is not retryable, so
+    // every retry spent a network round trip rediscovering the same fact.
+    //
+    // Asking here costs nothing and answers before anything leaves the process.
+    const requiredCapability = capabilityFor(request.actionType);
+    if (requiredCapability !== null) {
+      const preflight = await this.checkProviderCapability(request, requiredCapability);
+      if (preflight !== null) {
+        await this.logAction(actionId, 'BLOCKED', request, {
+          reason: preflight.error,
+          capability: requiredCapability,
+        });
+        return preflight;
+      }
+    }
+
     // 3. Execution routing
     let result: ActionResult = { success: false };
     try {
@@ -132,17 +229,123 @@ export class ActionGateway {
       return result;
     } catch (e: any) {
       console.error(`[ActionGateway] Fatal error during ${request.actionType}:`, e);
-      // E. AMBIGUOUS PROVIDER RESULT
-      // Network dropped or 504 Gateway Timeout means we don't know if the provider succeeded.
-      const isAmbiguous = e.message.includes('timeout') || e.message.includes('network');
-      const status = isAmbiguous ? 'AMBIGUOUS_PROVIDER_RESULT' : 'ERROR';
-      await this.logAction(actionId, status, request, { error: e.message, requiresReconciliation: isAmbiguous });
-      
-      if (isAmbiguous) {
-         // Queue for reconciliation worker...
-         console.warn(`[ActionGateway] Provider result is ambiguous. Action queued for reconciliation.`);
+
+      // P1.11 — the §32 classifier. This was:
+      //
+      //     const isAmbiguous = e.message.includes('timeout') || e.message.includes('network');
+      //
+      // which was inverted in both directions, and measurably so. `fetchWithTimeout` throws
+      // `HttpTimeoutError`, whose message reads "…timed out after 15000ms" — and "timed out"
+      // does not contain "timeout". So the ONE timeout this codebase raises classified as a
+      // definite failure, as did every other real provider error ("fetch failed", "socket
+      // hang up", "read ECONNRESET", "Rate Limit Exceeded", "504 Gateway Timeout").
+      //
+      // Meanwhile a message that DID contain "timeout" or "network" classified as ambiguous,
+      // and provider errors quote request content — so a customer could put the word in an
+      // email subject and steer the decision (§18).
+      //
+      // The result was precisely the failure §32 exists to prevent: a send that timed out,
+      // and may well have been delivered, was recorded as definitely-failed and became
+      // eligible for retry. Classification now reads type, code and HTTP status only.
+      const classified = classifyThrown(e, {
+        provider: providerFor(request.actionType),
+        operation: request.actionType,
+      });
+      const irreversible = isIrreversible(request.actionType);
+      const mustReconcile = requiresReconciliation(classified, irreversible);
+      const status = mustReconcile ? 'AMBIGUOUS_PROVIDER_RESULT' : 'ERROR';
+
+      await this.logAction(actionId, status, request, {
+        ...classified.toLogRecord(),
+        irreversible,
+        requiresReconciliation: mustReconcile,
+      });
+
+      if (mustReconcile) {
+        console.warn(
+          `[ActionGateway] ${classified.kind} on an irreversible ${request.actionType}: the ` +
+            `outcome is unknown, so this must be reconciled against the provider before any ` +
+            `retry. ${classified.disposition.rationale}`
+        );
       }
-      return { success: false, error: e.message, blockedReason: isAmbiguous ? 'AMBIGUOUS_PROVIDER_RESULT' : undefined };
+
+      return {
+        success: false,
+        error: classified.message,
+        errorKind: classified.kind,
+        isAmbiguousResult: classified.isAmbiguous,
+        requiresReconciliation: mustReconcile,
+        blockedReason: mustReconcile ? 'AMBIGUOUS_PROVIDER_RESULT' : undefined,
+      };
+    }
+  }
+
+  /**
+   * Returns null when the connection may perform `capability`, or the refusal to return.
+   *
+   * A connection we cannot READ is not a connection we may assume is fine: a datastore error
+   * here yields a refusal, not a pass. §14 — unknown must never default to permission — and
+   * the permission at stake is permission to send.
+   */
+  private async checkProviderCapability(
+    request: ActionRequest,
+    capability: Capability
+  ): Promise<ActionResult | null> {
+    if (!firestore) {
+      return {
+        success: false,
+        errorCode: 'CAPABILITY_NOT_GRANTED',
+        error: 'Cannot verify provider scopes: the datastore is unavailable. Refusing to send.',
+      };
+    }
+    const provider = providerFor(request.actionType);
+    try {
+      const snap = await getDocs(
+        query(
+          collection(firestore, 'oauth_connections'),
+          where('organizationId', '==', request.organizationId)
+        )
+      );
+      let connection: { provider: string; organizationId: string; scopes: string[] | null; status: string | null; expiresAt: any } | null = null;
+      snap.forEach((d) => {
+        const data: any = d.data();
+        const isGoogle = String(data.provider ?? '').toLowerCase() === 'gmail';
+        if (!isGoogle) return;
+        connection = {
+          provider,
+          organizationId: request.organizationId,
+          scopes: normalizeScopes(data.scopes ?? data.scope),
+          status: data.status ?? null,
+          expiresAt: data.expiresAt?.toDate?.() ?? data.expiresAt ?? null,
+        };
+      });
+
+      if (connection === null) {
+        return {
+          success: false,
+          errorCode: 'PROVIDER_NOT_CONFIGURED',
+          error: `No ${provider} connection is configured for this organization.`,
+        };
+      }
+
+      assertCapability(connection, capability, new Date());
+      return null;
+    } catch (e: any) {
+      if (e instanceof CapabilityError) {
+        console.warn(`[ActionGateway] ${request.actionType} refused: ${e.message}`);
+        return {
+          success: false,
+          errorCode: 'CAPABILITY_NOT_GRANTED',
+          error: e.message,
+        };
+      }
+      // Could not establish the grant. That is not the same as having it.
+      console.error(`[ActionGateway] Capability pre-flight failed for ${request.actionType}:`, e);
+      return {
+        success: false,
+        errorCode: 'CAPABILITY_NOT_GRANTED',
+        error: 'Could not verify provider scopes, so the grant is unknown. Refusing to send.',
+      };
     }
   }
 
@@ -347,10 +550,10 @@ export class ActionGateway {
 
         return { success: true, providerResult: result };
     } catch (e: any) {
-        if (e.message?.includes('timeout') || e.message?.includes('ECONNRESET')) {
-        return { success: false, error: e.message, isAmbiguousResult: true };
-      }
-      return { success: false, error: e.message };
+      // The same broken substring test lived here too, and missed the same errors. Rethrowing
+      // a classified error lets the one classifier in dispatchAction make the §32 decision,
+      // rather than two call sites each deciding it slightly differently.
+      throw classifyThrown(e, { provider: "gmail", operation: "EMAIL_SEND" });
     }
   }
 
@@ -358,25 +561,52 @@ export class ActionGateway {
   private async executeCalendarCreate(request: ActionRequest): Promise<ActionResult> {
      console.log(`[ActionGateway] Executing CALENDAR_CREATE for ${request.payload.title}`);
      
-     // O. CALENDAR EDGE CASES
-     // 1. Resolve Timezone
-     const tz = request.payload.timezone || 'UTC';
-     // 2. Check Business Hours
-     const date = new Date(request.payload.startTime);
-     const hour = date.getUTCHours();
-     if (hour < 8 || hour > 18) {
-         return { success: false, error: 'Outside business hours' };
+     // P1.9/P1.11 — three defects sat in these twenty lines.
+     //
+     //   const tz = request.payload.timezone || 'UTC';   <- read by the API body below
+     //   const hour = date.getUTCHours();
+     //   if (hour < 8 || hour > 18) ...                  <- business hours judged in UTC
+     //
+     // The zone was passed to Google, and ignored by the check one line below it — so we
+     // told the provider the customer's zone while judging "business hours" as 08:00-18:00
+     // UTC for everyone on earth. P1.9 fixed this shape everywhere else and missed it here,
+     // because this adapter is unreachable: `dispatchAction` has exactly one call site
+     // repo-wide and it always passes EMAIL_SEND. Unreachable code still gets reached one day.
+     //
+     //   let hasConflict = false;
+     //   // We will check it inside the real API call block to use the token.
+     //   if (hasConflict) return { success: false, error: 'Schedule conflict detected' };
+     //
+     // A conflict check structurally incapable of finding a conflict, sitting above the real
+     // one. It reads like protection and is not.
+     const timeZone = request.payload.timezone ?? DEFAULT_BUSINESS_HOURS.timeZone;
+     try {
+       assertTimeZone(timeZone);
+     } catch (e: any) {
+       return { success: false, error: String(e?.message ?? e), errorCode: 'INVALID_TIME_ZONE' };
      }
-     // 3. Validate duration
-     const duration = (new Date(request.payload.endTime).getTime() - date.getTime()) / 60000;
+
+     let startInstant: Date;
+     let endInstant: Date;
+     try {
+       startInstant = parseInstant(request.payload.startTime);
+       endInstant = parseInstant(request.payload.endTime);
+     } catch (e: any) {
+       return { success: false, error: String(e?.message ?? e), errorCode: 'INVALID_INSTANT' };
+     }
+
+     const hours = isWithinBusinessHours(startInstant, { ...DEFAULT_BUSINESS_HOURS, timeZone });
+     if (hours.within === false) {
+         return {
+           success: false,
+           error: `${hours.localTime} is outside business hours (${hours.reason}).`,
+           errorCode: 'OUTSIDE_BUSINESS_HOURS',
+         };
+     }
+
+     const duration = (endInstant.getTime() - startInstant.getTime()) / 60000;
      if (duration <= 0 || duration > 120) {
-         return { success: false, error: 'Invalid meeting duration' };
-     }
-     // 4. Check free/busy
-     let hasConflict = false;
-     // We will check it inside the real API call block to use the token.
-     if (hasConflict) {
-         return { success: false, error: 'Schedule conflict detected' };
+         return { success: false, error: 'Invalid meeting duration', errorCode: 'INVALID_DURATION' };
      }
 
      
@@ -429,8 +659,8 @@ export class ActionGateway {
                  },
                  body: JSON.stringify({
                      summary: request.payload.title,
-                     start: { dateTime: request.payload.startTime, timeZone: tz },
-                     end: { dateTime: request.payload.endTime, timeZone: tz },
+                     start: { dateTime: request.payload.startTime, timeZone },
+                     end: { dateTime: request.payload.endTime, timeZone },
                      attendees: request.payload.attendees ? request.payload.attendees.map((e: string) => ({ email: e })) : [],
                      conferenceData: {
                          createRequest: {

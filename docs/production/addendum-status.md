@@ -1077,6 +1077,176 @@ argument this document already applies to an undeployed Firestore rule.
 
 ---
 
+## 1k. Remediation progress — P1.11, provider adapters and error taxonomy (landed 2026-09-07)
+
+### The §32 control was inverted, and it never once fired
+
+The gateway decided whether a failed irreversible action might have happened anyway — the whole
+of §32 — like this:
+
+    const isAmbiguous = e.message.includes('timeout') || e.message.includes('network');
+
+`fetchWithTimeout` throws `HttpTimeoutError`, whose message is
+`"Request to <url> timed out after 15000ms"`. **"timed out" does not contain "timeout".**
+
+So the one timeout this codebase raises classified as a *definite failure*. Measured against the
+messages real failures actually carry — `fetch failed`, `socket hang up`, `read ECONNRESET`,
+`Rate Limit Exceeded`, `Backend Error`, `504 Gateway Timeout`, `Invalid Credentials` — **not
+one matches**. The AMBIGUOUS branch was unreachable in practice.
+
+The consequence is exactly the failure §32 exists to prevent: a Gmail send that timed out, where
+the message may well have been delivered, was recorded as definitely-failed and became eligible
+for retry. The prospect receives it twice and nothing in the system knows.
+
+And the test fired in the other direction on strings that were never provider diagnostics.
+Provider errors quote request content, so `"Invalid value for field subject: …the timeout
+issue?"` classifies as AMBIGUOUS — a customer choosing the wording (§18).
+
+This document already recorded that the matching was substring-based and "misses `504 Gateway
+Timeout`". It did not record that it also missed the error this repository throws itself. The
+difference between those two findings is the difference between a gap and an inversion.
+
+### What replaced it
+
+`server/lib/providerError.ts`. Ten kinds, each with a written **disposition**: whether the side
+effect might have occurred, and whether a retry is sensible. Classification reads the error's
+type, its `code`/`cause.code`, or an HTTP status — there is no branch that reads `.message`,
+and a guardrail now enforces that.
+
+The distinctions that matter are the ones that were previously collapsed:
+
+- **429 is NOT_APPLIED and retryable.** The provider refused at the edge; nothing happened.
+- **5xx is AMBIGUOUS.** A proxy can return 502 *after* the backend applied the change.
+- **401 is retryable, 403 is not.** One is fixed by refreshing a token; the other needs a human
+  to consent. Treating them alike meant retrying a scope failure forever.
+- **UNKNOWN is AMBIGUOUS.** Not a shrug — §14. Calling an unclassifiable failure "definitely
+  failed" grants permission to retry something that may already have happened.
+
+`mayRetryWithoutReconciliation(irreversible)` takes its argument **required, with no default**.
+A default would let a caller retry a send by forgetting to say it was a send, and forgetting is
+the failure mode. `tsc` enforces it; a test asserts the omission does not compile.
+
+### Two functions that answered before asking
+
+The only question before a send was "is there an access token?". Whether that token had ever
+been *granted permission to send* was never asked, because the granted scopes were never
+stored — the `oauth_connections` record held a token, an account and an expiry, and nothing
+else. A `gmail.readonly` token therefore reached the send path and was refused by Google with a
+403, after dispatch, after logging, after being counted against the outbox. A scope 403 is not
+retryable, so every retry spent a round trip rediscovering the same fact.
+
+`assertCapability` now runs before anything leaves the process. **An unrecorded grant is not a
+grant:** a connection that does not say what it may do is refused, and so is one we could not
+read because the datastore was down. Both are §14 in the same direction.
+
+`refreshToken` was a private field written and never read — there was no refresh flow, and no
+refresh token was persisted either. A Google access token lasts an hour, so every connection
+died after an hour and stayed dead until a human reconnected. `refreshAccessToken()` exists now
+and the record stores what it needs.
+
+### Silence was being read as emptiness
+
+`getHistory` returned `[]` on any non-OK response and `getMessage` returned `null`. A dead
+credential and a quiet inbox produced the same value, so a broken connection looked like a
+working one with nothing to do. `getMessage` still returns `null` for a genuine 404, because
+that really is absence; everything else now raises a classified error.
+
+### A defect P1.9 missed, in code nothing calls
+
+`executeCalendarCreate` resolved the customer's timezone into `tz`, passed it to Google — and
+judged business hours with `date.getUTCHours()` and a hardcoded `8..18`. So it told the
+provider the customer's zone while deciding "business hours" in UTC for everyone on earth.
+
+P1.9 fixed this shape everywhere else and missed it here because the adapter is unreachable:
+`dispatchAction` has exactly one call site repo-wide and always passes `EMAIL_SEND`. My S30
+entry said zone-aware hours were "verified at runtime", which was true of the paths that run and
+silent about one that does not. Unreachable code is still code that gets reached one day.
+
+Above it sat:
+
+    let hasConflict = false;
+    // We will check it inside the real API call block to use the token.
+    if (hasConflict) return { success: false, error: 'Schedule conflict detected' };
+
+A conflict check structurally incapable of finding a conflict, directly above the real one. It
+reads like protection. It is removed.
+
+A stale `actionGateway.ts.patch` — a diff, committed into the source tree and tracked by git —
+was also deleted. It described a fix that was never applied.
+
+### Adapter contracts (S41)
+
+A grep for `interface [A-Za-z]*Provider` returned **zero hits** across the repository. There was
+no statement of what an email provider is obliged to do, so nothing a second provider could be
+checked against. `server/providers/types.ts` states it: failures arrive as classified
+`ProviderError`s, a successful send returns a **provider-issued** id (P0.8: a fabricated id
+recorded as evidence cannot afterwards be told from a real one), and capabilities are declared.
+
+`Availability` is three-valued — `FREE | BUSY | UNKNOWN` — because `checkFreeBusy` returned
+`true` without contacting anything, and `true` from a free/busy check means "the slot is free",
+a claim that code was never in a position to make.
+
+`GmailService implements EmailProvider, RefreshableCredential`, and the compiler checks it:
+renaming `providerName` produces TS2420. That was verified by mutation, not assumed.
+
+### Evidence
+
+`npm test`: **643 tests across 23 files**, up from 580 across 21. **26 mutations, 26 caught** —
+after two survivors were fixed rather than explained away.
+
+Both survivors were the same mistake, and it is worth naming. My first suite asserted the
+pre-flight *code was present* and appeared textually before the dispatch switch. Wrapping the
+call site in `if (false && …)` left every one of those assertions passing. So did making a
+datastore failure return "allowed". **Asserting that a call site exists is not asserting that it
+runs** — the same distinction P1.8 recorded for a sanitiser that was in the repository and
+called by nothing. `capabilityPreflight.invariant.test.ts` now drives real requests through
+`dispatchAction` against a stubbed datastore, and both mutations die.
+
+The new guardrail, `check-no-substring-error-classification`, was mutation-tested **16/16**,
+including four mutations that try to disable it. One of those originally **survived**: making
+the scanner skip every file left its "files scanned" count intact and it reported "ok" with a
+plausible number beside it. It now counts files that actually reached the patterns. That is the
+fifth time on this branch a guardrail has been caught able to degrade into a silent no-op, and
+the second time the fix was a self-check.
+
+Two of my own errors, both caught by tooling rather than by review. `@ts-expect-error` placed
+above a further comment line targets the comment, not the code — `tsc` reported the directive as
+unused. And I used `npx tsc --noEmit | head -5 && echo "TSC OK"`, which reports `head`'s exit
+status and would have printed "OK" over real errors; every gate in this tranche now checks the
+compiler's own status.
+
+### What changed status
+
+**S41 moves from NOT_STARTED to PARTIAL.** The contracts exist and Gmail is checked against
+`EmailProvider` by the compiler. `CalendarProvider` has **no implementation**: the calendar
+code still lives inline in the gateway and in `calendar.service.ts`, neither of which declares
+the interface.
+
+**S32 stays PARTIAL, and the remainder is the half the title names.** Detection is now correct,
+structural, and mutation-tested. **Reconciliation is still a comment.** The gateway logs
+`AMBIGUOUS_PROVIDER_RESULT`, warns, and refuses to call the outcome a failure — but nothing
+queries the provider afterwards to find out what actually happened. Until something does, an
+ambiguous send stops rather than resolves. That is the safe direction, and it is not the
+invariant.
+
+**S13 stays PARTIAL.** Scopes are recorded and enforced pre-flight, and the "Gmail-connected is
+treated as Calendar-connected" conflation is resolved the right way: one Google connection can
+carry both, and the *scopes* now decide which, rather than the provider name. The remainder is
+that every connection already in the datastore has no scopes recorded, so it will be refused
+until reconnected. That is deliberate and it is an **operator action**, listed below.
+
+**S12 does not move.** The classified error keeps provider prose out of the envelope, but the 32
+handlers returning raw `e.message` at 500 are untouched by this tranche.
+
+### Operator action this adds
+
+Reconnecting the Google account is now **required before real sends will work**, because the
+existing `oauth_connections` record carries no scope list and an unrecorded grant is refused.
+Nothing breaks today — all five `REAL_*_ENABLED` flags remain `false` — but this must be done
+before they are turned on, and the refusal message says so.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -1085,11 +1255,11 @@ argument this document already applies to an undeployed Firestore rule.
 |---|---:|---|
 | `VERIFIED` | **0** | — |
 | `IMPLEMENTED_UNVERIFIED` | **1** | S1 |
-| `PARTIAL` | **31** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S18, S20, S21, S25, S29, S30, S31, S32, S33, S34, S36, S37, S39, S40, S43, S46, S47 |
-| `NOT_STARTED` | **17** | S11, S17, S19, S22, S23, S24, S26, S27, S28, S35, S38, S41, S42, S44, S45, S48, S49 |
+| `PARTIAL` | **32** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S18, S20, S21, S25, S29, S30, S31, S32, S33, S34, S36, S37, S39, S40, S41, S43, S46, S47 |
+| `NOT_STARTED` | **16** | S11, S17, S19, S22, S23, S24, S26, S27, S28, S35, S38, S42, S44, S45, S48, S49 |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-0 + 1 + 31 + 17 + 0 = **49 rows**.
+0 + 1 + 32 + 16 + 0 = **49 rows**.
 
 | Severity | Count |
 |---|---:|
@@ -1179,7 +1349,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S10 | Audit logging fail-closed on the Action Gateway | PARTIAL | CRITICAL | `actionGateway.ts:145-161`, `:54`, `:91`; `firestore.rules:5` | `logAction` swallows every error and returns void, so dispatch proceeds; `setDoc(..., {merge:true})` overwrites lifecycle states; no payload fingerprint; log is write-only and client-writable |
 | S11 | API contract registry (OpenAPI / runtime validation / contract tests) | NOT_STARTED | HIGH | `server.ts:115`, `:133`, `:462`, `:486`; `emailUnderstanding.agent.ts:2` | No OpenAPI; zod's only import is in a dead file; six handlers spread `req.body` into Firestore; the nine imported domain types are never applied to any handler |
 | S12 | Error envelope (stable codes, requestId, no raw leakage) | PARTIAL | CRITICAL | `server.ts:109` (×32); `actionGateway.ts:97`; `server/middleware/auth.ts:47` | 32 handlers return raw `e.message` at 500; 11 of 15 required codes absent; no requestId; no error middleware; send-safety decided by substring-matching error text |
-| S13 | Provider capability model | PARTIAL | CRITICAL | `actionGateway.ts:258-265`; `server.ts:502-531`; `gmailWorkspaceService.ts:23-28` | No scopes stored anywhere; Gmail-connected is treated as Calendar-connected; the real token/expiry/account are discarded and `'mock_token'` written instead |
+| S13 | Provider capability model | PARTIAL | CRITICAL | `server/lib/capabilities.ts`; `actionGateway.ts` (`checkProviderCapability` pre-flight); `server.ts` (oauth record) | Scopes are recorded at consent and checked BEFORE dispatch; an unrecorded grant is refused, as is a datastore read that failed (§14). The Gmail/Calendar conflation is resolved by scopes rather than by provider name. Gmail refresh flow implemented. **Remainder: every existing connection has no scopes recorded and will be refused until reconnected** — deliberate, and an operator action |
 | S14 | UNKNOWN != PERMITTED (consent / jurisdiction defaults) | PARTIAL | CRITICAL | `actionGateway.ts:170-171`, `:177`, `:185`; `outreachPolicy.ts:20` | Unknown country → `'US'`, unknown consent → `true`; both block rules neutered by hardcoded `isB2B: true`; the only fail-closed policy file is dead |
 | S15 | Email threading, identity normalization, duplicate prevention | PARTIAL | HIGH | `inboundPipeline.ts:35`; `gmail.service.ts:106-119`; `db/schema.ts:104` | `providerThreadId` is written and never queried; `Message-ID` never parsed; outbound `In-Reply-To` carries a Gmail internal id; dedupe is a racy SELECT with no unique index. *Superseded by §1f: thread resolution, conversation creation and Message-ID parsing landed 2026-09-06; held at PARTIAL by outbound Message-ID handling and the MIME parser.* |
 | S16 | MIME parsing, encodings, what reaches the model | PARTIAL | HIGH | `gmail.service.ts:80-104`, `:136-143`; `inboundPipeline.ts:65` | Hardcoded utf8 decode ignores charset; no quoted-printable, no RFC 2047, no multipart/report; `sanitizedHtmlBody` stores raw HTML; outbound headers built by unescaped interpolation |
@@ -1199,7 +1369,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S29 | Contact/account dedup, normalization and merge | PARTIAL | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all**. *Superseded by §1f: derived ids, account creation and a transactional merge landed 2026-09-06; held at PARTIAL by the open Firestore rules and the absence of a backfill.* |
 | S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | PARTIAL | HIGH | `shared/domain/time.ts`; `schema.ts` (76 `timestamptz` cols); `server.ts` (`POST /api/meetings`); `multiAgentReplySystem.ts`; `ScheduleMeetingModal.tsx`; `calendar.service.ts` | Zone-aware hours, IANA validation (rejecting `BST`, which Intl resolves to Asia/Dhaka), `{startAtUtc, timeZone}` meetings, all 76 columns zoned, and the `datetime-local` round trip fixed — all verified at runtime. **Remainder: 99 direct wall-clock reads in `server/` are not yet routed through the injectable `Clock`,** which is injected only into the reply composer and the context bundle |
 | S31 | Calendar conflict invariant: busy → zero create requests | PARTIAL | CRITICAL | `outbox.worker.ts:78`, `:95` (the only `dispatchAction` call site, hardcoding `EMAIL_SEND`); `actionGateway.ts:247-252`, `:282`, `:287`, `:300`; `server.ts:672` | **There is no partial implementation.** `executeCalendarCreate` is unreachable — `dispatchAction` has exactly one call site repo-wide and it always passes `ActionType.EMAIL_SEND`. The live booking path (`server.ts:1496`, was `:672` before this branch moved it) performs a local overlap check and a bare `addDoc`, with no provider call. **P1.9 did not move this.** `checkFreeBusy` now reports `UNKNOWN` instead of `true`, removing a way a caller could be misled, but it still has no callers and `executeCalendarCreate` is still unreachable |
-| S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `actionGateway.ts:97`, `:102-103`, `:222`; `outbox.service.ts:52,73` | Reconciliation is a comment; detection is case-sensitive substring matching that misses `504 Gateway Timeout`; AMBIGUOUS is a free-text value in a terminal FAILED row |
+| S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `server/lib/providerError.ts`; `actionGateway.ts` (single classifier); `providerError.invariant.test.ts` | Detection is fixed and structural. The old test (`e.message.includes('timeout')`) matched **none** of the errors this system actually raises — including its own `HttpTimeoutError`, whose message says "timed out", not "timeout" — so the AMBIGUOUS branch never fired and timed-out sends were retryable. Now classified by type/`code`/HTTP status, with UNKNOWN resolving to AMBIGUOUS (§14). **Remainder: reconciliation is still a comment** — an ambiguous action is logged and stopped, but nothing queries the provider to learn what happened |
 | S33 | Webhook signature, dedupe and ordering | PARTIAL | CRITICAL | `server.ts:58`, `:62`, `:773`, `:781-782`, `:810-811`; `stripe.routes.ts:55,62-69` | Stripe verification never succeeds (body already parsed); DocuSign unverified and unauthenticated; no event ledger, no dedupe, no ordering watermark; Gmail acks 200 before processing |
 | S34 | CSV / spreadsheet formula injection on export | PARTIAL | HIGH | `src/utils/exportUtils.ts:39-40`, `:18`; `LeadsView.tsx:198`; `server.ts:112-119` | Only `"` is doubled; no neutralisation of `=`, `+`, `-`, `@`, tab or CR; columns derived from `Object.keys(data[0])`, so attacker-injected keys become columns |
 | S35 | Frontend HTML safety / rendering untrusted provider HTML | NOT_STARTED | HIGH | zero `dangerouslySetInnerHTML` in `src/`; `inboundPipeline.ts:65`; `db/schema.ts:116`; `index.html`; `gmailWorkspaceService.ts:44,71,161` | **No control exists.** "Safe today only by absence of a sink" is the "nothing broke yet" reasoning the grading standard forbids — no sanitizer dependency, no CSP, and a column named `sanitizedHtmlBody` storing raw attacker HTML. Severity is HIGH, not MEDIUM: the stored-XSS sink would exfiltrate the live Gmail **send** credential sitting in `localStorage` |
@@ -1208,7 +1378,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S38 | Recovery console / safe operator tooling | NOT_STARTED | CRITICAL | `outbox.routes.ts:13,20-38`; `server.ts:337` vs `:560`; `killSwitch.controller.ts:15`; live probe `GET /api/outbox` → 500 | **There is no operator tooling — there is operator-tooling-shaped UI.** The console reads a store the queue does not live in; the kill switch is a stub that returns no `circuitBreaker` field, so the panel crashes; there is no retry, requeue or dead-letter of any kind; operator actions are unaudited and unauthenticated |
 | S39 | Monolith: ~75 route registrations against empty decomposition folders | PARTIAL | CRITICAL | `server.ts:309-344`, `:760-826`, `:62`, `:193-195` | ~70 of ~75 endpoints inline; controller and repository layers are 100% dead; ~30 hardcoded success stubs; zero request validation; webhooks registered only in the production branch |
 | S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | PARTIAL | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | Four React modules value-import a server agent (only esbuild elision keeps `@google/genai` and the API-key read out of the bundle); two real cycles; no lint rule, no dependency-cruiser, no ESLint |
-| S41 | Adapter contracts | NOT_STARTED | HIGH | grep `EmailProvider\|CalendarProvider\|PaymentProvider\|SignatureProvider\|interface [A-Za-z]*Provider\|Adapter` over `server/ src/ shared/` (`*.ts`, `*.tsx`, excluding `archive_scripts/`) → **zero hits**; `gmail.service.ts:151,166`; `actionGateway.ts:97,222,287-313`; `calendar.service.ts:11-21` | No provider interfaces; Google request bodies inlined in the gateway; two contradictory ambiguity classifiers; errors raised as interpolated strings; no test adapters |
+| S41 | Adapter contracts | PARTIAL | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). **Remainder: `CalendarProvider` has no implementation** — calendar code is still inline in the gateway and in `calendar.service.ts`, neither declaring the interface |
 | S42 | Chaos / fault-injection across the autonomous send path | NOT_STARTED | CRITICAL | `db/index.ts:48-51`; `outbox.worker.ts:49,134-137`; `gmail.service.ts:151-167`; `geminiClient.ts:139-145` | Zero fault-injection tests; every one of the 15 required failure modes is unhandled — DB down, mid-sequence commit failure, post-send crash, timeout, 401, 429, 500, malformed AI JSON, duplicate/out-of-order webhook, concurrent claim, concurrent human edit |
 | S43 | Outbox transaction boundaries: atomic claim, crash recovery, duplicates | PARTIAL | CRITICAL | `outbox.service.ts:47-62`; `outbox.worker.ts:23,95,120`; `schema.ts:147-156` | The "claim" is a read; no lease, no CAS, no transaction, no attempt counter, no re-entrancy guard; producer writes Postgres while consumer reads Firestore |
 | S44 | Alerting: thresholds and destinations | NOT_STARTED | HIGH | `metrics.service.ts:12-20`; `inboundPipeline.ts:147`; `salesDecisionEngine.ts:30-31`; case-insensitive grep `pagerduty\|slack\|sentry\|datadog\|prometheus\|opentelemetry\|cloudmonitoring\|webhookUrl\|alertTransport` over `server/ src/ package.json` → **one hit**, the comment `// In production, send to Datadog / Prometheus` at `metrics.service.ts:12` | One threshold (`>2000ms` → `console.warn`) on a line that never executes; `incrementCounter` has an empty body; zero of eleven required signals have a threshold or a destination; no alert client is a dependency |
