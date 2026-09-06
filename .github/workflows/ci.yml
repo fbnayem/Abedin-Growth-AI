@@ -1,0 +1,114 @@
+name: CI
+
+# P2 — The gate. Until this existed there was no automated check of any kind: no test runner,
+# no type-check on push, no dependency audit. A green build meant nothing had been run.
+#
+# Every job here fails the workflow on a non-zero exit. Do not add `|| true`, `continue-on-error`
+# or `|| echo "Ignoring..."` to any step — a gate that cannot fail is not a gate, and this
+# repository has already shipped one of those (see server/tests/adversarial.test.ts before P2,
+# which reported "4/4 passed" unconditionally).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Type-check, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # `npm ci` rather than `npm install`: it fails if package-lock.json and package.json
+      # disagree, which is a supply-chain check in itself (addendum §T).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Advisory for now: the repository currently has known moderate advisories, so failing
+      # here immediately would block every PR without fixing anything. Tighten to
+      # `--audit-level=moderate` once the existing findings are triaged, and delete this note
+      # when you do — an audit step that never fails is decoration.
+      - name: npm audit (high and above)
+        run: npm audit --audit-level=high
+
+  guardrails:
+    name: Safety guardrails
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # P0.1 — The browser must never regain the ability to send mail directly. The source can
+      # look clean while the built artifact is not, which is exactly how the second gmail.send
+      # grant in src/lib/firebase.ts survived the first fix. Assert on the artifact.
+      - name: Build client
+        run: npm run build
+
+      - name: Client bundle must not contain send-capable Gmail scopes
+        run: |
+          if grep -rl "auth/gmail.send" dist/assets/ 2>/dev/null; then
+            echo "::error::gmail.send scope found in the client bundle. Sending must go through the server ActionGateway (P0.1)."
+            exit 1
+          fi
+          if grep -rl "messages/send" dist/assets/ 2>/dev/null; then
+            echo "::error::A Gmail send endpoint is reachable from the client bundle (P0.1)."
+            exit 1
+          fi
+          echo "OK: no client-side send capability."
+
+      # P0.8 — A provider id must come from a provider. Catch a reintroduced local mint.
+      - name: No fabricated provider ids in source
+        run: |
+          if grep -rnE "'(sim|mock)_' \+ Date\.now\(\)" server/ server.ts --include="*.ts" | grep -v "^\s*//" | grep -v "P0\.8"; then
+            echo "::error::Locally-minted provider id found. A message cannot become SENT without a real provider result (addendum §3)."
+            exit 1
+          fi
+          echo "OK: no fabricated provider ids."

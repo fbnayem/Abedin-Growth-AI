@@ -20,10 +20,14 @@ export interface GmailTokenState {
   isConnected: boolean;
 }
 
+// P0.1 — 'gmail.send' was removed from this list deliberately. The browser must not hold a
+// credential that can deliver mail to a third party: all sending goes through the server so it
+// passes the ActionGateway, outreachPolicy, the outbox and the circuit breaker. Read-side scopes
+// remain so the inbox and label features keep working. Do not re-add gmail.send here — if the
+// browser needs to send, that is a signal the server path is missing something.
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify',
   'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.send',
   'https://www.googleapis.com/auth/gmail.labels',
 ].join(' ');
 
@@ -39,20 +43,25 @@ class GmailWorkspaceService {
   private listeners: ((state: GmailTokenState) => void)[] = [];
 
   constructor() {
-    // Attempt to load cached session state if available in sessionStorage/localStorage
+    // P0.1 — The OAuth access token is NEVER restored from localStorage, and never written
+    // there (see notify()). It previously persisted under 'abedin_workspace_gmail_auth',
+    // which meant any script running in this origin could read a live Google credential —
+    // a far worse outcome than a stolen session cookie, because it is not invalidated by
+    // logging out. With no HTML sanitizer and no CSP in this app (see S35), that is a
+    // realistic path, so the token now lives in memory only and dies with the tab.
+    //
+    // Only non-secret display state is restored, so the UI can still show which account was
+    // connected. isConnected stays false until the user re-authorizes, which is honest:
+    // without a token in memory there is genuinely no usable Gmail session.
     try {
-      const cached = localStorage.getItem('abedin_workspace_gmail_auth');
+      const cached = localStorage.getItem('abedin_workspace_gmail_display');
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed.expiresAt && parsed.expiresAt > Date.now()) {
-          this.accessToken = parsed.accessToken;
-          this.expiresAt = parsed.expiresAt;
-          this.accountEmail = parsed.accountEmail || DEFAULT_ACCOUNT;
-          this.labelId = parsed.labelId || null;
-        }
+        this.accountEmail = parsed.accountEmail || DEFAULT_ACCOUNT;
+        this.labelId = parsed.labelId || null;
       }
     } catch (e) {
-      console.warn('Could not restore cached Gmail token:', e);
+      console.warn('Could not restore cached Gmail display state:', e);
     }
   }
 
@@ -67,13 +76,16 @@ class GmailWorkspaceService {
   private notify() {
     const state = this.getState();
     this.listeners.forEach((l) => l(state));
+    // P0.1 — accessToken and expiresAt are deliberately NOT persisted. Writing a live
+    // gmail credential to localStorage put it within reach of any script in this origin.
+    // Only non-secret display state is stored.
     try {
-      localStorage.setItem('abedin_workspace_gmail_auth', JSON.stringify({
-        accessToken: this.accessToken,
-        expiresAt: this.expiresAt,
+      localStorage.setItem('abedin_workspace_gmail_display', JSON.stringify({
         accountEmail: this.accountEmail,
         labelId: this.labelId,
       }));
+      // Remove any credential written by a previous build.
+      localStorage.removeItem('abedin_workspace_gmail_auth');
     } catch (e) {
       // Ignore storage errors
     }
@@ -158,7 +170,8 @@ class GmailWorkspaceService {
     this.accessToken = null;
     this.expiresAt = null;
     this.labelId = null;
-    localStorage.removeItem('abedin_workspace_gmail_auth');
+    localStorage.removeItem('abedin_workspace_gmail_display');
+    localStorage.removeItem('abedin_workspace_gmail_auth'); // legacy key from before P0.1
     this.notify();
   }
 
@@ -271,72 +284,19 @@ class GmailWorkspaceService {
    * Sends an email directly through Google Workspace (info@abedintech.com)
    * and attaches the "Abedin Growth AI" label to the resulting message.
    */
-  public async sendEmail({
-    to,
-    subject,
-    bodyText,
-    threadId,
-  }: {
-    to: string;
-    subject: string;
-    bodyText: string;
-    threadId?: string;
-  }): Promise<{ messageId: string; threadId: string; labelName: string }> {
-    if (!this.accessToken) {
-      throw new Error('Gmail token missing. Please connect your Workspace account.');
-    }
-
-    const raw = this.createRawEmail({
-      to,
-      from: `Nayem Abedin <${this.accountEmail}>`,
-      subject,
-      bodyText,
-      threadId,
-    });
-
-    const sendRes = await apiFetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        raw,
-        threadId: threadId || undefined,
-      }),
-    });
-
-    if (!sendRes.ok) {
-      const errBody = await sendRes.text();
-      throw new Error(`Gmail API error (${sendRes.status}): ${errBody}`);
-    }
-
-    const sentMessage = await sendRes.json();
-
-    // Attach "Abedin Growth AI" label to the message
-    if (this.labelId && sentMessage.id) {
-      try {
-        await apiFetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${sentMessage.id}/modify`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${this.accessToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            addLabelIds: [this.labelId],
-          }),
-        });
-      } catch (lblErr) {
-        console.warn('Could not apply label to sent message:', lblErr);
-      }
-    }
-
-    return {
-      messageId: sentMessage.id,
-      threadId: sentMessage.threadId,
-      labelName: TARGET_LABEL_NAME,
-    };
-  }
+  // P0.1 — sendEmail() was REMOVED from this service, deliberately and permanently.
+  //
+  // It performed a real Gmail REST send from the browser, bypassing the ActionGateway,
+  // outreachPolicy, the outbox, the circuit breaker and every REAL_* flag. It was the only
+  // code path in the product that could put a message in a third party's inbox with no
+  // policy applied, and its single call site (InboxView.handleSend) also fell through to
+  // the server dispatch unconditionally, producing a guaranteed double-send.
+  //
+  // The method is deleted rather than left unused so that any attempt to reintroduce
+  // browser-side sending fails at COMPILE time rather than silently working. The
+  // gmail.send OAuth scope has been dropped from SCOPES above for the same reason.
+  //
+  // Sending belongs on the server, behind the gateway. See docs/production/addendum-status.md P0.1.
 
   /**
    * Fetches latest replies and messages labeled with "Abedin Growth AI"

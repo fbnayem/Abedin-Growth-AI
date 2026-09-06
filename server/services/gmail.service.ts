@@ -1,4 +1,5 @@
 import { config } from '../config/environment';
+import { fetchWithTimeout } from '../lib/httpClient';
 
 export interface SendEmailOptions {
   to: string;
@@ -46,7 +47,7 @@ export class GmailService {
     if (!this.accessToken) throw new Error("Credentials not set");
     
     // We get the history
-    const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${historyId}`, {
+    const res = await fetchWithTimeout(`https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${historyId}`, {
       headers: { 'Authorization': `Bearer ${this.accessToken}` }
     });
     
@@ -61,7 +62,7 @@ export class GmailService {
   async getMessage(messageId: string): Promise<GmailMessage | null> {
     if (!this.accessToken) throw new Error("Credentials not set");
     
-    const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`, {
+    const res = await fetchWithTimeout(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`, {
       headers: { 'Authorization': `Bearer ${this.accessToken}` }
     });
     
@@ -121,7 +122,15 @@ export class GmailService {
 
   async sendEmail(opts: SendEmailOptions): Promise<{ messageId: string, threadId: string }> {
     if (config.demoMode) {
-      console.log(`[DEMO MODE] Simulating Gmail send to ${opts.to}`);
+      // P0.8 — This simulation is retained for local development, but its output is
+      // deliberately shaped so it CANNOT be laundered into a durable SENT record. The
+      // `sim_` prefix is matched by isFabricatedProviderId() in the ActionGateway, and
+      // outbox.worker.ts fails any job whose provider id matches it. If you change this
+      // prefix, change that guard too — otherwise simulated sends silently become "sent".
+      console.warn(
+        `[DEMO MODE] Simulating Gmail send to ${opts.to}. This produces a fabricated ` +
+        `provider id which downstream code MUST reject; it can never be recorded as SENT.`
+      );
       return {
         messageId: `sim_${Date.now()}_msg`,
         threadId: opts.threadId || `sim_${Date.now()}_thread`
@@ -148,7 +157,7 @@ export class GmailService {
       .replace(/\//g, '_')
       .replace(/=+$/, '');
 
-    const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    const res = await fetchWithTimeout('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${this.accessToken}`,

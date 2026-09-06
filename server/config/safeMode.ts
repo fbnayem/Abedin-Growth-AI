@@ -1,0 +1,84 @@
+import dotenv from 'dotenv';
+
+/**
+ * P0.2 — Single source of truth for the Safe Rebuild Mode production-action flags.
+ *
+ * THE BUG THIS FIXES
+ * ------------------
+ * The ActionGateway used to snapshot these flags into a `private readonly SAFE_MODE = {...}`
+ * class field. That field is evaluated when the module is evaluated, and `server.ts` reaches
+ * the gateway through `import { outboxWorker } from "./server/workers/outbox.worker"` on line
+ * 6 — while `dotenv.config()` sat at line 52. ES module imports are hoisted and their bodies
+ * run before the importing module's own statements, so dotenv had NOT run yet and values in
+ * `.env` never reached the enforcement point; only real OS/platform environment variables did.
+ *
+ * Meanwhile `/api/readiness` read `process.env.REAL_EMAIL_SEND_ENABLED` at REQUEST time, long
+ * after dotenv had run. The result: the flag the operator reads and the flag the system
+ * enforces were different values, read from different places at different times, and could
+ * disagree in both directions. An operator could see "real sending is ON" while the gateway
+ * enforced OFF, or the reverse.
+ *
+ * THE FIX
+ * -------
+ * 1. dotenv.config() is called HERE, at the top of this module. Because the gateway imports
+ *    this module, dotenv is guaranteed to have run before any flag is read, regardless of
+ *    where this module sits in anyone's import list.
+ * 2. Flags are read LAZILY, per call, rather than snapshotted. Even if some future entrypoint
+ *    manages to evaluate modules in a surprising order, there is no stale copy to diverge.
+ * 3. Both the gateway and /api/readiness call into this module, so the displayed value and the
+ *    enforced value are by construction the same value.
+ *
+ * FAIL-CLOSED SEMANTICS
+ * ---------------------
+ * A flag is enabled ONLY when its variable is exactly the string "true". Absent, empty,
+ * malformed, "TRUE", "1" and "yes" all evaluate to DISABLED. Per addendum §A, production
+ * action flags must fail closed, so ambiguity resolves to "do not perform the real action".
+ */
+
+dotenv.config();
+
+export type RealActionFlag =
+  | 'REAL_EMAIL_SEND_ENABLED'
+  | 'REAL_CALENDAR_CREATE_ENABLED'
+  | 'REAL_PAYMENT_ENABLED'
+  | 'REAL_SIGNATURE_ENABLED'
+  | 'REAL_LINKEDIN_SEND_ENABLED';
+
+export const REAL_ACTION_FLAGS: RealActionFlag[] = [
+  'REAL_EMAIL_SEND_ENABLED',
+  'REAL_CALENDAR_CREATE_ENABLED',
+  'REAL_PAYMENT_ENABLED',
+  'REAL_SIGNATURE_ENABLED',
+  'REAL_LINKEDIN_SEND_ENABLED',
+];
+
+/**
+ * Read one production-action flag. Fails closed: anything other than the exact string
+ * "true" disables the real action.
+ */
+export function isRealActionEnabled(flag: RealActionFlag): boolean {
+  return process.env[flag] === 'true';
+}
+
+/**
+ * The full flag set, for /api/readiness and operator surfaces. This is the SAME read the
+ * gateway performs, so what an operator sees is what the system will enforce.
+ */
+export function safeModeSnapshot(): Record<RealActionFlag, boolean> {
+  return {
+    REAL_EMAIL_SEND_ENABLED: isRealActionEnabled('REAL_EMAIL_SEND_ENABLED'),
+    REAL_CALENDAR_CREATE_ENABLED: isRealActionEnabled('REAL_CALENDAR_CREATE_ENABLED'),
+    REAL_PAYMENT_ENABLED: isRealActionEnabled('REAL_PAYMENT_ENABLED'),
+    REAL_SIGNATURE_ENABLED: isRealActionEnabled('REAL_SIGNATURE_ENABLED'),
+    REAL_LINKEDIN_SEND_ENABLED: isRealActionEnabled('REAL_LINKEDIN_SEND_ENABLED'),
+  };
+}
+
+/**
+ * True when every real-action flag is disabled, i.e. the system cannot perform any external
+ * side effect. Readiness reports this so "safe" is a single unambiguous claim rather than
+ * something the reader has to assemble from five separate booleans.
+ */
+export function isFullySafeMode(): boolean {
+  return REAL_ACTION_FLAGS.every((f) => !isRealActionEnabled(f));
+}

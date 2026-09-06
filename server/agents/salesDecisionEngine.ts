@@ -24,8 +24,12 @@ const ledgerService = new LedgerService();
 // PART 49: CIRCUIT BREAKER & GLOBAL STATE
 // ==========================================
 export const circuitBreaker: CircuitBreakerState = {
-  globalAutonomousSendEnabled: true,
-  pausedReason: undefined,
+  // P0.2 — Was `true`. The master autonomy switch defaulted ON with no reachable runtime
+  // writer, so on every boot the system came up believing autonomous sending was permitted
+  // and nothing in the product could turn it off. Per addendum §A, a production action flag
+  // must fail closed: autonomy is now OFF until something deliberately enables it.
+  globalAutonomousSendEnabled: false,
+  pausedReason: 'Autonomy disabled by default at boot (P0.2). Enable deliberately via the operator kill switch.',
   consecutiveErrorCount: 0,
   duplicateSendAlertTriggered: false,
   bounceRateSpikeDetected: false,
@@ -197,8 +201,39 @@ export function evaluateEmailUnderstandingRuleBased(text: string): EmailUndersta
   }
 
   // Extract explicit questions (lines ending with ?)
-  const questionMatches = text.match(/[^.!?\n]+(?:\?)/g) || [];
-  const explicitQuestions = questionMatches.map((q) => q.trim()).filter((q) => q.length > 5);
+  // SECURITY (addendum §S, §16) — This was:
+  //
+  //     const questionMatches = text.match(/[^.!?\n]+(?:\?)/g) || [];
+  //
+  // which backtracks catastrophically. On text containing no "?", `[^.!?\n]+` greedily
+  // consumes to the end, fails to find `\?`, gives back one character, fails again — and the
+  // engine repeats that from every start position. Measured cost was quadratic: 5k chars
+  // 16ms, 10k 64ms, 20k 244ms, 40k 986ms. A 100k message blocked for ~6s and a 1MB one (well
+  // within Gmail's limits) would hold the event loop for minutes.
+  //
+  // Since inbound email is attacker-controlled, that is a remote denial of service against
+  // the whole single-threaded server, triggered by sending one long message.
+  //
+  // Splitting on the delimiters first is linear, and the length cap bounds worst-case work
+  // regardless of what any future pattern here does.
+  const MAX_ANALYSIS_CHARS = 20_000;
+  const analysisText = text.length > MAX_ANALYSIS_CHARS ? text.slice(0, MAX_ANALYSIS_CHARS) : text;
+
+  // Single linear pass: walk the text once, remembering where the current segment began, and
+  // keep a segment only when the delimiter that ended it was "?". No regex, no backtracking,
+  // and no per-segment search back into the source string.
+  const explicitQuestions: string[] = [];
+  let segmentStart = 0;
+  for (let i = 0; i < analysisText.length; i++) {
+    const ch = analysisText[i];
+    if (ch === '.' || ch === '!' || ch === '?' || ch === '\n') {
+      if (ch === '?') {
+        const segment = analysisText.slice(segmentStart, i).trim();
+        if (segment.length > 5) explicitQuestions.push(segment);
+      }
+      segmentStart = i + 1;
+    }
+  }
 
   const buyingSignals: string[] = [];
   const objections: string[] = [];

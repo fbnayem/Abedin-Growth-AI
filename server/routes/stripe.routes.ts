@@ -1,6 +1,8 @@
 import express, { Request, Response } from 'express';
 import Stripe from 'stripe';
 import { db } from '../db/index';
+import { isRealActionEnabled } from '../config/safeMode';
+import { getCircuitBreakerState } from '../services/circuitBreaker.service';
 
 const stripeRouter = express.Router();
 
@@ -19,9 +21,36 @@ const getStripe = () => {
 
 stripeRouter.post('/create-checkout-session', async (req: Request, res: Response) => {
   try {
+    // P0.15 — Payment creation previously bypassed the ActionGateway entirely: no Safe Mode
+    // flag, no kill switch, no audit record. Taking money is an irreversible external action
+    // and must respect the same gates as sending mail. Both are checked here, before any
+    // call to Stripe.
+    if (!isRealActionEnabled('REAL_PAYMENT_ENABLED')) {
+      console.warn('[stripe] Checkout refused: REAL_PAYMENT_ENABLED is not true (Safe Rebuild Mode).');
+      return res.status(403).json({
+        error: {
+          code: 'POLICY_BLOCKED',
+          message: 'Real payments are disabled in Safe Rebuild Mode (REAL_PAYMENT_ENABLED is not "true").',
+        },
+      });
+    }
+
+    const cb = await getCircuitBreakerState();
+    if (!cb.globalAutonomousSendEnabled) {
+      console.warn('[stripe] Checkout refused: circuit breaker engaged.');
+      return res.status(403).json({
+        error: {
+          code: 'POLICY_BLOCKED',
+          message: `Payments are halted: ${cb.pausedReason || 'circuit breaker engaged.'}`,
+        },
+      });
+    }
+
     const stripe = getStripe();
     if (!stripe) {
-      return res.status(400).json({ error: "Stripe is not configured" });
+      return res.status(400).json({
+        error: { code: 'PROVIDER_NOT_CONFIGURED', message: 'Stripe is not configured.' },
+      });
     }
 
     const { email, leadId } = req.body;

@@ -1,3 +1,13 @@
+// P0.2 — MUST BE THE FIRST IMPORT. This module calls dotenv.config() at evaluation time.
+// ES module imports are hoisted and evaluated in source order before this file's own
+// statements run, so the `dotenv.config()` call further down was too late for any module
+// that read process.env while being imported — notably the ActionGateway's Safe Mode flags.
+// Keeping this first guarantees .env is loaded before any other module body executes.
+import { safeModeSnapshot, isFullySafeMode } from './server/config/safeMode';
+import { getCircuitBreakerState, setCircuitBreaker } from './server/services/circuitBreaker.service';
+import { isFabricatedProviderId } from './server/gateway/actionGateway';
+import { verifyDocuSignSignature, verifyPubSubToken } from './server/services/webhookVerification.service';
+import { standardApiLimiter, aiOperationLimiter, webhookLimiter } from './server/middleware/rateLimit';
 import { collection, getDocs, getDoc, addDoc, doc, setDoc, updateDoc, query, where, orderBy, limit } from 'firebase/firestore';
 import { PrivacyService } from './server/services/privacy.service';
 import { globalStore } from "./server/dataStore";
@@ -55,15 +65,61 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // P0.14 — Raw body capture MUST be mounted before express.json(), otherwise the JSON parser
+  // consumes the stream and the signature can only ever be computed over a re-serialised
+  // object, which will not match the bytes the provider signed. The per-route express.raw()
+  // that used to sit on the signature webhook ran too late for exactly this reason, which is
+  // why that endpoint returned 400 for every genuine event.
+  //
+  // Ordering note: this parser fix is landing TOGETHER with the HMAC verification below.
+  // Fixing the parser on its own would convert a permanently-failing endpoint into a working
+  // unauthenticated one that any caller could use to mark meetings CONFIRMED.
+  app.use('/api/signature/webhook', express.raw({ type: '*/*' }));
   app.use(express.json());
 
+// P0.4 — Explicit allowlist of unauthenticated paths.
+//
+// This was `req.path.includes('/webhook')` — a SUBSTRING test. Any route whose path merely
+// contained the word anywhere was unauthenticated, including paths never intended to be
+// public (e.g. /api/settings/webhooks, /api/campaigns/webhook-preview). An allowlist of exact
+// paths cannot be widened by accident when someone adds a route.
+//
+// These endpoints are unauthenticated because the caller is a machine that cannot hold a user
+// credential. That makes SIGNATURE VERIFICATION the only thing standing between them and an
+// anonymous caller — see P0.14. Do not add an entry here without one.
+const UNAUTHENTICATED_API_PATHS = new Set([
+  '/readiness',
+  '/health',
+  '/signature/webhook',
+  '/webhooks/gmail',
+]);
+
 app.use("/api", (req, res, next) => {
-  // Bypass auth for webhooks and health/readiness checks
-  if (req.path.includes('/webhook') || req.path.startsWith('/readiness') || req.path.startsWith('/health')) {
-    return next();
+  // req.path is relative to the mount point, but normalise defensively in case this
+  // middleware is ever remounted elsewhere.
+  const p = req.path.replace(/^\/api/, '') || '/';
+  if (UNAUTHENTICATED_API_PATHS.has(p)) {
+    // P0.5 — Unauthenticated machine endpoints are rate limited by IP. They are the only
+    // surfaces reachable without a credential, so they get their own budget.
+    return webhookLimiter(req, res, next);
   }
   return requireAuth(req, res, next);
 });
+
+// P0.5 — Baseline limit on all authenticated API traffic, then a much tighter budget on the
+// endpoints that fan out into paid model calls. Ordering matters: the AI limiter is mounted
+// after the general one so an expensive request consumes both budgets.
+app.use("/api", standardApiLimiter);
+for (const aiPath of [
+  "/api/growth-command",
+  "/api/company-brain",
+  "/api/pitch-battle",
+  "/api/inbox/simulate",
+  "/api/inbox/generate-reply",
+  "/api/campaigns/generate",
+]) {
+  app.use(aiPath, aiOperationLimiter);
+}
 
 
   // Health check
@@ -74,13 +130,30 @@ app.use("/api", (req, res, next) => {
   // EXECUTABLE READINESS CHECK (Requirement X)
   app.get("/api/readiness", async (_req: Request, res: Response) => {
     try {
+      // P0.2 — These flags are now read through server/config/safeMode.ts, the SAME module
+      // the ActionGateway consults when it decides whether to dispatch. Previously this
+      // handler read process.env directly at request time while the gateway used a snapshot
+      // taken at module-evaluation time, before dotenv had run — so this endpoint could
+      // report "real sending is ON" while the gateway enforced OFF, or the reverse. The
+      // operator-facing indicator and the enforcement point are now the same read.
+      const flags = safeModeSnapshot();
       const checks = {
         databaseConnectivity: !!firestore,
         actionGatewayLoaded: true, // We import it statically
         safeRebuildMode: {
-          email: process.env.REAL_EMAIL_SEND_ENABLED === 'true',
-          calendar: process.env.REAL_CALENDAR_CREATE_ENABLED === 'true',
-        }
+          email: flags.REAL_EMAIL_SEND_ENABLED,
+          calendar: flags.REAL_CALENDAR_CREATE_ENABLED,
+          payment: flags.REAL_PAYMENT_ENABLED,
+          signature: flags.REAL_SIGNATURE_ENABLED,
+          linkedIn: flags.REAL_LINKEDIN_SEND_ENABLED,
+          allExternalActionsDisabled: isFullySafeMode(),
+        },
+        // NOTE (S47, tracked in the P3 roadmap): the checks above still test object existence
+        // rather than capability. `databaseConnectivity` is a truthiness test on the Firestore
+        // handle, not an executed query, and Postgres is not probed at all — so this endpoint
+        // can report READY while a required production dependency cannot perform its function.
+        // Do not treat READY as proof of capability until that work lands.
+        verifiesCapability: false,
       };
 
       const isReady = checks.databaseConnectivity;
@@ -323,7 +396,21 @@ app.get("/api/health", (_req: Request, res: Response) => {
   app.post("/api/meetings/brief", (req: Request, res: Response) => res.json({ brief: "Meeting brief generated." }));
   app.post("/api/settings/autopilot", (req: Request, res: Response) => res.json({ success: true }));
   app.post("/api/meetings/:id/sign-contract", (req: Request, res: Response) => res.json({ success: true }));
-  app.post("/api/meetings/:id/process-payment", (req: Request, res: Response) => res.json({ success: true }));
+  // P0.15 — Was `res.json({ success: true })`. This is the endpoint the UI calls to take
+  // payment, and it reported success without contacting any payment provider, creating any
+  // record, or moving any state. An operator watching the screen would believe a customer had
+  // paid. A stub that fabricates success for a FINANCIAL action is worse than a missing
+  // endpoint, so it now refuses honestly. Real payments go through /api/stripe.
+  app.post("/api/meetings/:id/process-payment", (_req: Request, res: Response) =>
+    res.status(501).json({
+      error: {
+        code: 'NOT_IMPLEMENTED',
+        message:
+          'Payment processing is not implemented on this endpoint. It previously returned ' +
+          'success without taking payment. Use the Stripe checkout flow (/api/stripe/create-checkout-session).',
+      },
+    })
+  );
   app.post("/api/meetings/:id/send-recovery-email", (req: Request, res: Response) => res.json({ success: true }));
   app.post("/api/inbox/auto-reply-all", (req: Request, res: Response) => res.json({ success: true, count: 5 }));
   app.post("/api/leads/batch-followup", (req: Request, res: Response) => res.json({ success: true, count: 10 }));
@@ -334,7 +421,29 @@ app.get("/api/health", (_req: Request, res: Response) => {
   app.get("/api/linkedin-config", (req: Request, res: Response) => res.json({ enabled: true }));
   app.post("/api/linkedin-config", (req: Request, res: Response) => res.json({ success: true }));
   app.get("/api/inbox/sales-decision-engine/inspect", (req: Request, res: Response) => res.json({ decision: "Proceed" }));
-  app.post("/api/inbox/circuit-breaker/toggle", (req: Request, res: Response) => res.json({ success: true }));
+  // P0.3 — Was `res.json({ success: true })`: it mutated nothing and returned no
+  // `circuitBreaker` field, so the console set its state to `undefined` and crashed on the
+  // next render — during precisely the incident an operator would press it. Now backed by a
+  // durable, fail-closed service. See server/services/circuitBreaker.service.ts.
+  app.post("/api/inbox/circuit-breaker/toggle", async (req: Request, res: Response) => {
+    try {
+      const { enabled, reason } = req.body || {};
+      if (typeof enabled !== 'boolean') {
+        return res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: '`enabled` must be a boolean.' },
+        });
+      }
+      // Actor attribution. requireAuth currently admits anonymous callers (fixed in P0.4), so
+      // record what we actually know rather than inventing an operator identity.
+      const actor = req.user?.email || req.user?.uid || 'unattributed';
+      const { state, accepted, message } = await setCircuitBreaker(enabled, reason, actor);
+      res.json({ success: accepted, message, circuitBreaker: state });
+    } catch (e: any) {
+      res.status(500).json({
+        error: { code: 'KILL_SWITCH_FAILED', message: e.message },
+      });
+    }
+  });
   app.post("/api/inbox/deep-audit", (req: Request, res: Response) => res.json({ audit: "Clean" }));
   app.post("/api/inbox/:id/auto-reply", (req: Request, res: Response) => res.json({ success: true }));
   app.post("/api/inbox/:id/memory/refresh", (req: Request, res: Response) => res.json({ success: true }));
@@ -500,32 +609,54 @@ app.get("/api/health", (_req: Request, res: Response) => {
   // 7. Inbox & Conversations
   
   app.post("/api/integrations/gmail/token", async (req: Request, res: Response) => {
-    const { accessToken, expiresIn, accountEmail } = req.body;
-    const orgId = req.user?.organizationId || "default";
-    
+    // P0.8 — This handler received a REAL accessToken in the request body, discarded it, and
+    // persisted the literal 'mock_token' with status ACTIVE. The ActionGateway then saw
+    // 'mock_token' and returned fabricated success for every send. So "connecting Gmail"
+    // reliably produced a connection that could never send while reporting itself healthy.
+    // The credential supplied is now the credential stored, and a request without one is
+    // rejected rather than answered with a fake ACTIVE connection.
+    const { accessToken, expiresIn, accountEmail } = req.body || {};
+
+    if (typeof accessToken !== 'string' || accessToken.trim() === '' || isFabricatedProviderId(accessToken) || accessToken === 'mock_token') {
+      return res.status(400).json({
+        error: {
+          code: 'PROVIDER_NOT_CONFIGURED',
+          message:
+            'A real Gmail access token is required. Refusing to store a placeholder credential, ' +
+            'which would make the gateway report sends that never happened.',
+        },
+      });
+    }
+
+    // TODO(P1 — tenant resolution): org is hardcoded here as everywhere else in this file.
+    // TODO(P0.0/P0.6 — credential storage): oauth_connections is a top-level collection in a
+    // datastore whose rules are still `allow read, write: if true`, so this token is readable
+    // and overwritable by anyone until the rules are closed and server access moves to the
+    // Admin SDK. Storing a real credential here is only acceptable once that has landed.
+    const orgId = 'org_1';
+
     try {
-      const existing = await getDocs(query(collection(firestore, 'oauth_connections'), where('organizationId', '==', 'org_1'), where('provider', '==', 'gmail')));
+      const record: Record<string, unknown> = {
+        organizationId: orgId,
+        provider: 'gmail',
+        accessToken,
+        accountEmail: accountEmail || null,
+        // Expiry is derived server-side; an absent expiresIn means "unknown", not "forever".
+        expiresAt: typeof expiresIn === 'number' ? new Date(Date.now() + expiresIn * 1000) : null,
+        status: 'ACTIVE',
+        updatedAt: new Date(),
+      };
+
+      const existing = await getDocs(query(collection(firestore, 'oauth_connections'), where('organizationId', '==', orgId), where('provider', '==', 'gmail')));
       if (!existing.empty) {
-        await updateDoc(existing.docs[0].ref, {
-          accessToken: 'mock_token',
-          refreshToken: 'mock_refresh',
-          updatedAt: new Date()
-        });
+        await updateDoc(existing.docs[0].ref, record);
       } else {
-        await addDoc(collection(firestore, 'oauth_connections'), {
-          id: 'oauth_' + Date.now(),
-          organizationId: 'org_1',
-          provider: 'gmail',
-          accessToken: 'mock_token',
-          refreshToken: 'mock_refresh',
-          status: 'ACTIVE',
-          updatedAt: new Date()
-        });
+        await addDoc(collection(firestore, 'oauth_connections'), { id: 'oauth_' + Date.now(), ...record });
       }
       res.json({ success: true });
     } catch(e) {
       console.error("Token sync error:", e);
-      res.status(500).json({ error: e.message });
+      res.status(500).json({ error: { code: 'PROVIDER_UNAVAILABLE', message: e.message } });
     }
   });
 
@@ -557,13 +688,35 @@ app.get("/api/health", (_req: Request, res: Response) => {
   });
 
   // Circuit Breaker Status & Toggle Endpoints (Part 49)
-app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
-    // We import circuitBreaker from salesDecisionEngine dynamically or just require it
-    // Wait, since we are in server.ts we can import it at the top or inline.
-    res.json({
-      enabled: circuitBreaker.globalAutonomousSendEnabled,
-      reason: circuitBreaker.pausedReason
-    });
+app.get("/api/inbox/circuit-breaker", async (_req: Request, res: Response) => {
+    // P0.3 — This previously returned `{enabled, reason}` while the admin console reads
+    // `data.circuitBreaker`, so the panel set its state to `undefined` and crashed on LOAD as
+    // well as on toggle. It also read a process-local boolean, so replicas disagreed. Now it
+    // returns the durable state under the key the console actually consumes. The legacy
+    // `enabled`/`reason` keys are retained so any other client keeps working.
+    try {
+      const state = await getCircuitBreakerState();
+      res.json({
+        circuitBreaker: state,
+        enabled: state.globalAutonomousSendEnabled,
+        reason: state.pausedReason,
+      });
+    } catch (e: any) {
+      // Fail closed: if state cannot be determined, report paused rather than active.
+      res.status(200).json({
+        circuitBreaker: {
+          globalAutonomousSendEnabled: false,
+          pausedReason: `State unavailable: ${e.message}`,
+          consecutiveErrorCount: 0,
+          duplicateSendAlertTriggered: false,
+          bounceRateSpikeDetected: false,
+          autonomyDisabledByConfiguration: true,
+          degradedFailClosed: true,
+        },
+        enabled: false,
+        reason: `State unavailable: ${e.message}`,
+      });
+    }
   });
 
 
@@ -666,12 +819,79 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
 
   // 9. Meetings & Calendar
 
+  // P0.13 — CALENDAR CONFLICT INVARIANT ON THE LIVE BOOKING PATH.
+  //
+  // This is where meetings are ACTUALLY created. The ActionGateway's executeCalendarCreate,
+  // which contains the free/busy logic, is unreachable: dispatchAction has one call site
+  // (outbox.worker.ts) and it always passes EMAIL_SEND. So the addendum §31 invariant
+  // ("free/busy reports busy -> calendar create request count = 0") had no enforcement point
+  // at all — this handler was a bare addDoc that accepted any body and always said SCHEDULED.
+  //
+  // Two changes: the request is validated and projected (it previously spread `...req.body`
+  // straight into the document, a mass assignment), and an overlap check now runs before the
+  // write. This checks OUR OWN calendar; a real provider free/busy call additionally requires
+  // Google credentials, so a meeting created here is explicitly NOT marked as confirmed on
+  // the provider — it is PENDING_CALENDAR_SYNC until something actually books it.
   app.post("/api/meetings", async (req: Request, res: Response) => {
     try {
-      const payload = { ...req.body, id: "meet_" + Date.now(), status: 'SCHEDULED' };
+      const { contactId, scheduledTime, durationMinutes, title, notes } = req.body || {};
+
+      const startMs = new Date(scheduledTime).getTime();
+      if (!scheduledTime || !Number.isFinite(startMs)) {
+        return res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: '`scheduledTime` must be a valid date-time.' },
+        });
+      }
+      const duration = Number.isFinite(Number(durationMinutes)) ? Number(durationMinutes) : 30;
+      if (duration <= 0 || duration > 480) {
+        return res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: '`durationMinutes` must be between 1 and 480.' },
+        });
+      }
+      const endMs = startMs + duration * 60_000;
+
+      // Conflict detection against existing non-cancelled meetings.
+      const existingSnap = await getDocs(collection(firestore, 'organizations/org_1/meetings'));
+      const conflicts: any[] = [];
+      existingSnap.forEach((d) => {
+        const m: any = d.data();
+        if (['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(m.status)) return;
+        const mStart = m.scheduledTime?.toMillis?.() ?? new Date(m.scheduledTime || 0).getTime();
+        if (!Number.isFinite(mStart) || mStart === 0) return;
+        const mEnd = mStart + (Number(m.durationMinutes) || 30) * 60_000;
+        // Half-open intervals: [start, end). Touching meetings do not conflict.
+        if (mStart < endMs && startMs < mEnd) conflicts.push({ id: m.id, scheduledTime: m.scheduledTime });
+      });
+
+      if (conflicts.length > 0) {
+        // The invariant: on a confirmed conflict, do NOT create. Zero provider requests, and
+        // zero local records that would later be treated as a real booking.
+        console.warn(`[meetings] Refused booking: ${conflicts.length} overlapping meeting(s).`);
+        return res.status(409).json({
+          error: {
+            code: 'SCHEDULE_CONFLICT',
+            message: `Requested slot overlaps ${conflicts.length} existing meeting(s).`,
+            details: { conflicts },
+          },
+        });
+      }
+
+      const payload = {
+        id: "meet_" + Date.now(),
+        contactId: contactId ?? null,
+        title: title ?? null,
+        notes: notes ?? null,
+        scheduledTime: new Date(startMs),
+        durationMinutes: duration,
+        status: 'SCHEDULED',
+        // Honest about provider state: nothing has been booked on a real calendar here.
+        providerSyncStatus: 'PENDING_CALENDAR_SYNC',
+        providerEventId: null,
+        createdAt: new Date(),
+      };
       await addDoc(collection(firestore, 'organizations/org_1/meetings'), payload);
       res.json(payload);
-    } catch(e: any) { res.status(500).json({error: e.message}); }
+    } catch(e: any) { res.status(500).json({error: { code: 'MEETING_CREATE_FAILED', message: e.message }}); }
   });
 
   app.get("/api/meetings", async (_req: Request, res: Response) => {
@@ -756,45 +976,76 @@ app.get("/api/inbox/circuit-breaker", (_req: Request, res: Response) => {
   // 19. Complete Outbox & Audit Trails
 
 
-  // Vite middleware for development / static serving in production
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    
+  // P0.14 — These webhook routes were previously registered ONLY inside the
+  // `else` (production) branch below, alongside the static-file handler. In development
+  // NODE_ENV !== "production", so neither route existed and both returned 404 — meaning the
+  // signature-verification path could never be exercised before shipping. They are
+  // registered unconditionally here, ahead of the environment split.
 // eSignature routes (DocuSign/PandaDoc Webhook)
-app.post("/api/signature/webhook", express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
-  try {
-    // In a real app we verify the HMAC signature from DocuSign here
-    const event = JSON.parse(req.body.toString());
-    
-    if (event.event === 'envelope-completed') {
-      const meetingId = event.data.envelopeSummary.customFields.customField.find((f: any) => f.name === 'meetingId')?.value;
-      if (meetingId) {
-        console.log(`DocuSign webhook received for meeting: ${meetingId}`);
-        
-        const meetingRef = doc(firestore, 'organizations/org_1/meetings', meetingId);
-        await updateDoc(meetingRef, { status: 'CONFIRMED' });
+app.post("/api/signature/webhook", async (req: Request, res: Response) => {
+  // P0.14 — Verify BEFORE parsing or acting. This handler previously carried the comment
+  // "In a real app we verify the HMAC signature from DocuSign here" and did not, which meant
+  // anyone who could reach the URL could mark any meeting CONFIRMED by posting a JSON body.
+  const verification = verifyDocuSignSignature(req, req.body as unknown as Buffer);
+  if (!verification.ok) {
+    console.warn(`[signature/webhook] Rejected unverified webhook: ${verification.reason}`);
+    return res.status(401).json({
+      error: { code: 'WEBHOOK_VERIFICATION_FAILED', message: verification.reason },
+    });
+  }
 
+  try {
+    const event = JSON.parse((req.body as unknown as Buffer).toString('utf8'));
+
+    if (event.event === 'envelope-completed') {
+      const meetingId = event.data?.envelopeSummary?.customFields?.customField
+        ?.find((f: any) => f.name === 'meetingId')?.value;
+      if (meetingId) {
+        console.log(`DocuSign webhook verified for meeting: ${meetingId}`);
+
+        // P0.14 — Gate the transition on current state instead of writing CONFIRMED
+        // unconditionally. Webhook delivery is duplicated, delayed and out of order, so a
+        // late replay must not resurrect a meeting that has since been cancelled.
+        const meetingRef = doc(firestore, 'organizations/org_1/meetings', meetingId);
+        const snap = await getDoc(meetingRef);
+        if (!snap.exists()) {
+          console.warn(`[signature/webhook] Meeting ${meetingId} not found; ignoring event.`);
+        } else {
+          const current = (snap.data() as any)?.status;
+          const terminal = ['CANCELLED', 'COMPLETED', 'NO_SHOW'];
+          if (terminal.includes(current)) {
+            console.warn(
+              `[signature/webhook] Ignoring envelope-completed for meeting ${meetingId}: ` +
+              `already in terminal state ${current}. A late or replayed event must not roll state backward.`
+            );
+          } else {
+            await updateDoc(meetingRef, { status: 'CONFIRMED' });
+          }
+        }
       }
     }
     res.status(200).send("OK");
   } catch(e) {
     console.error("DocuSign webhook error", e);
-    res.status(500).send("Error");
+    res.status(500).json({ error: { code: 'WEBHOOK_PROCESSING_FAILED', message: 'Error' } });
   }
 });
 
   
   // Gmail Pub/Sub Webhook
   app.post("/api/webhooks/gmail", async (req: Request, res: Response) => {
+    // P0.14 / P0.5 — Verify before doing any work. This endpoint is auth-exempt and drives
+    // gmailHistorySyncService.processEvent, an uncapped loop that issues paid AI calls. Left
+    // unverified it is an open financial-loss primitive reachable by anyone on the internet.
+    const verification = verifyPubSubToken(req);
+    if (!verification.ok) {
+      console.warn(`[webhooks/gmail] Rejected unverified push: ${verification.reason}`);
+      return res.status(401).json({
+        error: { code: 'WEBHOOK_VERIFICATION_FAILED', message: verification.reason },
+      });
+    }
+
     try {
-      // In production, verify Google Pub/Sub signature
       const message = req.body.message;
       if (!message || !message.data) {
         return res.status(400).send("Bad Request");
@@ -816,6 +1067,18 @@ app.post("/api/signature/webhook", express.raw({ type: 'application/json' }), as
       res.status(500).send("Error");
     }
   });
+
+  // Vite middleware for development / static serving in production
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    
 
   app.get("*", (_req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));

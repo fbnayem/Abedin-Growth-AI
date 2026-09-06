@@ -284,7 +284,13 @@ export const InboxView: React.FC<InboxViewProps> = ({
   const [inspectionResult, setInspectionResult] = useState<any>(null);
   const [runningTestMatrix, setRunningTestMatrix] = useState(false);
   const [testMatrixReport, setTestMatrixReport] = useState<any>(null);
-  const [circuitBreakerState, setCircuitBreakerState] = useState<any>({ globalAutonomousSendEnabled: true });
+  // P0.3 — Defaults to PAUSED, not ACTIVE. The safety indicator must never claim sending is
+  // live before the real state has been fetched; an optimistic default shows a green
+  // "AUTONOMOUS SEND: ACTIVE" badge during load regardless of the truth.
+  const [circuitBreakerState, setCircuitBreakerState] = useState<any>({
+    globalAutonomousSendEnabled: false,
+    pausedReason: "Loading state…",
+  });
   const [ctaRegistryList, setCtaRegistryList] = useState<any[]>([]);
 
   const handleInspectSalesDecision = async (targetConvId?: string) => {
@@ -338,7 +344,15 @@ export const InboxView: React.FC<InboxViewProps> = ({
       ]);
       if (cbRes.ok) {
         const cbData = await cbRes.json();
-        setCircuitBreakerState(cbData.circuitBreaker);
+        // P0.3 — Guard against a response without `circuitBreaker`. This assignment used to
+        // set the state to `undefined`, and the next render dereferenced it and threw.
+        // Anything unrecognised resolves to paused rather than to a crash.
+        setCircuitBreakerState(
+          cbData?.circuitBreaker ?? {
+            globalAutonomousSendEnabled: false,
+            pausedReason: "Server did not report circuit breaker state.",
+          }
+        );
       }
       if (ctaRes.ok) {
         const ctaData = await ctaRes.json();
@@ -358,7 +372,18 @@ export const InboxView: React.FC<InboxViewProps> = ({
       });
       if (res.ok) {
         const data = await res.json();
-        setCircuitBreakerState(data.circuitBreaker);
+        // P0.3 — Same guard as the load path: never set state to `undefined`.
+        setCircuitBreakerState(
+          data?.circuitBreaker ?? {
+            globalAutonomousSendEnabled: false,
+            pausedReason: "Server did not report circuit breaker state.",
+          }
+        );
+        // The server may accept the request but still refuse to resume — e.g. autonomy is
+        // disabled by configuration. Surface that instead of silently showing a stale badge.
+        if (data?.message) {
+          console.warn("[CircuitBreaker]", data.message);
+        }
       }
     } catch (e) {
       console.error("Toggle circuit breaker error:", e);
@@ -597,19 +622,17 @@ export const InboxView: React.FC<InboxViewProps> = ({
     if (!activeConv) return;
     setSending(true);
     try {
-      // If live Google Workspace OAuth token is present, send directly via Workspace Gmail API and label "Abedin Growth AI"
-      if (gmailState.isConnected && gmailState.accessToken) {
-        try {
-          await workspaceGmailService.sendEmail({
-            to: activeConv.contactEmail,
-            subject: draftSubject,
-            bodyText: draftBody,
-          });
-        } catch (workspaceErr) {
-          console.warn("Direct Gmail API send encountered an issue, falling back to server dispatch:", workspaceErr);
-        }
-      }
-
+      // P0.1 — The browser-side Gmail send was removed here.
+      //
+      // It called workspaceGmailService.sendEmail() directly and then fell through to
+      // onSendReply() unconditionally — the call below sat outside both the `if` and the
+      // `try`, so it ran on success *and* on failure. That is a deterministic double-send,
+      // latent only because /api/inbox/:id/reply is still a stub.
+      //
+      // It also bypassed the ActionGateway, outreachPolicy, the outbox, the circuit breaker
+      // and every REAL_* flag, making it the only path in the product that could reach a
+      // third party with no policy applied. All sending must go through the server so it
+      // passes the gateway. See docs/production/addendum-status.md P0.1.
       await onSendReply(activeConv.id, draftSubject, draftBody);
       await fetchLiveConversations();
       await fetchOutbox();

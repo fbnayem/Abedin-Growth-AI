@@ -8,10 +8,36 @@ import { messages, conversations, contacts, accounts, conversationFacts, outboxM
 import { eq, and } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { GmailMessage } from './gmail.service';
+import { outboxService } from './outbox.service';
+import { incrementInboundVersion, computeApprovalDigest } from './draftIntegrity.service';
 // Import agents (we will build/refactor these)
 import { IdentityResolverService } from './identityResolver.service';
 import { evaluateEmailUnderstandingRuleBased, determineNextBestAction, composeAutonomousSalesReply } from '../agents/salesDecisionEngine';
 import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
+
+type AuditDecision = 'PASS' | 'BLOCK' | 'HUMAN_REVIEW_REQUIRED';
+
+/**
+ * P0.11 — Placeholder for the independent audit, returning a SAFE decision rather than a
+ * fabricated one.
+ *
+ * When auditReplyAgainstPlan() is wired to real ReplyPlan / ClientIdentityResolution /
+ * EmailUnderstanding inputs, this becomes a call to it and the branching at the call site
+ * starts doing real work. Until then it returns HUMAN_REVIEW_REQUIRED, so drafts are held
+ * rather than sent on the strength of a verdict nobody computed.
+ *
+ * The explicit return type matters: it stops TypeScript narrowing the result to a single
+ * literal and reporting the caller's PASS/BLOCK branches as unreachable, which would invite
+ * someone to delete them.
+ */
+function runIndependentAudit(): { decision: AuditDecision; reason: string } {
+  return {
+    decision: 'HUMAN_REVIEW_REQUIRED',
+    reason:
+      'Independent auditor not yet wired to real ReplyPlan/identity inputs; routing to human ' +
+      'review rather than asserting a PASS that was never computed.',
+  };
+}
 
 export class InboundPipeline {
   async processNewEmail(email: GmailMessage, organizationId: string) {
@@ -67,8 +93,14 @@ export class InboundPipeline {
         receivedAt: new Date(),
       });
       
-      // 4. Update Conversation Memory
-      
+      // P0.12 — Record that the conversation has advanced, atomically, as part of ingesting
+      // this message. Every draft generated from here on is stamped with this version, and
+      // the worker refuses to send any draft whose stamp no longer matches. This must happen
+      // AFTER the message is persisted and BEFORE any draft is composed, or a draft could be
+      // stamped with a version that does not include the message it is replying to.
+      const inboundVersion = await incrementInboundVersion(conversationId);
+      console.log(`[InboundPipeline] conversation ${conversationId} -> inbound version ${inboundVersion}`);
+
       // 4. Update Conversation Memory
       const convMsgs = await db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(messages.receivedAt);
       
@@ -118,30 +150,76 @@ export class InboundPipeline {
       const draft = await composeAutonomousSalesReply({ incomingEmail: email.textBody, latestIntent: understanding.primaryIntent, buyingStage: BuyingStage.DISCOVERY, nextBestAction: nbaResult, prospectName: email.from } as any);
 
       // 8. Independent Audit
-      const auditResult = { decision: 'PASS', reason: '' }; // mock auditor for now
+      //
+      // P0.11 — This line was `const auditResult = { decision: 'PASS', reason: '' };`. That
+      // single hardcoded value disabled THREE controls at once, because suppression checking,
+      // claim grounding and the circuit breaker all sit behind auditReplyAgainstPlan(): every
+      // draft passed, unconditionally, no matter what it contained.
+      //
+      // The real auditor needs a ReplyPlan, a resolved ClientIdentityResolution and the full
+      // EmailUnderstanding. This pipeline does not build them yet — note the `{} as any`
+      // arguments passed to determineNextBestAction above — so the auditor cannot be invoked
+      // faithfully here without that plumbing.
+      //
+      // Given that, the choice is between inventing a verdict and admitting we do not have
+      // one. Addendum §14 and §23 are explicit: when required information is absent, apply a
+      // safe policy rather than fabricating it. So an un-runnable audit now routes the draft
+      // to HUMAN_REVIEW instead of asserting PASS. The effect is that autonomous replies stop
+      // until the auditor is properly wired — which is the correct failure direction, and
+      // visible, rather than a silent bypass that looks like a working control.
+      const { decision: auditDecision, reason: auditReason } = runIndependentAudit();
+      console.warn(`[InboundPipeline] audit -> ${auditDecision}: ${auditReason}`);
 
-      if ((auditResult.decision as any) === 'BLOCK') {
-         console.error("Draft blocked by auditor:", auditResult.reason);
+      if (auditDecision === 'BLOCK') {
+         console.error("Draft blocked by auditor:", auditReason);
          return;
       }
 
       // 9. Transactional Outbox Insert
-      const outboxStatus = (auditResult.decision as any) === 'HUMAN_REVIEW_REQUIRED' ? 'HUMAN_REVIEW' : 'PENDING';
-      
-      await db.insert(outboxMessages).values({
-        id: uuidv4(),
-        idempotencyKey: `reply_${email.id}`,
+      //
+      // P0.7 — This wrote to the POSTGRES `outboxMessages` table while outbox.worker.ts polls
+      // the FIRESTORE queue, so nothing produced here was ever consumed: the Firestore queue
+      // had no reachable producer and always returned empty. Both sides now use the same
+      // store, through outboxService, which is also where the idempotency key and the
+      // claim/lease fields live.
+      const outboxStatus = auditDecision === 'PASS' ? 'PENDING' : 'HUMAN_REVIEW';
+
+      // P0.12 — Stamp the draft with the conversation version it was generated from, plus a
+      // digest of exactly what would be sent. The worker re-checks both immediately before
+      // dispatch, so a message that arrives between now and then invalidates this draft
+      // rather than being silently overtaken.
+      //
+      // `inboundVersion` was incremented above when this message was recorded, so it is the
+      // version this draft genuinely reflects.
+      const outboundPayload = {
+        to: email.from,
+        subject: draft.subject,
+        htmlBody: draft.body,
+        inReplyTo: email.id,
+        references: email.references ? `${email.references} ${email.id}` : email.id,
+        threadId: email.threadId,
+      };
+
+      const approvalDigest = computeApprovalDigest({
+        to: outboundPayload.to,
+        subject: outboundPayload.subject,
+        htmlBody: outboundPayload.htmlBody,
         conversationId,
-        payload: {
-           to: email.from,
-           subject: draft.subject,
-           htmlBody: draft.body,
-           inReplyTo: email.id,
-           references: email.references ? `${email.references} ${email.id}` : email.id,
-           threadId: email.threadId
-        },
-        status: outboxStatus
+        inboundVersion,
       });
+
+      const queued = await outboxService.queueMessage(
+        conversationId,
+        outboundPayload,
+        `reply_${email.id}`,
+        { generatedForInboundVersion: inboundVersion, approvalDigest }
+      );
+
+      // queueMessage defaults new rows to PENDING; anything not cleared by the auditor must
+      // be held for a human instead.
+      if (queued && outboxStatus !== 'PENDING') {
+        await outboxService.holdForHumanReview(queued.id, auditReason);
+      }
 
       console.log(`--- Pipeline Completed. Outbox job created: ${outboxStatus} ---`);
       MetricsService.getInstance().recordLatency("INBOUND_PROCESSING", Date.now() - startTime);

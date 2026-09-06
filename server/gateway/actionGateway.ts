@@ -1,7 +1,12 @@
+// P0.2 — Imported FIRST and for its side effect as well as its exports: this module calls
+// dotenv.config() at evaluation time, guaranteeing .env has been loaded before any flag is
+// read, no matter how this gateway is reached. See server/config/safeMode.ts.
+import { isRealActionEnabled } from '../config/safeMode';
 import { firestore } from '../firebase';
 import { collection, doc, getDoc, getDocs, setDoc, query, where } from 'firebase/firestore';
 import { gmailService } from '../services/gmail.service';
 import { outreachPolicyService } from '../policies/outreachPolicy';
+import { fetchWithTimeout } from '../lib/httpClient';
 
 export enum ActionType {
   EMAIL_SEND = 'EMAIL_SEND',
@@ -30,18 +35,40 @@ export interface ActionResult {
   error?: string;
   isAmbiguousResult?: boolean;
   blockedReason?: string;
+  /**
+   * P0.8 — Structured failure code so callers branch on a value rather than on error prose.
+   * PROVIDER_NOT_CONFIGURED is the specific case that used to be reported as SUCCESS with a
+   * fabricated `sim_...` provider id.
+   */
+  errorCode?:
+    | 'PROVIDER_NOT_CONFIGURED'
+    | 'PROVIDER_AUTH_EXPIRED'
+    | 'PROVIDER_UNAVAILABLE'
+    | 'POLICY_BLOCKED'
+    | 'FABRICATED_PROVIDER_ID'
+    | 'UNSUPPORTED_ACTION';
+}
+
+/**
+ * P0.8 — A provider id must come from a provider. Ids shaped like `sim_`, `mock_` or `test_`
+ * were previously minted locally and written to durable records with status SENT, which made
+ * every "successful send" in the system unfalsifiable. Nothing matching this may be persisted
+ * as evidence that an external action occurred.
+ */
+export const FABRICATED_PROVIDER_ID = /^(sim|mock|test|fake|stub)[-_]/i;
+
+export function isFabricatedProviderId(id: unknown): boolean {
+  return typeof id === 'string' && FABRICATED_PROVIDER_ID.test(id);
 }
 
 export class ActionGateway {
   
-  // Safe Rebuild Mode - Defaults from Requirement A
-  private readonly SAFE_MODE = {
-    REAL_EMAIL_SEND_ENABLED: process.env.REAL_EMAIL_SEND_ENABLED === 'true',
-    REAL_CALENDAR_CREATE_ENABLED: process.env.REAL_CALENDAR_CREATE_ENABLED === 'true',
-    REAL_PAYMENT_ENABLED: process.env.REAL_PAYMENT_ENABLED === 'true',
-    REAL_SIGNATURE_ENABLED: process.env.REAL_SIGNATURE_ENABLED === 'true',
-    REAL_LINKEDIN_SEND_ENABLED: process.env.REAL_LINKEDIN_SEND_ENABLED === 'true',
-  };
+  // P0.2 — The `private readonly SAFE_MODE = {...}` snapshot that used to live here has been
+  // removed. It was evaluated at module-evaluation time, which ES module hoisting runs BEFORE
+  // dotenv.config() in server.ts, so values in .env never reached this enforcement point while
+  // /api/readiness reported them as if they had. Flags are now read lazily, per decision, from
+  // server/config/safeMode.ts — the same module readiness reads, so the displayed value and the
+  // enforced value cannot drift apart.
 
   /**
    * Central entry point for all external actions.
@@ -109,19 +136,31 @@ export class ActionGateway {
   private checkFeatureFlag(actionType: ActionType): boolean {
     switch (actionType) {
       case ActionType.EMAIL_SEND:
-        return this.SAFE_MODE.REAL_EMAIL_SEND_ENABLED;
+        return isRealActionEnabled('REAL_EMAIL_SEND_ENABLED');
       case ActionType.CALENDAR_CREATE:
       case ActionType.CALENDAR_UPDATE:
       case ActionType.CALENDAR_CANCEL:
-        return this.SAFE_MODE.REAL_CALENDAR_CREATE_ENABLED;
+        return isRealActionEnabled('REAL_CALENDAR_CREATE_ENABLED');
       case ActionType.PAYMENT_CREATE:
-        return this.SAFE_MODE.REAL_PAYMENT_ENABLED;
+        return isRealActionEnabled('REAL_PAYMENT_ENABLED');
       case ActionType.SIGNATURE_SEND:
-        return this.SAFE_MODE.REAL_SIGNATURE_ENABLED;
+        return isRealActionEnabled('REAL_SIGNATURE_ENABLED');
       case ActionType.EXTERNAL_MESSAGE_SEND:
-        return this.SAFE_MODE.REAL_LINKEDIN_SEND_ENABLED; // Assuming LinkedIn for now
+        return isRealActionEnabled('REAL_LINKEDIN_SEND_ENABLED');
+      case ActionType.CRM_UPDATE:
+        // Internal-only mutation: no external side effect, so it is not gated by Safe Mode.
+        return true;
       default:
-        return true; // Internal CRM updates might be allowed
+        // P0.2 — This used to `return true`, which meant any action type added to the enum
+        // without a case here was dispatched by DEFAULT. A dispatch gate whose fallback is
+        // "allow" fails OPEN, the exact inverse of addendum §A ("production action flags must
+        // fail closed"). An unrecognised action is now refused, so adding an ActionType
+        // without deciding its safety posture blocks it rather than silently permitting it.
+        console.warn(
+          `[ActionGateway] Unrecognised action type '${actionType}' has no Safe Mode policy; ` +
+            `refusing by default (fail closed). Add an explicit case to checkFeatureFlag().`
+        );
+        return false;
     }
   }
 
@@ -166,44 +205,114 @@ export class ActionGateway {
         // Q. JURISDICTION-AWARE OUTREACH POLICY
         // In a real implementation, we'd lookup the recipient's country and consent status from the DB.
 
-        // Resolve contact consent and jurisdiction
-        let resolvedCountry = 'US';
-        let resolvedConsent = true;
-        if (request.payload.contactId) {
-            const contactSnap = await getDoc(doc(firestore, 'organizations/org_1/contacts', request.payload.contactId));
-            if (contactSnap.exists) {
-                const contactData = contactSnap.data() as any;
-                resolvedCountry = contactData.country || 'US';
-                resolvedConsent = contactData.consentGiven !== false; // default true unless explicit false
-            }
+        // P0.10 — CONSENT AND SUPPRESSION, FAIL CLOSED.
+        //
+        // This block previously defaulted `resolvedCountry = 'US'`, `resolvedConsent = true`
+        // and passed a hardcoded `isB2B: true`. Addendum §14 forbids exactly this: unknown
+        // consent must not become "true", unknown country must not become a permissive
+        // jurisdiction, and unknown customer state must not authorise cold outreach. As
+        // written, a contact with no record at all was treated as a consenting US B2B
+        // recipient — the most permissive reading of the least information.
+        //
+        // Note `contactSnap.exists` was also a bug: in the Firestore v9 API `exists` is a
+        // METHOD, so the truthiness test passed even for missing documents and the code read
+        // fields off a non-existent record.
+        if (!request.payload.contactId) {
+            const reason =
+                'EMAIL_SEND requires an explicit contactId so consent and suppression can be ' +
+                'checked. Refusing to send to an unidentified recipient.';
+            console.warn(`[ActionGateway] ${reason}`);
+            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
         }
-        
+
+        const contactSnap = await getDoc(doc(firestore, 'organizations/org_1/contacts', request.payload.contactId));
+        if (!contactSnap.exists()) {
+            const reason =
+                `Contact ${request.payload.contactId} not found. Refusing to send without a ` +
+                `consent record (INSUFFICIENT_DATA, not implied permission).`;
+            console.warn(`[ActionGateway] ${reason}`);
+            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+        }
+
+        const contactData = contactSnap.data() as any;
+
+        // Suppression is checked before anything else: an unsubscribe, hard bounce or
+        // complaint outranks every other consideration, including an operator's intent.
+        const suppressionFlags = [
+            contactData.suppressed === true ? 'SUPPRESSED' : null,
+            contactData.unsubscribed === true ? 'UNSUBSCRIBED' : null,
+            contactData.hardBounced === true ? 'HARD_BOUNCE' : null,
+            contactData.complained === true ? 'SPAM_COMPLAINT' : null,
+            contactData.emailStatus === 'BOUNCED' ? 'BOUNCED' : null,
+        ].filter(Boolean);
+
+        if (suppressionFlags.length > 0) {
+            const reason = `Recipient is suppressed (${suppressionFlags.join(', ')}). Send refused.`;
+            console.warn(`[ActionGateway] ${reason}`);
+            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+        }
+
+        // Unknown consent is INSUFFICIENT_DATA, never permission.
+        if (contactData.consentGiven !== true) {
+            const reason =
+                `No affirmative consent record for contact ${request.payload.contactId} ` +
+                `(consentGiven=${JSON.stringify(contactData.consentGiven)}). ` +
+                `Unknown consent is treated as INSUFFICIENT_DATA and routed to human review, ` +
+                `not as permission.`;
+            console.warn(`[ActionGateway] ${reason}`);
+            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+        }
+
+        // Unknown country is not a permissive jurisdiction. Normalise to an ISO code and
+        // refuse when absent, rather than assuming 'US'.
+        const rawCountry = typeof contactData.country === 'string' ? contactData.country.trim().toUpperCase() : '';
+        if (!/^[A-Z]{2}$/.test(rawCountry)) {
+            const reason =
+                `Recipient jurisdiction unknown or not an ISO-3166 alpha-2 code ` +
+                `(country=${JSON.stringify(contactData.country)}). Refusing rather than ` +
+                `assuming a permissive jurisdiction.`;
+            console.warn(`[ActionGateway] ${reason}`);
+            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+        }
+
         const policyResult = await outreachPolicyService.evaluateOutreach({
-             country: resolvedCountry,
-             campaignType: 'inbound',
-             consentGiven: resolvedConsent,
-             isB2B: true
+             country: rawCountry,
+             campaignType: request.payload.campaignType || 'inbound',
+             consentGiven: true, // proven above, not assumed
+             // Was hardcoded `true`. B2B status materially changes the legal basis under
+             // PECR/GDPR, so it must come from the record and default to the stricter B2C.
+             isB2B: contactData.isB2B === true,
         });
 
         if (!policyResult.allowed) {
             console.warn(`[ActionGateway] Email blocked by outreach policy: ${policyResult.reason}`);
-            return { success: false, blockedReason: policyResult.reason };
+            return { success: false, blockedReason: policyResult.reason, errorCode: 'POLICY_BLOCKED' };
         }
 
         if (!firestore) return { success: false, error: 'Firestore not initialized' };
         // Fetch oauth token for organization
         const q = query(collection(firestore, 'oauth_connections'), where('organizationId', '==', request.organizationId));
         const oauthsSnap = await getDocs(q);
-        let accessToken = 'mock_token';
+        // P0.8 — This used to default to the literal 'mock_token' and, on finding it, RETURN
+        // SUCCESS with a locally-minted `sim_email_<timestamp>` id. Because server.ts wrote
+        // 'mock_token' on every Gmail "connect", that branch fired for 100% of sends: the
+        // system transmitted nothing and recorded status SENT. Addendum §3 requires that a
+        // message cannot become SENT without a real provider result, so a missing or
+        // unusable credential is now a FAILURE, and it is the caller's job to surface it.
+        let accessToken: string | null = null;
         oauthsSnap.forEach(doc => {
-            if (doc.data().provider === 'gmail' || doc.data().provider === 'GMAIL') {
-                accessToken = doc.data().accessToken;
+            const d = doc.data();
+            if (d.provider === 'gmail' || d.provider === 'GMAIL') {
+                accessToken = d.accessToken ?? null;
             }
         });
 
-        if (accessToken === 'mock_token') {
-             // Simulation for testing/staging without real OAuth
-             return { success: true, providerResult: { messageId: 'sim_email_' + Date.now(), threadId: request.payload.threadId || 'sim_thread_' + Date.now() } };
+        if (!accessToken || isFabricatedProviderId(accessToken) || accessToken === 'mock_token') {
+            const reason =
+                'No usable Gmail credential is configured for this organization. ' +
+                'Refusing to report a send that did not happen.';
+            console.warn(`[ActionGateway] EMAIL_SEND refused: ${reason}`);
+            return { success: false, error: reason, errorCode: 'PROVIDER_NOT_CONFIGURED' };
         }
 
         gmailService.setCredentials({ access_token: accessToken });
@@ -257,19 +366,28 @@ export class ActionGateway {
          // Fetch oauth token for organization
          const q = query(collection(firestore, 'oauth_connections'), where('organizationId', '==', request.organizationId));
          const oauthsSnap = await getDocs(q);
-         let accessToken = 'mock_token';
+         // P0.8 — Same fabricated-success defect as the email path: a missing credential
+         // returned SUCCESS with a locally-minted `sim_evt_<timestamp>` id, so a meeting could
+         // be recorded as booked when no calendar event existed. Creating a calendar event is
+         // an irreversible external action; it must fail loudly rather than be invented.
+         let accessToken: string | null = null;
          oauthsSnap.forEach(doc => {
-             if (doc.data().provider === 'gmail' || doc.data().provider === 'GMAIL') {
-                 accessToken = doc.data().accessToken;
+             const d = doc.data();
+             if (d.provider === 'gmail' || d.provider === 'GMAIL') {
+                 accessToken = d.accessToken ?? null;
              }
          });
-         
-         if (accessToken === 'mock_token') {
-             return { success: true, providerResult: { eventId: 'sim_evt_' + Date.now() } };
+
+         if (!accessToken || isFabricatedProviderId(accessToken) || accessToken === 'mock_token') {
+             const reason =
+                 'No usable Google credential is configured for this organization. ' +
+                 'Refusing to report a calendar event that was never created.';
+             console.warn(`[ActionGateway] CALENDAR_CREATE refused: ${reason}`);
+             return { success: false, error: reason, errorCode: 'PROVIDER_NOT_CONFIGURED' };
          }
 
          // 4. Check free/busy via Google Calendar API
-         const fbRes = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
+         const fbRes = await fetchWithTimeout('https://www.googleapis.com/calendar/v3/freeBusy', {
              method: 'POST',
              headers: { 'Authorization': `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
              body: JSON.stringify({
@@ -284,7 +402,7 @@ export class ActionGateway {
          
          // Perform real Google Calendar API call
          try {
-             const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', {
+             const res = await fetchWithTimeout('https://www.googleapis.com/calendar/v3/calendars/primary/events?conferenceDataVersion=1', {
                  method: 'POST',
                  headers: {
                      'Authorization': `Bearer ${accessToken}`,
