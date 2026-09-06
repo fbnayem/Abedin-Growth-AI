@@ -118,6 +118,78 @@ Sections that remain `NOT_STARTED` despite related work include **S18**: the red
 
 ---
 
+## 1d. Remediation progress — P1.1 and P1.2, tenancy (landed 2026-09-06)
+
+### P1.1 — there is now a tenant
+
+There was not one before. One hardcoded organisation id appeared **42 times across seven files**, so every authenticated user read and wrote the same organisation's data whoever they were, and two services accepted an `organizationId` argument and discarded it.
+
+`server/tenancy/orgScope.ts` is the single place that answers "which organisation is this", and `orgPath()` is the single place that turns the answer into a datastore path. `server/middleware/tenant.ts` resolves it once, after `requireAuth` and before the rate limiters, from a **Firebase custom claim** — and denies with 403 rather than falling back to a default.
+
+Three properties are worth stating explicitly, because each replaces a specific failure:
+
+**The grant comes from the token, not the datastore.** Custom claims can only be written with Admin SDK credentials and are covered by the token signature. Membership documents in Firestore are *not* a grant: `firestore.rules` is still `allow read, write: if true`, so a membership record there could have been written by anyone. The same asymmetric-authority rule the kill switch uses applies here — **the token may grant, the datastore may only revoke**. A membership document can suspend a user; it can never create access. An unreadable one denies, per §14.
+
+**The org id is now untrusted input in a path.** It stopped being a literal and started arriving from a token, and it is concatenated into a Firestore path that splits on `/`. An org id of `../oauth_connections` would have retargeted the read out of the tenant subtree entirely. `orgPath` validates against an allow-list before any concatenation, and it is the only sanctioned way to build these paths precisely so the check cannot be skipped — which is what makes the CI guardrail a grep.
+
+**The consent check was answering from the wrong tenant.** `actionGateway` read a hardcoded organisation's contacts for the consent and suppression lookup while `request.organizationId` sat in scope nine lines earlier. An unknown recipient could look consented and a suppressed one could look clear, because the answer came from a different customer's records.
+
+Callers that had no request to resolve from were handled rather than papered over: the outbox worker asks which tenants it serves and **idles rather than guessing** when it cannot; the org travels on the job, not implied by where the job happens to be stored; the approval digest binds the tenant; and the global kill switch moved to `system_settings/circuitBreaker`, because it is a system control that was stored as though it were one tenant's setting — with a restriction-only carry-forward so a pause recorded at the old location cannot be silently cleared by the move.
+
+### P1.2 — the tenant reaches the database
+
+Thirteen of nineteen tables had no `organization_id` at all. Not "the predicate was missing" — there was **no column to filter on**, so a tenant predicate could not be written for `messages`, `outbox_messages`, `campaigns`, `meetings`, any ledger, or any knowledge row. All thirteen now carry it `NOT NULL` with a foreign key, and the five required composite uniques are declared, tenant-first.
+
+`users.email` is unique **per organisation** rather than globally. A global unique stops one person holding an account in two tenants, and turns "is this address taken?" into a probe for the existence of a user in someone else's organisation. The outbox idempotency key was global for the same reason and had a worse consequence: one tenant's key could suppress another tenant's send — a silent non-delivery that looks like successful deduplication.
+
+**Three findings came out of doing this work, and each is more useful than the schema change itself.**
+
+**1. `db` was typed `any`, so every Drizzle query in the repository was unchecked.** The export read `pool ? drizzle(...) : new Proxy({} as any, ...)`. A union containing `any` collapses to `any`. `db.insert(messages).values({})` type-checked. Omitting a NOT NULL column type-checked. This is why adding `organization_id` to thirteen tables initially produced **zero** compiler errors at the call sites that fail to populate it. With the proxy asserted to the real database type, the compiler found three real omissions immediately — the `messages` insert, the `conversation_facts` insert, and the contacts mirror — all of which had been silently writing rows with no tenant.
+
+**2. The human review console returned every tenant's queued mail.** `server/routes/outbox.routes.ts` is mounted and live. `db.select().from(outboxMessages)` had no predicate of any kind, so it returned **every organisation's** queued messages — recipients, subjects and bodies — to any authenticated caller, and `/:id/approve` matched on id alone, so an operator in one tenant could release another tenant's message for sending. It was also reading the wrong store: it queried Postgres while the worker dispatches from Firestore, so approving set a row nothing consumes, and with `DATABASE_URL` unset the console returned 500. And it had no state gate: `set({status:'PENDING'})` unconditionally, so a cancelled or already-sent job could be pushed back into the send queue by a stale browser tab. Rewritten against the tenant-scoped Firestore queue, with 404 on a foreign id (not 403 — saying "forbidden" would confirm the id exists elsewhere) and a transactional state gate.
+
+**3. The generated migration would have failed the first time it met real data.** `drizzle-kit` emitted fourteen statements of the form `ALTER TABLE "messages" ADD COLUMN "organization_id" varchar(255) NOT NULL`. PostgreSQL rejects that outright on a table that already has rows. Against the current unprovisioned database it would have appeared to work. It has been rewritten by hand as add-nullable → backfill-from-parent → `SET NOT NULL`, and — the part that matters — the four tables with no parent to derive a tenant from (`campaigns`, `knowledge_items`, `attention_items`, `ai_run_logs`) make the migration **stop and refuse** rather than sweep orphan rows into an arbitrary organisation. A failed migration is recoverable; a customer record silently filed under the wrong tenant is not. A test now asserts no migration contains the unsafe form.
+
+### Evidence
+
+`npm test`: **231 tests across 10 files**, up from 159. New: 36 tenancy invariants, 50 schema-structure invariants, 22 email-key invariants, 5 cross-tenant draft-integrity invariants.
+
+The tenancy tests were **mutation-tested**: relaxing `ORG_ID_PATTERN` to `/^.*$/` and making unresolved tenants fall back to a default produced 16 failures. They are not vacuous.
+
+Runtime, against the live datastore rather than the compiler:
+
+| Probe | Result |
+|---|---|
+| `GET /api/leads` with no organisation claim | `403 TENANT_UNRESOLVED` |
+| `X-Org-Id: globex` (not granted by the token) | `403 TENANT_FORBIDDEN` |
+| `X-Org-Id: ../oauth_connections` | `403 TENANT_FORBIDDEN` |
+| `GET /api/campaigns` where the tenant collection holds 2 documents | 2 returned |
+| `GET /api/outbox` (previously 500 from the dead Postgres path) | `200 []` |
+| `GET /api/outbox/<unknown id>` | `404` |
+| approve a job from another tenant | `NOT_FOUND`, job stays `HUMAN_REVIEW` |
+| approve twice | second is `ILLEGAL_TRANSITION` |
+| cancel twice | second is `ILLEGAL_TRANSITION` |
+
+The temporary job created for that last group was deleted afterwards and its absence confirmed.
+
+### Three source files were binary, and the obvious check for it does not work
+
+`draftIntegrity.service.ts`, `adversarial.test.ts` and a new fixture each contained a **raw NUL byte** where an escape was intended. All three compiled and ran correctly, so nothing downstream complained — but git renders such a file as "Binary files differ" (no reviewable diff), grep skips it, and **every grep-based guardrail in CI therefore excluded it silently**. `adversarial.test.ts` had been in that state since the P2 commit.
+
+The obvious fix is a grep. The obvious fix does not work: `grep -rlP "\x00"` returns "no matches" against a file that definitely contains one, because grep classifies it as binary and skips it. That was measured, not assumed. The check is `scripts/check-no-nul-bytes.mjs` instead. A guardrail that cannot fail is worse than none, because it is mistaken for coverage.
+
+### What changed status
+
+**S4 moves `NOT_STARTED → PARTIAL`** — the first movement for the section that blocks everything else. There is now a request-scoped tenant, all thirteen tables carry the column, all five composite uniques exist, by-id reads and writes carry the tenant predicate and return 404 on a foreign id, and executable tests assert it.
+
+**It does not move further, and the reason is not a technicality.** §4 is tenant integrity *at database level*. `firestore.rules` is still `allow read, write: if true`, so the datastore enforces nothing: every control described above lives in the application, and anyone with the committed `apiKey` can bypass the application entirely and read or write any organisation's data directly from a browser console. On the PostgreSQL side the constraints are declared but nothing writes through them — `DATABASE_URL` is unset and the live store is Firestore. Both halves of "at database level" are still missing.
+
+So the blocker for `VERIFIED` has **moved**, not lifted. Section 1c said `VERIFIED` was unreachable because there was no tenant path to prove. There is one now. What stands in the way today is **P0.0**: no test can prove cross-tenant isolation while the datastore is open to anonymous readers and writers, because the property being tested is bypassable by construction. That is a console action, and it is not mine to perform.
+
+**S15, S26 and S29 do not move.** S29 gains a single shared normalisation module with tests — replacing two incompatible normalisers — but the merge operation still does not exist and the deterministic document id that would enforce the same uniqueness on Firestore is P1.5. S15's composite uniques are declared on a store nothing writes to. S26 gains a `campaign_recipients` table carrying the required unique, and **nothing writes to it**: it is scaffolding placed deliberately so that campaign execution cannot later be built without the constraint, not evidence of a control.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -126,11 +198,11 @@ Sections that remain `NOT_STARTED` despite related work include **S18**: the red
 |---|---:|---|
 | `VERIFIED` | **0** | — |
 | `IMPLEMENTED_UNVERIFIED` | **1** | S1 |
-| `PARTIAL` | **23** | S2, S3, S5, S8, S9, S10, S13, S14, S15, S16, S21, S29, S30, S31, S32, S33, S36, S37, S39, S40, S43, S46, S47 |
-| `NOT_STARTED` | **25** | S4, S6, S7, S11, S12, S17, S18, S19, S20, S22, S23, S24, S25, S26, S27, S28, S34, S35, S38, S41, S42, S44, S45, S48, S49 |
+| `PARTIAL` | **24** | S2, S3, S4, S5, S8, S9, S10, S13, S14, S15, S16, S21, S29, S30, S31, S32, S33, S36, S37, S39, S40, S43, S46, S47 |
+| `NOT_STARTED` | **24** | S6, S7, S11, S12, S17, S18, S19, S20, S22, S23, S24, S25, S26, S27, S28, S34, S35, S38, S41, S42, S44, S45, S48, S49 |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-0 + 1 + 23 + 25 + 0 = **49 rows**.
+0 + 1 + 24 + 24 + 0 = **49 rows**.
 
 | Severity | Count |
 |---|---:|
@@ -211,7 +283,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S1 | Active code graph: dead modules, competing owners, untracked repo-mutation scripts | IMPLEMENTED_UNVERIFIED | CRITICAL | `docs/production/active-code-graph.md` (the deliverable, written); `server/services/pipeline.service.ts:5-11`; `server/gateway/actionGateway.ts:173`; `server.ts:344`; `server/routes/outbox.routes.ts:13` | The required artifact exists and is accurate; **nothing verifies it** — no dependency-cruiser rule, no CI check, no lint boundary fails when it goes stale. (The 25 dead modules, the 6 ownerless capabilities and the 172 `.cjs` scripts are what the graph *documents*; they are graded in the sections that own them, not here.) |
 | S2 | Proof-based status: test inventory, runner, CI | PARTIAL | CRITICAL | `package.json:12-13`; `server/tests/adversarial.test.ts:29-41`; `server/tests/pipeline.test.ts:16-19`; no `.github` | Zero assertions repo-wide; no test runner; no CI; the one runnable test reports 4/4 unconditionally |
 | S3 | A message cannot become SENT without a real provider result | PARTIAL | CRITICAL | `server/workers/outbox.worker.ts:99-100`; `actionGateway.ts:204-207`; `server.ts:511,519` | `|| 'sim_' + Date.now()` fabricates provider ids; two paths return success with no network call; no reconciliation; no retry; unlocked claim |
-| S4 | Tenant integrity at database level | NOT_STARTED | CRITICAL | `firestore.rules:5`; `server.ts:504` vs `:507`; `server/middleware/auth.ts:17-21`; `identityResolver.service.ts:8` | No request-scoped tenant; 13 of 19 tables have no org column; none of the 5 required composite uniques exist; two services accept `organizationId` and discard it |
+| S4 | Tenant integrity at database level | PARTIAL | CRITICAL | `server/tenancy/orgScope.ts`; `server/middleware/tenant.ts`; `server/db/schema.ts`; `firestore.rules:5` | **P1.1/P1.2 landed.** Request-scoped tenant from a signed claim; all 13 tables carry `organization_id NOT NULL`; all 5 composite uniques declared; by-id access 404s on a foreign id; 86 executable invariants. Still PARTIAL: `firestore.rules` remains `allow read, write: if true`, so the *datastore* enforces nothing and every control is bypassable by going direct; the PostgreSQL constraints have no writer |
 | S5 | Migration safety: expand/contract, rollback, backfill, tests | PARTIAL | HIGH | `drizzle/meta/_journal.json`; `run_migrations.cjs:7,10`; `server/db/index.ts:24,29,48-52` | No runner wired; the only script applies migration 0001 only, with no ledger; zero down migrations, zero backfills, zero indexes; TLS verification disabled — `ssl: { rejectUnauthorized: false }` at `server/db/index.ts:24`, `:29` and `run_migrations.cjs:7` |
 | S6 | State machines: campaign, outbox, meeting, payment, opportunity, autopilot, knowledge | NOT_STARTED | CRITICAL | `server.ts:303`, `:318`, `:782`, `:744`; `salesDecisionEngine.ts:275-291` | No transition map anywhere; `COMPLETED → ACTIVE` is the default branch; opportunity stage accepts any string; `AUTONOMY_PAUSED_BY_HUMAN` has no writer |
 | S7 | Optimistic concurrency (version / ETag / conditional write) | NOT_STARTED | HIGH | `server/db/schema.ts:287`; `server.ts:176-181`, `:193-198`, `:297-307` | No `version` column on any table; zero `runTransaction`/`writeBatch`/`increment`; no 409 anywhere; blind whole-document `setDoc` overwrites |
@@ -307,7 +379,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 
 ---
 
-### S4 — Tenant integrity at database level · NOT_STARTED · CRITICAL
+### S4 — Tenant integrity at database level · PARTIAL · CRITICAL
 
 **What exists.** Tenancy-shaped naming: a path prefix and five `organizationId` columns. No tenancy.
 
@@ -320,6 +392,10 @@ The only thing preventing delivery today is the `'mock_token'` simulation branch
 The same primitive reaches further than the outbox. Anyone can set `autonomyPausedByHuman` on any conversation (defeating the human-ownership lock in the direction of their choosing), and anyone can write the knowledge and company-brain documents that are stringified into every prompt — a **write** injection channel that is strictly stronger than the inbound-email text channel S18 analyses, because it needs no model to cooperate and leaves no inbound message to inspect. **Correct blast radius:** not "customer A sees customer B's contacts", but an open relay from a reputable business mailbox, remotely programmable by an anonymous party, with the customer's sending-domain reputation and legal exposure as collateral.
 
 **Worst case.** Onboard a second customer: every request, including unauthenticated ones, resolves to `organizations/org_1/...`, so B's dashboard renders A's contacts, inbox, pipeline and company brain with no error. And with `allow read, write: if true` plus the committed `firebase-applet-config.json`, anyone can read or delete every organization's data from a browser console without touching the Express server — or, per the finding above, make it send mail of their choosing on the customer's behalf.
+
+**Update (P1.1/P1.2 landed 2026-09-06).** The application half of this section is now built and tested; the datastore half is not, which is why the status is PARTIAL rather than higher. Built: a request-scoped tenant resolved from a Firebase custom claim (`server/middleware/tenant.ts`), a single `orgScope(req)` accessor with a validated `orgPath()` path builder, all 42 hardcoded literals removed with a CI grep banning their return, `organization_id NOT NULL` on all 13 tables, all 5 composite uniques, `users.email` rescoped to `unique(organizationId, email)`, tenant predicates on the Drizzle reads and deletes, and 404-on-foreign-id for by-id access. `identityResolver.resolve` now uses the argument it was discarding, and `actionGateway`'s consent lookup uses `request.organizationId` instead of a hardcoded tenant. `outbox.routes.ts` — which returned every tenant's queued mail and approved by id with no predicate — was rewritten against the tenant-scoped queue. Verified at runtime: no claim → 403 `TENANT_UNRESOLVED`; a foreign `X-Org-Id` → 403 `TENANT_FORBIDDEN`; `../oauth_connections` as an org id → refused; a cross-tenant approve → `NOT_FOUND` with the job left untouched.
+
+**What still blocks this section, unchanged:** `firestore.rules:5`. Every control above is an application control, and the application is not the only way in. With `allow read, write: if true` and the `apiKey` committed to a public repository, any party can read and write any organisation's data directly, and the mail-injection primitive described above is untouched by tenant resolution. The PostgreSQL constraints are declared but have no writer. This section cannot move again until P0.0 is done.
 
 **Remediation.** Close the datastore boundary first — and do it as a **console action, today**, not as a commit: publish deny-by-default rules from the Firebase console, revoke and rotate the committed `apiKey` and the OAuth client, and audit the live Firestore for documents an anonymous party may already have written, specifically `oauth_connections` and the knowledge / company-brain corpus that feeds the prompts. Accept that local dev breaks; the product has never sent an autonomous email in any environment, so nothing of value is protected by keeping the dev server functional (see P0.0). The Admin-SDK migration — moving server access off the client SDK so the tightened rules can coexist with a working server — then proceeds at engineering pace as a separate, later item. Delete the three auth bypasses. Add real tenant resolution behind a single `orgScope(req)` accessor and CI-grep for new `org_1` literals. Add `organizationId` to the 13 tables. Add the five composite uniques and change `users.email` to `unique(organizationId, email)`. Make entity ids insufficient: every by-id read/write carries the tenant predicate and returns 404 on a foreign id. Then write the cross-tenant suite (foreign id → 404; unauthenticated → 401; firestore-rules unit test → DENIED).
 
@@ -923,8 +999,8 @@ Ordered by dependency; each step assumes the ones above it. Two ordering princip
 
 ### P1 — Correctness and tenancy
 
-1. **Real tenant resolution.** Resolve `orgId` once in middleware from the authenticated user, expose it through a single `orgScope(req)` accessor, delete all 43 `org_1` literals, and add a CI grep banning the literal. Fix the two services that accept `organizationId` and discard it, and the gateway line that hardcodes `org_1` while `request.organizationId` is in scope. *(S4, S1, S26)*
-2. **Tenant columns and composite uniques.** Add `organizationId` to the 13 tables lacking it; add the five required composite uniques (contact normalized email, message provider id, conversation thread id, campaign recipient, oauth provider account); change `users.email` to `unique(organizationId, email)`; make every by-id read and write carry the tenant predicate and return 404 on a foreign id. *(S4, S15, S29)*
+1. **~~Real tenant resolution.~~ LANDED 2026-09-06 — see section 1d.** Resolve `orgId` once in middleware from the authenticated user, expose it through a single `orgScope(req)` accessor, delete all 43 `org_1` literals, and add a CI grep banning the literal. Fix the two services that accept `organizationId` and discard it, and the gateway line that hardcodes `org_1` while `request.organizationId` is in scope. *(S4, S1, S26)*
+2. **~~Tenant columns and composite uniques.~~ LANDED 2026-09-06 — see section 1d.** *(Declared and tested at the schema level; not yet enforced by a running datastore. `firestore.rules` is still open and PostgreSQL has no writer.)* Add `organizationId` to the 13 tables lacking it; add the five required composite uniques (contact normalized email, message provider id, conversation thread id, campaign recipient, oauth provider account); change `users.email` to `unique(organizationId, email)`; make every by-id read and write carry the tenant predicate and return 404 on a foreign id. *(S4, S15, S29)*
 3. **Optimistic concurrency.** Add a `version` column to every mutable entity in both stores; require the expected version on every mutation; compare inside a transaction; return 409. Replace the blind whole-document `setDoc` overwrites and the read-modify-write toggle. *(S7, S6)*
 4. **State machines.** Create one transition module with a legal map per entity and `assertTransition`; implement the required campaign chain; replace the toggle with explicit pause/resume; validate opportunity stage against an enum; persist payment and autopilot state; add a knowledge approval lifecycle; back it all with CHECK/enum constraints and Firestore rules. *(S6, S25)*
 5. **Identity, dedup and merge.** One shared normalization module; a derived `emailKey` with a deterministic document id enforcing uniqueness at write time; account records actually created; real thread resolution from `Message-ID`/`References`; and a transactional merge operation that reparents everything and writes `supersededBy`. *(S29, S15)*

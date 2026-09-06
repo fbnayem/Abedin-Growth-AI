@@ -1,4 +1,5 @@
 import { isValidOrgId } from './tenancy/orgScope';
+import { normalizeEmailKey } from './lib/emailKey';
 import { db } from './db/index';
 import { eq } from 'drizzle-orm';
 import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, outboxMessages, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
@@ -265,9 +266,19 @@ export class DataStore {
 
       // Just an example mirror of the leads
       for (const lead of this.leads) {
+        // P1.2 — contacts now carries (organization_id, email_key) UNIQUE, so the mirror has
+        // to derive the same key every other writer does. A lead with no usable address is
+        // skipped rather than written with an empty key: empty collides with every other
+        // empty, so the constraint would merge unrelated contacts into one row.
+        const emailKey = normalizeEmailKey(lead.email);
+        if (!emailKey) {
+          console.warn(`[dataStore] Skipping lead ${lead.id}: no usable email address.`);
+          continue;
+        }
         await db.insert(contacts).values({
           id: lead.id,
           organizationId: orgId,
+          emailKey,
           primaryEmail: lead.email,
           name: lead.name,
           firstName: lead.name?.split(' ')[0] || '',

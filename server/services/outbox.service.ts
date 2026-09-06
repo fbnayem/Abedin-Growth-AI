@@ -5,6 +5,7 @@ import {
   collection,
   doc,
   setDoc,
+  getDoc,
   getDocs,
   query,
   where,
@@ -332,6 +333,119 @@ export class OutboxService {
       heldAt: Date.now(),
     });
   }
+  /**
+   * P1.2 — Fetch one job, scoped to a tenant.
+   *
+   * Returns null for an id that does not exist IN THIS TENANT, which is what lets the router
+   * answer 404 rather than acting on another organisation's row. The Firestore path is
+   * tenant-scoped by construction, so a foreign id genuinely resolves to nothing — but that
+   * only helps if the caller builds the path from the resolved tenant, which is why this
+   * method takes the org rather than reading it from somewhere ambient.
+   */
+  async getJob(organizationId: string, id: string): Promise<any | null> {
+    const ref = outboxDoc(organizationId, id);
+    if (!ref) return null;
+    try {
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return null;
+      return { ...(snap.data() as any), organizationId };
+    } catch (e: any) {
+      console.error('[Outbox] getJob failed:', e?.message);
+      return null;
+    }
+  }
+
+  /**
+   * P1.2 — Operator approval: HUMAN_REVIEW -> PENDING.
+   *
+   * Transactional and state-gated. Two operators clicking approve, or one clicking twice,
+   * must produce one transition, not two — and a job that has since been cancelled or
+   * dead-lettered must not be resurrected into the send queue by a stale console.
+   *
+   * Approving does NOT bypass the P0.12 integrity check: the worker re-verifies the inbound
+   * version and the approval digest immediately before dispatch, so a draft that went stale
+   * between review and approval is still refused there.
+   */
+  async approveForSending(
+    organizationId: string,
+    id: string,
+    actor: string
+  ): Promise<{ ok: true } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
+    const ref = outboxDoc(organizationId, id);
+    if (!ref || !firestore) {
+      return { ok: false, code: 'NOT_FOUND', message: 'Datastore unavailable.' };
+    }
+    try {
+      return await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) {
+          return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };
+        }
+        const data: any = snap.data();
+        if (data.status !== 'HUMAN_REVIEW') {
+          return {
+            ok: false as const,
+            code: 'ILLEGAL_TRANSITION' as const,
+            message: `Job is ${data.status}; only a HUMAN_REVIEW job can be approved.`,
+          };
+        }
+        tx.update(ref, {
+          status: 'PENDING',
+          approvedBy: actor,
+          approvedAt: Date.now(),
+          nextAttemptAt: Date.now(),
+        });
+        return { ok: true as const };
+      });
+    } catch (e: any) {
+      console.error('[Outbox] approveForSending failed:', e?.message);
+      return { ok: false, code: 'NOT_FOUND', message: 'Approval could not be recorded.' };
+    }
+  }
+
+  /**
+   * P1.2 — Operator cancellation. Terminal states are left alone: cancelling something already
+   * PROCESSED would record a lie about a message that has been delivered.
+   */
+  async cancelJob(
+    organizationId: string,
+    id: string,
+    actor: string,
+    reason: string
+  ): Promise<{ ok: true } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
+    const ref = outboxDoc(organizationId, id);
+    if (!ref || !firestore) {
+      return { ok: false, code: 'NOT_FOUND', message: 'Datastore unavailable.' };
+    }
+    try {
+      return await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) {
+          return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };
+        }
+        const data: any = snap.data();
+        if (data.status === 'PROCESSED' || data.status === 'CANCELLED') {
+          return {
+            ok: false as const,
+            code: 'ILLEGAL_TRANSITION' as const,
+            message: `Job is ${data.status} and cannot be cancelled.`,
+          };
+        }
+        tx.update(ref, {
+          status: 'CANCELLED',
+          cancelledBy: actor,
+          cancelledReason: reason,
+          cancelledAt: new Date().toISOString(),
+          leaseUntil: null,
+        });
+        return { ok: true as const };
+      });
+    } catch (e: any) {
+      console.error('[Outbox] cancelJob failed:', e?.message);
+      return { ok: false, code: 'NOT_FOUND', message: 'Cancellation could not be recorded.' };
+    }
+  }
+
   /** Operator/inspection helper: list jobs by status. */
   async listByStatus(organizationId: string, status: string, limitCount = 50): Promise<any[]> {
     const outboxRef = outboxCollection(organizationId);

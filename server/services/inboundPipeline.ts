@@ -92,6 +92,7 @@ export class InboundPipeline {
       const messageId = `msg_${Date.now()}`;
       await db.insert(messages).values({
         id: messageId,
+        organizationId,
         conversationId,
         provider: 'GMAIL',
         providerMessageId: email.id,
@@ -116,7 +117,13 @@ export class InboundPipeline {
       console.log(`[InboundPipeline] conversation ${conversationId} -> inbound version ${inboundVersion}`);
 
       // 4. Update Conversation Memory
-      const convMsgs = await db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(messages.receivedAt);
+      const convMsgs = await db
+        .select()
+        .from(messages)
+        .where(
+          and(eq(messages.organizationId, organizationId), eq(messages.conversationId, conversationId))
+        )
+        .orderBy(messages.receivedAt);
 
       const convData = {
          id: conversationId,
@@ -136,10 +143,20 @@ export class InboundPipeline {
       const memory = await extractAndSynthesizeMemory(convData);
 
       // Update memory in DB - clear old facts and insert new
-      await db.delete(conversationFacts).where(eq(conversationFacts.conversationId, conversationId));
+      // The tenant predicate belongs on DELETE most of all: without it a conversation id
+      // belonging to another organisation would delete that organisation's facts.
+      await db
+        .delete(conversationFacts)
+        .where(
+          and(
+            eq(conversationFacts.organizationId, organizationId),
+            eq(conversationFacts.conversationId, conversationId)
+          )
+        );
       for (const fact of (memory as any).facts) {
          await db.insert(conversationFacts).values({
             id: `fact_${Date.now()}_${Math.random()}`,
+            organizationId,
             conversationId,
             key: 'synthesized_fact',
             value: fact,

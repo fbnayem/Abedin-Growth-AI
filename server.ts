@@ -403,6 +403,20 @@ app.get("/api/health", (req: Request, res: Response) => {
   app.post("/api/pipeline/:id/stage", async (req: Request, res: Response) => {
     try {
       const docRef = doc(firestore, orgPath(orgScope(req), 'opportunities'), req.params.id);
+
+      // P1.2 — Existence is checked before the write. The path is tenant-scoped, so an id
+      // belonging to another organisation resolves to nothing; without this check updateDoc
+      // threw and the handler answered 500 with the raw provider message, which reads as a
+      // server fault rather than "no such opportunity here".
+      //
+      // 404, not 403: saying "forbidden" would confirm the id exists in some other tenant.
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such opportunity.' } });
+      }
+
+      // TODO(P1.4 — state machines): req.body.stage is written unvalidated, so any string
+      // becomes a pipeline stage. The legal-transition map belongs here.
       await updateDoc(docRef, { stage: req.body.stage });
       res.json({ success: true, stage: req.body.stage });
     } catch(e: any) { res.status(500).json({error: e.message}); }

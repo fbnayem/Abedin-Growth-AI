@@ -3,6 +3,7 @@ import { db } from '../db/index';
 import { contacts, accounts, conversations } from '../db/schema';
 import { and, eq, ilike } from 'drizzle-orm';
 import { ClientIdentityResolution } from '../../shared/domain/models';
+import { normalizeEmailKey } from '../lib/emailKey';
 
 export class IdentityResolverService {
   /**
@@ -75,9 +76,15 @@ export class IdentityResolverService {
     } as any;
   }
 
+  /**
+   * P1.2 — Delegates to the shared key so this resolver and the contacts uniqueness
+   * constraint agree on what "the same person" means. It previously had its own copy, which
+   * is how two normalisations drift apart and the constraint quietly stops applying to one of
+   * them. Returns the raw lowercase form when no address can be derived, so the existing
+   * "no match" path is preserved rather than throwing.
+   */
   private normalizeEmail(email: string) {
-    const match = email.match(/<([^>]+)>/);
-    return match ? match[1].toLowerCase().trim() : email.toLowerCase().trim();
+    return normalizeEmailKey(email) ?? email.toLowerCase().trim();
   }
 
   private extractDomain(email: string) {
