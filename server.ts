@@ -15,6 +15,14 @@ import { firestore } from "./server/firebase";
 import { requireAuth } from "./server/middleware/auth";
 import { resolveTenant } from "./server/middleware/tenant";
 import { orgScope, orgPath, isValidOrgId } from "./server/tenancy/orgScope";
+import { assertTransition, CAMPAIGN, MEETING, OPPORTUNITY } from "./server/domain/stateMachines";
+import {
+  expectedVersionFrom,
+  mutateWithVersion,
+  sendMutationOutcome,
+  sendVersionRequired,
+  versionOf,
+} from "./server/lib/concurrency";
 import { outboxWorker } from "./server/workers/outbox.worker";
 import { stripeRouter } from "./server/routes/stripe.routes";
 import { outboxRouter } from "./server/routes/outbox.routes";
@@ -141,7 +149,7 @@ for (const aiPath of [
   app.use("/api/stripe", stripeRouter);
   app.use("/api/outbox", outboxRouter);
 
-  
+
   // EXECUTABLE READINESS CHECK (Requirement X)
   app.get("/api/readiness", async (req: Request, res: Response) => {
     try {
@@ -172,7 +180,7 @@ for (const aiPath of [
       };
 
       const isReady = checks.databaseConnectivity;
-      
+
       res.json({
         status: isReady ? "READY" : "NOT_READY",
         checks
@@ -244,6 +252,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/pipeline", async (req: Request, res: Response) => {
     try {
+      // P1.3 — See /api/campaigns: the version travels with every row.
       const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'opportunities')));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
@@ -252,36 +261,72 @@ app.get("/api/health", (req: Request, res: Response) => {
   });
 
 
+  /**
+   * P1.3 — The two singleton documents (company brain, settings).
+   *
+   * The GET used to read the whole COLLECTION and return `items[0]` — an arbitrary row, since
+   * Firestore imposes no order — while the POST wrote the document `main`. So a second
+   * document in either collection made the read and the write disagree about which record the
+   * operator was looking at. They now both address `main`.
+   *
+   * The GET also returns `version` and an ETag, because a caller cannot state the version it
+   * is updating unless the read gives it one.
+   */
+  async function readSingleton(req: Request, res: Response, collectionName: string) {
+    const ref = doc(firestore, orgPath(orgScope(req), collectionName), 'main');
+    const snap = await getDoc(ref);
+    const data: any = snap.exists() ? snap.data() : {};
+    const version = versionOf(data, snap.exists());
+    res.setHeader('ETag', `"${version}"`);
+    return res.json({ ...data, version });
+  }
+
+  async function writeSingleton(
+    req: Request,
+    res: Response,
+    collectionName: string,
+    payload: Record<string, unknown>
+  ) {
+    const ref = doc(firestore, orgPath(orgScope(req), collectionName), 'main');
+    const expected = expectedVersionFrom(req);
+
+    if (expected.ok === false) {
+      // Tell the caller the current version in the same response that refuses the write, so
+      // recovering from the error is one retry rather than a second round trip.
+      const snap = await getDoc(ref);
+      return sendVersionRequired(res, expected, versionOf(snap.exists() ? snap.data() : null, snap.exists()));
+    }
+
+    // `version` and `expectedVersion` are transport, not content: they must not be persisted
+    // as document fields, or the next read would hand them back as data.
+    const { expectedVersion: _ignored, version: _alsoIgnored, ...body } = payload as any;
+
+    const outcome = await mutateWithVersion(ref, expected.value, () => body);
+    return sendMutationOutcome(res, outcome);
+  }
+
   app.get("/api/company-brain", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'company_brain')));
-      const items: any[] = [];
-      snap.forEach((d: any) => items.push(d.data()));
-      res.json(items[0] || {});
+      return await readSingleton(req, res, 'company_brain');
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
   app.post("/api/company-brain", async (req: Request, res: Response) => {
     try {
-      await setDoc(doc(firestore, orgPath(orgScope(req), 'company_brain'), 'main'), req.body);
-      res.json(req.body);
+      return await writeSingleton(req, res, 'company_brain', req.body || {});
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
 
   app.get("/api/settings", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'settings')));
-      const items: any[] = [];
-      snap.forEach((d: any) => items.push(d.data()));
-      res.json(items[0] || {});
+      return await readSingleton(req, res, 'settings');
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
   app.post("/api/settings", async (req: Request, res: Response) => {
     try {
-      await setDoc(doc(firestore, orgPath(orgScope(req), 'settings'), 'main'), req.body);
-      res.json(req.body);
+      return await writeSingleton(req, res, 'settings', req.body || {});
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
@@ -296,9 +341,22 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/company-brain/generate", async (req: Request, res: Response) => {
     try {
+      // P1.3 — Regeneration replaced the company brain blind, which is the most damaging
+      // instance of the lost update in this file: the brain is stringified into every outbound
+      // prompt, so silently discarding an operator's edit changes what customers are told.
+      const ref = doc(firestore, orgPath(orgScope(req), 'company_brain'), 'main');
+      const expected = expectedVersionFrom(req);
+      if (expected.ok === false) {
+        const snap = await getDoc(ref);
+        return sendVersionRequired(res, expected, versionOf(snap.exists() ? snap.data() : null, snap.exists()));
+      }
+
+      // Generated BEFORE the transaction: it is an external model call, and produceNext runs
+      // inside a transaction that may be retried. A retryable block must not make paid calls.
       const result = await generateCompanyBrain(req.body);
-      await setDoc(doc(firestore, orgPath(orgScope(req), 'company_brain'), 'main'), result);
-      res.json(result);
+
+      const outcome = await mutateWithVersion(ref, expected.value, () => result as any);
+      return sendMutationOutcome(res, outcome);
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
@@ -377,50 +435,127 @@ app.get("/api/health", (req: Request, res: Response) => {
     try {
       const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'campaigns')));
       const items: any[] = [];
-      snap.forEach((d: any) => items.push(d.data()));
+      // P1.3 — The version travels with every row. A client cannot state the version it is
+      // updating unless the read gives it one, so omitting this would make the write path
+      // impossible to use correctly rather than merely easy to use incorrectly.
+      snap.forEach((d: any) => items.push({ ...d.data(), version: versionOf(d.data(), true) }));
       res.json(items);
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
-  app.post("/api/campaigns/:id/toggle", async (req: Request, res: Response) => {
+  /**
+   * P1.3/P1.4 — Campaign pause and resume.
+   *
+   * This was a TOGGLE: read the status, negate it, write it back, in two round trips. A toggle
+   * cannot express intent — the request says "the other one", not what the operator wanted —
+   * so two clicks in the same second both read ACTIVE and both write PAUSED, and a campaign an
+   * operator meant to stop keeps running with the UI showing it stopped.
+   *
+   * The caller now states the status it wants and the version it read. Asking for the status a
+   * campaign is already in succeeds without incrementing the version: pausing something already
+   * paused is the operator getting what they asked for, not a conflict.
+   */
+  const setCampaignStatus = async (req: Request, res: Response) => {
     try {
+      const desired = (req.body || {}).status;
       const docRef = doc(firestore, orgPath(orgScope(req), 'campaigns'), req.params.id);
-      const docSnap = await getDoc(docRef);
-      if (!docSnap.exists()) return res.status(404).json({error: "Not found"});
-      const data = docSnap.data();
-      const newStatus = data.status === "ACTIVE" ? "PAUSED" : "ACTIVE";
-      await updateDoc(docRef, { status: newStatus });
-      res.json({ ...data, status: newStatus });
+      const snap = await getDoc(docRef);
+      if (!snap.exists()) {
+        return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such campaign.' } });
+      }
+
+      const current: any = snap.data();
+      const currentVersion = versionOf(current, true);
+
+      // P1.4 — The legal set and the legal MOVES both come from the one transition map, so an
+      // ARCHIVED campaign cannot be reactivated and a COMPLETED one cannot be paused. Neither
+      // rule was expressible when this was a toggle.
+      const verdict = assertTransition(CAMPAIGN, current.status, desired);
+      if (verdict.ok === false) {
+        return res.status(422).json({ error: { code: verdict.code, message: verdict.message } });
+      }
+      if (verdict.changed === false) {
+        res.setHeader('ETag', `"${currentVersion}"`);
+        return res.json({ ...current, version: currentVersion });
+      }
+
+      const expected = expectedVersionFrom(req);
+      if (expected.ok === false) return sendVersionRequired(res, expected, currentVersion);
+
+      const outcome = await mutateWithVersion(docRef, expected.value, (existing: any) => ({
+        ...existing,
+        status: desired,
+        statusChangedAt: new Date().toISOString(),
+      }));
+      return sendMutationOutcome(res, outcome);
     } catch(e: any) { res.status(500).json({error: e.message}); }
-  });
+  };
+
+  // Both spellings: /status is what it does, /toggle is what existing callers send.
+  app.post("/api/campaigns/:id/status", setCampaignStatus);
+  app.post("/api/campaigns/:id/toggle", setCampaignStatus);
 
   app.post("/api/settings/token", (req: Request, res: Response) => res.json({ success: true }));
   app.post("/api/autopilot/run-cycle-now", (req: Request, res: Response) => res.json({ status: "success" }));
   app.post("/api/leads/research", (req: Request, res: Response) => res.json({ notes: "Research complete: High intent detected." }));
   app.post("/api/inbox/:id/reply", (req: Request, res: Response) => res.json({ success: true }));
   app.post("/api/inbox/:id/classify", (req: Request, res: Response) => res.json({ intentConfidence: 0.9 }));
-  
-  app.post("/api/pipeline/:id/stage", async (req: Request, res: Response) => {
+
+  /**
+   * P1.2/P1.3/P1.4 — Move an opportunity to a stage.
+   *
+   * Three separate defects lived in six lines here:
+   *
+   *   - The route was registered for POST while the only caller in the repository
+   *     (src/App.tsx handleUpdatePipelineStage) sends PUT. Every stage change from the UI has
+   *     been 404ing. Both verbs are now registered; PUT is the correct one for an idempotent
+   *     "set the stage to X".
+   *   - `req.body.stage` was written straight to the document with no validation, so any
+   *     string — "won", "", an object — became a pipeline stage and was persisted and rendered.
+   *   - The write was blind: no version, so two operators dragging the same card both win and
+   *     neither is told.
+   */
+  const setOpportunityStage = async (req: Request, res: Response) => {
     try {
       const docRef = doc(firestore, orgPath(orgScope(req), 'opportunities'), req.params.id);
 
-      // P1.2 — Existence is checked before the write. The path is tenant-scoped, so an id
-      // belonging to another organisation resolves to nothing; without this check updateDoc
-      // threw and the handler answered 500 with the raw provider message, which reads as a
-      // server fault rather than "no such opportunity here".
-      //
-      // 404, not 403: saying "forbidden" would confirm the id exists in some other tenant.
+      // The path is tenant-scoped, so an id belonging to another organisation resolves to
+      // nothing. 404, not 403: saying "forbidden" would confirm the id exists in some other
+      // tenant.
       const snap = await getDoc(docRef);
       if (!snap.exists()) {
         return res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such opportunity.' } });
       }
 
-      // TODO(P1.4 — state machines): req.body.stage is written unvalidated, so any string
-      // becomes a pipeline stage. The legal-transition map belongs here.
-      await updateDoc(docRef, { stage: req.body.stage });
-      res.json({ success: true, stage: req.body.stage });
+      const current: any = snap.data();
+      const currentVersion = versionOf(current, true);
+      const desired = (req.body || {}).stage;
+
+      const verdict = assertTransition(OPPORTUNITY, current.stage, desired);
+      if (verdict.ok === false) {
+        // 422, not 400: the request is well-formed, it is the state change that is not
+        // permitted. A client can tell "you sent nonsense" from "you may not do that".
+        return res.status(422).json({ error: { code: verdict.code, message: verdict.message } });
+      }
+      if (verdict.changed === false) {
+        res.setHeader('ETag', `"${currentVersion}"`);
+        return res.json({ ...current, version: currentVersion });
+      }
+
+      const expected = expectedVersionFrom(req);
+      if (expected.ok === false) return sendVersionRequired(res, expected, currentVersion);
+
+      const outcome = await mutateWithVersion(docRef, expected.value, (existing: any) => ({
+        ...existing,
+        stage: desired,
+        stageChangedAt: new Date().toISOString(),
+      }));
+      return sendMutationOutcome(res, outcome);
     } catch(e: any) { res.status(500).json({error: e.message}); }
-  });
+  };
+
+  app.put("/api/pipeline/:id/stage", setOpportunityStage);
+  app.post("/api/pipeline/:id/stage", setOpportunityStage);
 
   app.post("/api/meetings/brief", (req: Request, res: Response) => res.json({ brief: "Meeting brief generated." }));
   app.post("/api/settings/autopilot", (req: Request, res: Response) => res.json({ success: true }));
@@ -485,27 +620,27 @@ app.get("/api/health", (req: Request, res: Response) => {
     try {
       if (!firestore) return res.status(500).json({ error: "Firebase not initialized" });
       const orgId = orgScope(req);
-      
+
       const contactsSnap = await getDocs(collection(firestore, orgPath(orgId, 'contacts')));
       let qualifiedLeadsCount = 0;
       contactsSnap.forEach(doc => {
          const s = doc.data().status;
          if (s === "QUALIFIED" || s === "ENGAGED" || s === "DEMO_SCHEDULED") qualifiedLeadsCount++;
       });
-      
+
       const convsSnap = await getDocs(collection(firestore, orgPath(orgId, 'conversations')));
       let positiveConversationsCount = 0;
       convsSnap.forEach(doc => {
          const s = doc.data().status;
          if (s === "ACTIVE" || s === "HUMAN_NEEDED" || s === "MEETING_REQUESTED") positiveConversationsCount++;
       });
-      
+
       const meetingsSnap = await getDocs(collection(firestore, orgPath(orgId, 'meetings')));
       let meetingsBookedCount = 0;
       meetingsSnap.forEach(doc => {
          if (doc.data().status === "CONFIRMED") meetingsBookedCount++;
       });
-      
+
       const oppsSnap = await getDocs(collection(firestore, orgPath(orgId, 'opportunities')));
       let pipelineValue = 0;
       oppsSnap.forEach(doc => {
@@ -572,8 +707,8 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   // Batch Follow-Up to all Contacted Leads
 
-  
-  
+
+
   // 3. Leads & Research (REWRITTEN TO NATIVE POSTGRESQL)
 
 
@@ -584,7 +719,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
 
   // 4. Investors
-  
+
   app.get("/api/investors", async (req: Request, res: Response) => {
     try {
       const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'contacts')), where('type', '==', 'INVESTOR')));
@@ -608,7 +743,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
 
   // 5. Partners
-  
+
   app.get("/api/partners", async (req: Request, res: Response) => {
     try {
       const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'contacts')), where('type', '==', 'PARTNER')));
@@ -631,12 +766,12 @@ app.get("/api/health", (req: Request, res: Response) => {
 
 
   // 6. Campaigns
-  
+
 
 
 
   // 7. Inbox & Conversations
-  
+
   app.post("/api/integrations/gmail/token", async (req: Request, res: Response) => {
     // P0.8 — This handler received a REAL accessToken in the request body, discarded it, and
     // persisted the literal 'mock_token' with status ACTIVE. The ActionGateway then saw
@@ -770,16 +905,16 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
 
   // 8. Pipeline Opportunities
 
-  
-  
+
+
   app.post("/api/campaigns/generate-strategy", async (req: Request, res: Response) => {
     try {
       const { name, engineType, targetAudience, targetIndustries, targetLocations, enrolledCount, isABTestingEnabled } = req.body;
-      
+
       const projectedReach = enrolledCount || 0;
       const projectedEngagement = Math.floor(projectedReach * 0.68);
       const projectedConversion = Math.floor(projectedReach * 0.12);
-      
+
       const newCampaign = {
         id: "camp_" + Date.now(),
         name: name || "Untitled Campaign",
@@ -822,16 +957,16 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         createdAt: new Date().toISOString(),
         isABTestingEnabled: !!isABTestingEnabled
       };
-      
+
       await addDoc(collection(firestore, orgPath(orgScope(req), 'campaigns')), newCampaign);
       res.json(newCampaign);
     } catch(e: any) { res.status(500).json({error: e.message}); }
   });
 
 
-  
 
-  
+
+
   app.post("/api/pipeline", async (req: Request, res: Response) => {
     try {
       const newId = `opp_${Date.now()}`;
@@ -978,7 +1113,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
   // 15. AI Logs
 
   // 16. Continuous Autopilot Runner API
-  
+
 
   app.get("/api/autopilot/status", (req: Request, res: Response) => {
     res.json(autopilotRunner.status);
@@ -1057,15 +1192,21 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
         if (!snap.exists()) {
           console.warn(`[signature/webhook] Meeting ${meetingId} not found; ignoring event.`);
         } else {
+          // P1.4 — The hand-rolled terminal list that used to live here has been replaced by
+          // the shared transition map. The rule is the same; the difference is that it is now
+          // the same rule every other handler uses, instead of one someone remembered to write
+          // here and nowhere else.
           const current = (snap.data() as any)?.status;
-          const terminal = ['CANCELLED', 'COMPLETED', 'NO_SHOW'];
-          if (terminal.includes(current)) {
+          const verdict = assertTransition(MEETING, current, 'CONFIRMED');
+          if (verdict.ok === false) {
             console.warn(
               `[signature/webhook] Ignoring envelope-completed for meeting ${meetingId}: ` +
-              `already in terminal state ${current}. A late or replayed event must not roll state backward.`
+              `${verdict.message} A late or replayed event must not roll state backward.`
             );
+          } else if (verdict.changed === false) {
+            console.log(`[signature/webhook] Meeting ${meetingId} is already CONFIRMED; nothing to do.`);
           } else {
-            await updateDoc(meetingRef, { status: 'CONFIRMED' });
+            await updateDoc(meetingRef, { status: 'CONFIRMED', statusChangedAt: new Date().toISOString() });
           }
         }
       }
@@ -1077,7 +1218,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
   }
 });
 
-  
+
   // Gmail Pub/Sub Webhook
   app.post("/api/webhooks/gmail", async (req: Request, res: Response) => {
     // P0.14 / P0.5 — Verify before doing any work. This endpoint is auth-exempt and drives
@@ -1096,16 +1237,16 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
       if (!message || !message.data) {
         return res.status(400).send("Bad Request");
       }
-      
+
       const decodedData = Buffer.from(message.data, 'base64').toString('utf8');
       const event = JSON.parse(decodedData);
-      
-      
+
+
       console.log(`Received Gmail Pub/Sub event for ${event.emailAddress} (historyId: ${event.historyId})`);
-      
+
       gmailHistorySyncService.processEvent(event.emailAddress, event.historyId)
         .catch((e: Error) => console.error("Error processing history event:", e));
-      
+
       res.status(200).send("OK");
 
     } catch(e) {
@@ -1124,7 +1265,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    
+
 
   app.get("*", (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));

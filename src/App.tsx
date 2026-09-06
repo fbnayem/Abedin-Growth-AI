@@ -333,7 +333,7 @@ export function App() {
         if (knoRes.ok && isJson(knoRes)) setKnowledgeItems(await knoRes.json());
         if (setRes.ok && isJson(setRes)) {
           const s = await setRes.json();
-          
+
         }
         if (logsRes.ok && isJson(logsRes)) setAiLogs(await logsRes.json());
         if (autoRes.ok && isJson(autoRes)) setAutopilotStatus(await autoRes.json());
@@ -492,20 +492,54 @@ export function App() {
     }
   };
 
-  const handleToggleCampaignStatus = async (campaignId: string) => {
+  /**
+   * P1.3/P1.4 — Pause or resume a campaign.
+   *
+   * This used to POST to /toggle with no body: the server read the status, negated it and
+   * wrote it back. Two clicks in the same second both read ACTIVE and both wrote PAUSED, so a
+   * campaign an operator meant to stop kept running while the UI showed it stopped.
+   *
+   * The client now says which status it wants and which version it is acting on. A 409 means
+   * somebody else changed it first, and the honest response is to show them the current state
+   * rather than to retry and overwrite the change they have not seen.
+   */
+  const handleSetCampaignStatus = async (
+    campaignId: string,
+    desired: "ACTIVE" | "PAUSED" | "COMPLETED"
+  ) => {
     try {
-      const res = await apiFetch(`/api/campaigns/${campaignId}/toggle`, {
+      const campaign = campaigns.find((c) => c.id === campaignId);
+      const res = await apiFetch(`/api/campaigns/${campaignId}/status`, {
         method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "If-Match": String(campaign?.version ?? 0),
+        },
+        body: JSON.stringify({ status: desired }),
       });
+
       if (res.ok) {
         const updated = await res.json();
-        setCampaigns((prev) =>
-          prev.map((c) => (c.id === campaignId ? updated : c))
-        );
+        setCampaigns((prev) => prev.map((c) => (c.id === campaignId ? updated : c)));
+        return;
+      }
+
+      if (res.status === 409) {
+        const body = await res.json().catch(() => null);
+        console.warn("Campaign changed elsewhere; refreshing.", body?.error?.message);
+        const fresh = await apiFetch("/api/campaigns");
+        if (fresh.ok) setCampaigns(await fresh.json());
       }
     } catch (e) {
       console.error(e);
     }
+  };
+
+  const handleToggleCampaignStatus = async (campaignId: string) => {
+    // The desired status is derived here, from what the operator can see, and then stated
+    // explicitly to the server together with the version it was derived from.
+    const campaign = campaigns.find((c) => c.id === campaignId);
+    await handleSetCampaignStatus(campaignId, campaign?.status === "ACTIVE" ? "PAUSED" : "ACTIVE");
   };
 
   const handleSendInboxReply = async (convId: string, subject: string, body: string) => {
@@ -536,16 +570,30 @@ export function App() {
   };
 
   const handleUpdatePipelineStage = async (oppId: string, newStage: any) => {
+    // P1.3 — This has never worked: the server registered POST while this sends PUT, so every
+    // stage change 404'd silently (the response was never checked for anything but .ok). The
+    // server now accepts both verbs, and the write states the version it is replacing.
+    const opportunity = opportunities.find((o) => o.id === oppId);
     const res = await apiFetch(`/api/pipeline/${oppId}/stage`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "If-Match": String(opportunity?.version ?? 0),
+      },
       body: JSON.stringify({ stage: newStage }),
     });
+
     if (res.ok) {
       const updated = await res.json();
-      setOpportunities((prev) =>
-        prev.map((o) => (o.id === oppId ? updated : o))
-      );
+      setOpportunities((prev) => prev.map((o) => (o.id === oppId ? updated : o)));
+      return;
+    }
+
+    if (res.status === 409 || res.status === 422) {
+      const body = await res.json().catch(() => null);
+      console.warn("Pipeline stage change refused:", body?.error?.message);
+      const fresh = await apiFetch("/api/pipeline");
+      if (fresh.ok) setOpportunities(await fresh.json());
     }
   };
 

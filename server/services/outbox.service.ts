@@ -1,5 +1,6 @@
 import { firestore } from '../firebase';
 import { orgPath } from '../tenancy/orgScope';
+import { assertTransition, OUTBOX_JOB } from '../domain/stateMachines';
 import { v4 as uuidv4 } from 'uuid';
 import {
   collection,
@@ -382,11 +383,18 @@ export class OutboxService {
           return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };
         }
         const data: any = snap.data();
-        if (data.status !== 'HUMAN_REVIEW') {
+        // P1.4 — Defers to the shared transition map rather than restating the rule. The map
+        // is also what makes PROCESSED unreachable from here: a message that reached a
+        // provider cannot be re-approved into the send queue.
+        const verdict = assertTransition(OUTBOX_JOB, data.status, 'PENDING');
+        if (verdict.ok === false || data.status !== 'HUMAN_REVIEW') {
           return {
             ok: false as const,
             code: 'ILLEGAL_TRANSITION' as const,
-            message: `Job is ${data.status}; only a HUMAN_REVIEW job can be approved.`,
+            message:
+              verdict.ok === false
+                ? verdict.message
+                : `Job is ${data.status}; only a HUMAN_REVIEW job can be approved.`,
           };
         }
         tx.update(ref, {
@@ -424,11 +432,19 @@ export class OutboxService {
           return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };
         }
         const data: any = snap.data();
-        if (data.status === 'PROCESSED' || data.status === 'CANCELLED') {
+        const verdict = assertTransition(OUTBOX_JOB, data.status, 'CANCELLED');
+        if (verdict.ok === false) {
           return {
             ok: false as const,
             code: 'ILLEGAL_TRANSITION' as const,
-            message: `Job is ${data.status} and cannot be cancelled.`,
+            message: verdict.message,
+          };
+        }
+        if (verdict.changed === false) {
+          return {
+            ok: false as const,
+            code: 'ILLEGAL_TRANSITION' as const,
+            message: 'Job is CANCELLED and cannot be cancelled.',
           };
         }
         tx.update(ref, {

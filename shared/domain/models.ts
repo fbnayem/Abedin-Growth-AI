@@ -16,6 +16,10 @@ export enum EmailStatus {
 
 export enum MeetingStatus {
   PROPOSED = 'PROPOSED',
+  // P1.4 — POST /api/meetings has been persisting 'SCHEDULED' since before this enum existed,
+  // so live meeting records already hold a value the domain does not define. Adding it stops
+  // the divergence; removing it would make existing meetings unreadable.
+  SCHEDULED = 'SCHEDULED',
   PENDING_CLIENT_CONFIRMATION = 'PENDING_CLIENT_CONFIRMATION',
   PENDING_CALENDAR_CREATION = 'PENDING_CALENDAR_CREATION',
   CONFIRMED = 'CONFIRMED',
@@ -359,6 +363,12 @@ export interface CampaignStep {
 
 export interface Campaign {
   id: string;
+  /**
+   * P1.3 — Optimistic concurrency. Returned by every read and required by every write, so a
+   * mutation states which revision it believes it is updating and a concurrent edit is a 409
+   * rather than a silently discarded change.
+   */
+  version?: number;
   workspaceId: string;
   name: string;
   engineType: EngineCategory;
@@ -440,6 +450,8 @@ export interface Conversation {
 
 export interface Opportunity {
   id: string;
+  /** P1.3 — See Campaign.version. */
+  version?: number;
   workspaceId: string;
   title: string;
   companyName: string;

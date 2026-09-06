@@ -49,6 +49,7 @@ export const organizations = pgTable('organizations', {
   timezone: varchar('timezone', { length: 50 }).default('UTC').notNull(),
   locale: varchar('locale', { length: 20 }).default('en-US').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
+  version: integer('version').default(0).notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
   observedAt: timestamp('observed_at').defaultNow(),
   lastVerifiedAt: timestamp('last_verified_at'),
@@ -71,6 +72,7 @@ export const users = pgTable(
     role: varchar('role', { length: 50 }).default('VIEWER').notNull(),
     status: varchar('status', { length: 50 }).default('ACTIVE').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
   },
   (t) => [unique('users_org_email_unique').on(t.organizationId, t.email)]
 );
@@ -89,6 +91,7 @@ export const accounts = pgTable(
     metadata: jsonb('metadata'),
     lifecycleStage: varchar('lifecycle_stage', { length: 50 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     observedAt: timestamp('observed_at').defaultNow(),
     lastVerifiedAt: timestamp('last_verified_at'),
@@ -130,6 +133,7 @@ export const contacts = pgTable(
     stakeholderRole: varchar('stakeholder_role', { length: 50 }).default('UNKNOWN'),
     status: varchar('status', { length: 50 }).default('ACTIVE').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     observedAt: timestamp('observed_at').defaultNow(),
     lastVerifiedAt: timestamp('last_verified_at'),
@@ -163,6 +167,7 @@ export const conversations = pgTable(
     nextBestAction: varchar('next_best_action', { length: 100 }),
     assignedTo: varchar('assigned_to', { length: 255 }).references(() => users.id),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     observedAt: timestamp('observed_at').defaultNow(),
     lastVerifiedAt: timestamp('last_verified_at'),
@@ -235,6 +240,7 @@ export const conversationFacts = pgTable(
     confidence: integer('confidence'),
     verificationStatus: varchar('verification_status', { length: 50 }).default('UNVERIFIED').notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     observedAt: timestamp('observed_at').defaultNow(),
     lastVerifiedAt: timestamp('last_verified_at'),
@@ -259,6 +265,7 @@ export const outboxMessages = pgTable(
     status: varchar('status', { length: 50 }).default('PENDING').notNull(),
     error: text('error'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     processedAt: timestamp('processed_at'),
   },
   (t) => [
@@ -277,6 +284,7 @@ export const campaigns = pgTable(
     targetAudience: varchar('target_audience', { length: 255 }),
     type: varchar('type', { length: 50 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
   },
   (t) => [index('campaigns_org_idx').on(t.organizationId)]
 );
@@ -309,6 +317,7 @@ export const campaignRecipients = pgTable(
     lastStepSentAt: timestamp('last_step_sent_at'),
     nextStepDueAt: timestamp('next_step_due_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
   },
   (t) => [
@@ -332,6 +341,7 @@ export const meetings = pgTable(
     scheduledTime: timestamp('scheduled_time'),
     meetUrl: text('meet_url'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
   },
   (t) => [index('meetings_org_scheduled_idx').on(t.organizationId, t.scheduledTime)]
 );
@@ -345,6 +355,7 @@ export const opportunities = pgTable(
     value: integer('value'),
     stage: varchar('stage', { length: 50 }).notNull(),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
   },
   (t) => [index('opportunities_org_idx').on(t.organizationId)]
 );
@@ -358,6 +369,7 @@ export const knowledgeItems = pgTable(
     content: text('content').notNull(),
     category: varchar('category', { length: 50 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
   },
   (t) => [index('knowledge_items_org_idx').on(t.organizationId)]
 );
@@ -373,6 +385,7 @@ export const attentionItems = pgTable(
     type: varchar('type', { length: 50 }),
     actionType: varchar('action_type', { length: 50 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
   },
   (t) => [index('attention_items_org_idx').on(t.organizationId)]
 );
@@ -435,6 +448,7 @@ export const customerCommitments = pgTable(
     status: varchar('status', { length: 50 }).notNull(),
     riskLevel: varchar('risk_level', { length: 50 }),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     observedAt: timestamp('observed_at').defaultNow(),
     lastVerifiedAt: timestamp('last_verified_at'),
@@ -455,6 +469,7 @@ export const questionLedger = pgTable(
     status: varchar('status', { length: 50 }).notNull(), // OPEN, PARTIALLY_ANSWERED, ANSWERED, DEFERRED, HUMAN_REQUIRED
     sourceMessageId: varchar('source_message_id', { length: 255 }).references(() => messages.id),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     observedAt: timestamp('observed_at').defaultNow(),
     lastVerifiedAt: timestamp('last_verified_at'),
@@ -479,6 +494,7 @@ export const objectionLedger = pgTable(
     resolution: text('resolution'),
     resolvedAt: timestamp('resolved_at'),
     createdAt: timestamp('created_at').defaultNow().notNull(),
+    version: integer('version').default(0).notNull(),
     updatedAt: timestamp('updated_at').defaultNow().notNull(),
     observedAt: timestamp('observed_at').defaultNow(),
     lastVerifiedAt: timestamp('last_verified_at'),
