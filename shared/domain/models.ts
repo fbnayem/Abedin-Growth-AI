@@ -477,7 +477,21 @@ export interface Meeting {
   prospectEmail: string;
   companyName: string;
   category: EngineCategory;
-  scheduledTime: string;
+  /**
+   * P1.9 — `scheduledTime` alone was an instant with no record of what was agreed. It is kept
+   * so existing readers keep working, and it now carries the same value as `startAtUtc`.
+   *
+   * `startAtUtc` + `timeZone` is the pair that means something: the instant is what a calendar
+   * needs, and the zone is what lets the meeting be restated as "Tuesday at 2 your time" later,
+   * re-rendered correctly after a tz-database update, or explained to a prospect in a different
+   * country. Dropping the zone is not a compression — it is a fact we cannot recover.
+   *
+   * `null` on `startAtUtc` means no slot could be proposed. It is not a stand-in for "now".
+   */
+  scheduledTime: string | null;
+  startAtUtc?: string | null;
+  /** IANA identifier. Never an abbreviation: "BST" resolves to Asia/Dhaka, five hours out. */
+  timeZone?: string;
   durationMinutes: number;
   meetUrl?: string;
   status: 'CONFIRMED' | 'COMPLETED' | 'CANCELLED' | 'MISSED';

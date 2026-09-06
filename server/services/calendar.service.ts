@@ -1,4 +1,10 @@
 import { config } from '../config/environment';
+import {
+  DEFAULT_BUSINESS_HOURS,
+  assertTimeZone,
+  isWithinBusinessHours,
+  type BusinessHours,
+} from '../../shared/domain/time';
 
 export class CalendarService {
   private accessToken: string | null = null;
@@ -8,16 +14,41 @@ export class CalendarService {
   }
 
   // O. CALENDAR EDGE CASES
-  async checkFreeBusy(startTime: Date, endTime: Date, timeZone: string, emails: string[]): Promise<boolean> {
-     // Implement real check against free/busy API
-     return true; 
+  //
+  // Still unimplemented, and now it says so instead of returning `true`. `true` from a
+  // free/busy check means "the slot is free" — a claim this code has never been in a
+  // position to make. Callers must treat UNKNOWN as unknown (§14) rather than as free.
+  async checkFreeBusy(
+    _startTime: Date,
+    _endTime: Date,
+    timeZone: string,
+    _emails: string[]
+  ): Promise<{ status: 'UNKNOWN'; reason: string }> {
+    assertTimeZone(timeZone);
+    return {
+      status: 'UNKNOWN',
+      reason: 'Free/busy is not wired to a provider; availability has not been checked.',
+    };
   }
 
-  async validateBusinessHours(startTime: Date, timeZone: string): Promise<boolean> {
-     // Validate against configured business hours
-     const hour = startTime.getUTCHours();
-     // Simple stub
-     return true;
+  /**
+   * P1.9 — this read `startTime.getUTCHours()` into an unused variable and returned `true`.
+   * A validator that returns true for every input is worse than no validator: every caller
+   * reads it as a check that passed. It now answers with the verdict AND the local time it
+   * judged, so a refusal can be explained to the person who chose the slot.
+   */
+  validateBusinessHours(
+    startTime: Date,
+    timeZone: string,
+    hours: BusinessHours = DEFAULT_BUSINESS_HOURS
+  ): { valid: boolean; reason: string | null; localTime: string } {
+    assertTimeZone(timeZone);
+    const verdict = isWithinBusinessHours(startTime, hours);
+    return {
+      valid: verdict.within,
+      reason: verdict.within === true ? null : verdict.reason,
+      localTime: verdict.localTime,
+    };
   }
 
   async createMeeting(params: {
@@ -28,6 +59,8 @@ export class CalendarService {
     attendees: string[];
     timeZone: string;
   }) {
+    assertTimeZone(params.timeZone);
+
     if (config.demoMode) {
       console.log("[DEMO MODE] Simulating Calendar meeting creation.");
       return {

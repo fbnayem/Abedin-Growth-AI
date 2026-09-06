@@ -929,6 +929,154 @@ control. This document does not credit intent.
 
 ---
 
+## 1j. Remediation progress — P1.9, time correctness (landed 2026-09-07)
+
+### The comment named a zone the code could not produce
+
+    targetDate.setDate(targetDate.getDate() + 2);
+    targetDate.setHours(14, 30, 0, 0); // 2:30 PM BST
+
+`setHours` writes the **machine's** wall clock. Run on this machine, whose system zone is
+Asia/Dhaka, that line produces **09:30 in Europe/London** — five hours from the 2:30 PM the
+comment claims, and somewhere else again on a UTC cloud host. Measured, not reasoned about.
+
+It got two further things wrong. Adding two days by mutating a Date lands on a Saturday every
+Thursday, and nothing asked whether the slot was inside anybody's working hours.
+
+### "BST" is Bangladesh Standard Time
+
+The single most useful thing measured this tranche. `Intl.DateTimeFormat` **accepts** `"BST"`
+and canonicalises it to **Asia/Dhaka**, because British Summer Time and Bangladesh Standard Time
+share an abbreviation and ICU resolves the collision without saying so. Those zones are five
+hours apart.
+
+Intl also accepts `EST` (→ America/Panama), `US/Eastern`, `+01:00`, `utc` and
+`europe/london`. So **"Intl did not throw" is not validation.** Membership of
+`Intl.supportedValuesOf('timeZone')` is; it rejects every one of those, and the module adds
+`UTC` back because it is universally meant and absent from that list.
+
+Fixed offsets are refused separately and for their own reason: an offset cannot express a
+transition, so any instant computed from one is wrong by an hour for half the year.
+
+### The round trip applied the offset twice, in the same direction
+
+    tomorrow.setHours(14, 0, 0, 0);                            // 14:00 LOCAL
+    const defaultTimeString = tomorrow.toISOString().slice(0, 16);   // ...rendered as UTC
+    // ...and on submit:
+    scheduledTime: new Date(scheduledTime).toISOString()       // offset-less -> parsed as LOCAL
+
+Measured drift on this machine: **-360 minutes**. The field displayed a time the operator never
+chose, and submitted a third value different from both. The field now renders and reads through
+one **named** zone, chosen in the UI beside it, so the two ends cannot disagree.
+
+`POST /api/meetings` had the matching hole: `new Date(scheduledTime)` accepted
+`"2026-09-07T14:00"` and `"2026-09-07T14:00Z"` into the same field, six hours apart here.
+An instant now requires an offset.
+
+### What the clocks do at the boundaries
+
+Two civil times a year have no single answer, and neither is now resolved by guessing (§14 —
+a booking is a permission, and unknown must not default to permission):
+
+- The hour **skipped** at a spring-forward never happens. Booking inside it is refused.
+- The hour **repeated** at a fall-back happens twice. Both instants are returned and **neither
+  is chosen**. Silently taking the first would put a meeting an hour from where the customer
+  expects it, once a year, in a way nobody would ever debug.
+
+The first implementation got the second case wrong, and a probe caught it before any test did:
+probing the offset only at the naive instant reports the *post*-transition offset for 01:30 on
+the London fall-back day, resolves cleanly, and never generates the second candidate — so an
+ambiguous time was reported as unambiguous. Probing a day either side fixes it. Verified against
+Europe/London, America/New_York, and **Australia/Lord_Howe**, whose DST shift is thirty minutes
+rather than an hour.
+
+### Storage
+
+All **76** `timestamp` columns are now `timestamptz`. (The addendum says 72; the count grew
+to 76 when P1.2 added tenant and bitemporal columns. The document said 72 because that was true
+when it was written.) `timestamp without time zone` stores the digits and forgets which zone
+produced them — two servers in different regions write "14:30" into one column and mean
+different moments, and the row cannot say which.
+
+`meetings` now carries `{ startAtUtc, timeZone, durationMinutes }`. The instant is what a
+calendar needs; **the zone is what was agreed**, and it is the half that cannot be recovered
+once dropped. It is what lets the meeting be restated as "Tuesday at 2 your time" a year later,
+re-rendered correctly after a tz-database update, or explained to a prospect in another country.
+The route **requires** it rather than defaulting it: a zone the server guessed is a guess that
+is invisible in the stored row.
+
+### Two functions that always said yes
+
+`validateBusinessHours` read `startTime.getUTCHours()` into an unused variable and returned
+`true`. `checkFreeBusy` returned `true` without contacting anything — from a free/busy
+check, `true` means "the slot is free", a claim this code has never been in a position to make.
+Neither had a single caller anywhere in the repository.
+
+A validator that returns true for every input is worse than no validator, because every reader
+takes it for a check that passed. The first now answers with a verdict *and* the local time it
+judged; the second reports `UNKNOWN`, which is what it actually knows (§14, §39).
+
+### A defect only a running server could show
+
+`GET /api/meetings` mapped `m.scheduledTime.toISOString()`. Firestore returns a
+`Timestamp`, which carries `toMillis()` and `toDate()` and **no `toISOString()`** — so
+the call yielded `undefined` and the endpoint has been answering **200 with an empty
+`scheduledAt` for every meeting it has ever returned**.
+
+Neither the compiler nor the suite could see it: the snapshot value is `any`, and no test
+round-tripped through the store. It took sending a real request and reading the response — and
+it survived my own rewrite of the adjacent line, because I preserved the shape of the call
+instead of checking what the value was.
+
+### Evidence
+
+`npm test`: **580 tests across 21 files**, up from 509 across 20. The 71 new ones were
+**mutation-tested**: 14 deliberate breakages, **13 caught**.
+
+The survivor is recorded rather than papered over: stepping the day cursor by 86 400 000 ms
+instead of by calendar date is an **equivalent mutant** here. Measured across all 418 IANA zones
+and 2 585 real transitions over ten years — 169 198 comparisons — the two forms never disagree,
+because the day cursor is anchored at **noon UTC** and no modern transition moves the clock
+across noon. The calendar-day form stays because it expresses the intent and does not depend on
+that anchor being remembered, but no test proves it and this document does not pretend one does.
+
+The new guardrail, `check-time-correctness`, was itself mutation-tested: **14 of 14**. Three of
+those mutations try to *disable the guardrail* — emptying its method list, breaking its column
+pattern, turning off comment stripping. All three are caught, because the script now runs a
+**self-check** against samples with known verdicts before it judges the repository. That check
+exists because the empty-method-list mutation originally **survived**: the guardrail would have
+degraded to a silent no-op, which is precisely how three earlier guardrails on this branch
+reported "ok" against code they forbid.
+
+Runtime verification against a live server, in a throwaway organisation (`p19verify`), every
+record deleted afterwards and absence confirmed: an offset-less string, `"BST"`, a missing
+zone, `"+01:00"`, 31 February, an 03:00 booking and a Saturday booking were each refused with
+the specific reason; a real slot was created carrying **both** halves; a duplicate was refused
+409; and the out-of-hours refusal proved overridable on purpose.
+
+### What changed status
+
+**S30 moves from PARTIAL to PARTIAL, and the remainder is now small and named.** Zone-aware
+business hours, validated IANA identifiers, `{startAtUtc, timeZone}` meetings, 76 zoned
+columns and the fixed `datetime-local` round trip are all real and on live paths. What holds it
+short is the last clause of the roadmap item: **one injectable clock**. A `Clock` exists and is
+injected into the reply composer and the context bundle, but **99 direct wall-clock reads remain
+in `server/`**. Until they are routed through it, most of the system still cannot be tested
+standing on a boundary.
+
+**S31 does not move, and P1.9 did not touch what holds it.** `checkFreeBusy` no longer claims
+"free", which removes a way a future caller could have been misled — but it has no callers, and
+`executeCalendarCreate` remains unreachable because `dispatchAction` still has exactly one
+call site repo-wide and always passes `EMAIL_SEND`. The conflict check in `POST
+/api/meetings` is local-only and was verified refusing a duplicate; it is not the provider-level
+invariant S31 asks for.
+
+**The guardrails are now wired into `npm run guardrails` and `npm run verify`.** Until this
+tranche all seven were run by hand. A guardrail nobody runs is not a control, by the same
+argument this document already applies to an undeployed Firestore rule.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -1049,8 +1197,8 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S27 | Deliverability: sender identity health and fabricated metrics | NOT_STARTED | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
 | S28 | Bounce, DSN and automated-mail classification before replying | NOT_STARTED | CRITICAL | `inboundPipeline.ts:112`; `models.ts:814-834`; `salesDecisionEngine.ts:133-134`; `schema.ts:122` | Zero classification of bounce/DSN/OOO/auto-reply; the one intent gate compares against strings the engine never returns; the address blacklist is unreachable; nothing writes `automationClassification` |
 | S29 | Contact/account dedup, normalization and merge | PARTIAL | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all**. *Superseded by §1f: derived ids, account creation and a transactional merge landed 2026-09-06; held at PARTIAL by the open Firestore rules and the absence of a backfill.* |
-| S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | PARTIAL | HIGH | `actionGateway.ts:238-241`; `multiAgentReplySystem.ts:520-523`; `ScheduleMeetingModal.tsx:30-33,76`; `schema.ts` (72 `timestamp` cols) | Business hours gated on raw `getUTCHours()`; "BST" emitted as free text; meeting instants built with server-local `setHours`; all timestamp columns are `without time zone`; no injectable clock |
-| S31 | Calendar conflict invariant: busy → zero create requests | PARTIAL | CRITICAL | `outbox.worker.ts:78`, `:95` (the only `dispatchAction` call site, hardcoding `EMAIL_SEND`); `actionGateway.ts:247-252`, `:282`, `:287`, `:300`; `server.ts:672` | **There is no partial implementation.** `executeCalendarCreate` is unreachable — `dispatchAction` has exactly one call site repo-wide and it always passes `ActionType.EMAIL_SEND`. The live booking path (`server.ts:672`) is a bare `addDoc` with no provider call and no conflict logic |
+| S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | PARTIAL | HIGH | `shared/domain/time.ts`; `schema.ts` (76 `timestamptz` cols); `server.ts` (`POST /api/meetings`); `multiAgentReplySystem.ts`; `ScheduleMeetingModal.tsx`; `calendar.service.ts` | Zone-aware hours, IANA validation (rejecting `BST`, which Intl resolves to Asia/Dhaka), `{startAtUtc, timeZone}` meetings, all 76 columns zoned, and the `datetime-local` round trip fixed — all verified at runtime. **Remainder: 99 direct wall-clock reads in `server/` are not yet routed through the injectable `Clock`,** which is injected only into the reply composer and the context bundle |
+| S31 | Calendar conflict invariant: busy → zero create requests | PARTIAL | CRITICAL | `outbox.worker.ts:78`, `:95` (the only `dispatchAction` call site, hardcoding `EMAIL_SEND`); `actionGateway.ts:247-252`, `:282`, `:287`, `:300`; `server.ts:672` | **There is no partial implementation.** `executeCalendarCreate` is unreachable — `dispatchAction` has exactly one call site repo-wide and it always passes `ActionType.EMAIL_SEND`. The live booking path (`server.ts:1496`, was `:672` before this branch moved it) performs a local overlap check and a bare `addDoc`, with no provider call. **P1.9 did not move this.** `checkFreeBusy` now reports `UNKNOWN` instead of `true`, removing a way a caller could be misled, but it still has no callers and `executeCalendarCreate` is still unreachable |
 | S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `actionGateway.ts:97`, `:102-103`, `:222`; `outbox.service.ts:52,73` | Reconciliation is a comment; detection is case-sensitive substring matching that misses `504 Gateway Timeout`; AMBIGUOUS is a free-text value in a terminal FAILED row |
 | S33 | Webhook signature, dedupe and ordering | PARTIAL | CRITICAL | `server.ts:58`, `:62`, `:773`, `:781-782`, `:810-811`; `stripe.routes.ts:55,62-69` | Stripe verification never succeeds (body already parsed); DocuSign unverified and unauthenticated; no event ledger, no dedupe, no ordering watermark; Gmail acks 200 before processing |
 | S34 | CSV / spreadsheet formula injection on export | PARTIAL | HIGH | `src/utils/exportUtils.ts:39-40`, `:18`; `LeadsView.tsx:198`; `server.ts:112-119` | Only `"` is doubled; no neutralisation of `=`, `+`, `-`, `@`, tab or CR; columns derived from `Object.keys(data[0])`, so attacker-injected keys become columns |

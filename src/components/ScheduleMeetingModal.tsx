@@ -2,6 +2,15 @@ import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, Calendar, Clock, Sparkles, Building, Mail, User, Plus, Loader2 } from "lucide-react";
 import { Meeting, EngineType } from "../types";
+import {
+  DEFAULT_BUSINESS_HOURS,
+  fromDateTimeLocalValue,
+  isValidTimeZone,
+  isWithinBusinessHours,
+  nextBusinessSlot,
+  supportedTimeZones,
+  toDateTimeLocalValue,
+} from "../../shared/domain/time";
 
 interface ScheduleMeetingModalProps {
   isOpen: boolean;
@@ -26,14 +35,40 @@ export const ScheduleMeetingModal: React.FC<ScheduleMeetingModalProps> = ({
   const [prospectEmail, setProspectEmail] = useState(initialData?.email || "");
   const [category, setCategory] = useState<EngineType>(initialData?.category || "CUSTOMER");
   
-  // Default to tomorrow 14:00
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  tomorrow.setHours(14, 0, 0, 0);
-  const defaultTimeString = tomorrow.toISOString().slice(0, 16);
+  // P1.9 — this was:
+  //
+  //     tomorrow.setHours(14, 0, 0, 0);                    // 14:00 LOCAL
+  //     const defaultTimeString = tomorrow.toISOString().slice(0, 16);   // ...converted to UTC
+  //
+  // and the submit handler then did `new Date(scheduledTime)`, which reads an offset-less
+  // value as LOCAL again. The offset was applied twice in the same direction. Measured on a
+  // UTC+6 machine the round trip drifted by -360 minutes: the field showed a time the user
+  // never picked, and submitted a third time different from both.
+  //
+  // The fix is to be explicit about which zone the field is displaying. The value in the box
+  // and the instant sent to the server are now derived from the same named zone.
+  const [timeZone, setTimeZone] = useState<string>(() => {
+    const browserZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return isValidTimeZone(browserZone) ? browserZone : DEFAULT_BUSINESS_HOURS.timeZone;
+  });
+
+  const defaultSlot = () => {
+    const slot = nextBusinessSlot(new Date(), {
+      hours: DEFAULT_BUSINESS_HOURS,
+      minLeadMinutes: 24 * 60,
+      durationMinutes: 30,
+      slotMinutes: 30,
+    });
+    return slot === null ? null : slot;
+  };
+  const defaultTimeString = (() => {
+    const slot = defaultSlot();
+    return slot === null ? "" : toDateTimeLocalValue(slot, timeZone);
+  })();
 
   const [scheduledTime, setScheduledTime] = useState(defaultTimeString);
   const [durationMinutes, setDurationMinutes] = useState(30);
+  const [timeError, setTimeError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   // Update fields if initialData changes
@@ -63,6 +98,29 @@ export const ScheduleMeetingModal: React.FC<ScheduleMeetingModalProps> = ({
     e.preventDefault();
     if (!prospectName.trim() || !companyName.trim()) return;
 
+    // The two civil times a year that have no single answer are refused here, in front of the
+    // person who typed them, rather than resolved by a guess nobody would ever see. §14: a
+    // booking is a permission, and unknown must not default to permission.
+    let resolved;
+    try {
+      resolved = fromDateTimeLocalValue(scheduledTime, timeZone);
+    } catch (err: any) {
+      setTimeError(String(err?.message ?? "That is not a valid date and time."));
+      return;
+    }
+    if (resolved.ok === false) {
+      setTimeError(resolved.detail);
+      return;
+    }
+    const hours = isWithinBusinessHours(resolved.instant, DEFAULT_BUSINESS_HOURS);
+    if (hours.within === false) {
+      setTimeError(
+        `${hours.localTime} is outside business hours (${hours.reason}). The server will refuse it.`
+      );
+      return;
+    }
+    setTimeError(null);
+
     setLoading(true);
     try {
       const res = await apiFetch("/api/meetings", {
@@ -73,7 +131,8 @@ export const ScheduleMeetingModal: React.FC<ScheduleMeetingModalProps> = ({
           prospectEmail: prospectEmail || "prospect@example.com",
           companyName,
           category,
-          scheduledTime: new Date(scheduledTime).toISOString(),
+          scheduledTime: resolved.instant.toISOString(),
+          timeZone,
           durationMinutes: Number(durationMinutes) || 30,
         }),
       });
@@ -175,9 +234,31 @@ export const ScheduleMeetingModal: React.FC<ScheduleMeetingModalProps> = ({
               <input
                 type="datetime-local"
                 value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
+                onChange={(e) => {
+                  setScheduledTime(e.target.value);
+                  setTimeError(null);
+                }}
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium focus:ring-2 focus:ring-emerald-500 outline-hidden"
               />
+              {/* The zone is shown and chosen, never inferred silently. Two people reading
+                  "14:00" in different countries agree only once it is named. */}
+              <select
+                value={timeZone}
+                onChange={(e) => {
+                  setTimeZone(e.target.value);
+                  setTimeError(null);
+                }}
+                className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:ring-2 focus:ring-emerald-500 outline-hidden"
+              >
+                {supportedTimeZones().map((zone) => (
+                  <option key={zone} value={zone}>
+                    {zone}
+                  </option>
+                ))}
+              </select>
+              {timeError !== null && (
+                <p className="mt-1 text-[11px] font-semibold text-red-600">{timeError}</p>
+              )}
             </div>
 
             <div>

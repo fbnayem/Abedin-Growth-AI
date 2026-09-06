@@ -27,6 +27,13 @@ import { createContactIfAbsent, ensureAccount, mergeContacts } from "./server/li
 import { accountDomain, contactDocId, plusAddressTag, suggestedBaseAddress } from "./server/lib/identity";
 import { requestId, sendCaught, sendError, terminalErrorHandler } from "./server/lib/errors";
 import {
+  parseInstant,
+  timeZoneRejection,
+  isWithinBusinessHours,
+  DEFAULT_BUSINESS_HOURS,
+  toIsoOrNull,
+} from './shared/domain/time';
+import {
   expectedVersionFrom,
   mutateWithVersion,
   sendMutationOutcome,
@@ -1488,11 +1495,31 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
   // the provider — it is PENDING_CALENDAR_SYNC until something actually books it.
   app.post("/api/meetings", async (req: Request, res: Response) => {
     try {
-      const { contactId, scheduledTime, durationMinutes, title, notes } = req.body || {};
+      const { contactId, scheduledTime, timeZone, durationMinutes, title, notes } = req.body || {};
 
-      const startMs = new Date(scheduledTime).getTime();
-      if (!scheduledTime || !Number.isFinite(startMs)) {
-        return sendError(req, res, 'VALIDATION_ERROR', '`scheduledTime` must be a valid date-time.');
+      // P1.9 — this was `new Date(scheduledTime).getTime()`, which reads an offset-less string
+      // such as "2026-09-07T14:00" as the SERVER's local time. On this machine that is six
+      // hours from the same string read as UTC, and the route accepted both spellings into one
+      // field. `parseInstant` requires an offset, so a string can only mean one moment.
+      let startInstant: Date;
+      try {
+        startInstant = parseInstant(scheduledTime);
+      } catch (err: any) {
+        return sendError(req, res, 'VALIDATION_ERROR', String(err?.message ?? '`scheduledTime` is not an instant.'));
+      }
+      const startMs = startInstant.getTime();
+
+      // The zone is required, not defaulted. Defaulting it would be the server asserting what
+      // the customer agreed to (§14): a meeting whose zone we guessed is a meeting we cannot
+      // honestly restate, and the guess is invisible in the stored row.
+      const zoneRejection = timeZoneRejection(timeZone);
+      if (zoneRejection !== null) {
+        return sendError(
+          req,
+          res,
+          'VALIDATION_ERROR',
+          `\`timeZone\` must be an IANA identifier. ${zoneRejection}`
+        );
       }
       const duration = Number.isFinite(Number(durationMinutes)) ? Number(durationMinutes) : 30;
       if (duration <= 0 || duration > 480) {
@@ -1506,7 +1533,8 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       existingSnap.forEach((d) => {
         const m: any = d.data();
         if (['CANCELLED', 'NO_SHOW', 'COMPLETED'].includes(m.status)) return;
-        const mStart = m.scheduledTime?.toMillis?.() ?? new Date(m.scheduledTime || 0).getTime();
+        const stored = m.startAtUtc ?? m.scheduledTime;
+        const mStart = stored?.toMillis?.() ?? new Date(stored || 0).getTime();
         if (!Number.isFinite(mStart) || mStart === 0) return;
         const mEnd = mStart + (Number(m.durationMinutes) || 30) * 60_000;
         // Half-open intervals: [start, end). Touching meetings do not conflict.
@@ -1526,12 +1554,29 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         );
       }
 
+      // Booking outside the operator's stated hours is refused rather than quietly accepted:
+      // an 03:00 meeting is not a meeting, and the caller is told the local time it computed
+      // so the disagreement is visible instead of arriving as a calendar invitation.
+      const hoursVerdict = isWithinBusinessHours(startInstant, DEFAULT_BUSINESS_HOURS);
+      if (hoursVerdict.within === false && req.body?.allowOutsideBusinessHours !== true) {
+        return sendError(
+          req,
+          res,
+          'VALIDATION_ERROR',
+          `${hoursVerdict.localTime} is outside business hours (${hoursVerdict.reason}). ` +
+            'Send `allowOutsideBusinessHours: true` to book it deliberately.'
+        );
+      }
+
       const payload = {
         id: "meet_" + Date.now(),
         contactId: contactId ?? null,
         title: title ?? null,
         notes: notes ?? null,
-        scheduledTime: new Date(startMs),
+        // Both halves. `startAtUtc` is the instant the calendar needs; `timeZone` is what the
+        // customer agreed to, and it is the half that cannot be recovered later if dropped.
+        startAtUtc: new Date(startMs),
+        timeZone: timeZone,
         durationMinutes: duration,
         status: 'SCHEDULED',
         // Honest about provider state: nothing has been booked on a real calendar here.
@@ -1554,7 +1599,14 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         prospectEmail: "unknown@example.com",
         companyName: "Unknown",
         status: m.status,
-        scheduledAt: m.scheduledTime ? m.scheduledTime.toISOString() : undefined,
+        // Found by a runtime probe, not by the compiler or the tests: the stored value comes
+        // back from Firestore as a `Timestamp`, which has `toMillis()` and `toDate()` and NOT
+        // `toISOString()`. The original line was `m.scheduledTime.toISOString()`, so this
+        // endpoint has been answering `scheduledAt: undefined` for every meeting it has ever
+        // returned — a 200 carrying a field that was never populated.
+        scheduledAt: toIsoOrNull(m.startAtUtc ?? m.scheduledTime),
+        timeZone: m.timeZone ?? null,
+        durationMinutes: m.durationMinutes ?? null,
         meetLink: m.meetUrl,
       }));
       res.json(mapped);

@@ -1,5 +1,6 @@
 import { pricingContextFor } from '../../shared/domain/quote';
 import { buildContextBundle } from '../domain/contextBundle';
+import { DEFAULT_BUSINESS_HOURS, nextBusinessSlot, systemClock, type Clock } from '../../shared/domain/time';
 import { STANDARD_TIER } from '../../shared/domain/pricing';
 import { safeGenerateJSON } from "../geminiClient";
 import { Conversation, ConversationMemory, CompanyBrain, EmailMessage, Meeting } from "../../shared/domain/models";
@@ -294,7 +295,11 @@ export function sanitizeZeroPhoneNumbers(text: string): string {
 export async function executeMultiAgentReplyPipeline(
   conversation: Conversation,
   companyBrain?: CompanyBrain,
-  customInstructions?: string
+  customInstructions?: string,
+  // P1.9 — the clock is an argument. A function that reads `Date.now()` internally cannot be
+  // tested standing on a DST boundary, which is the only place these bugs appear. Defaulting
+  // to the real clock keeps every existing call site unchanged.
+  clock: Clock = systemClock
 ): Promise<MultiAgentReplyOutput> {
   const thread = conversation.thread || [];
   const prospectReplies = thread.filter((m) => m.sender === "PROSPECT");
@@ -331,7 +336,7 @@ export async function executeMultiAgentReplyPipeline(
     outstandingCommitments: (conversation as any).outstandingCommitments ?? [],
     quotes: (conversation as any).quotes ?? [],
     companyFacts: (conversation as any).companyFacts ?? [],
-    now: new Date().toISOString(),
+    now: clock.now().toISOString(),
   });
 
   const fullTranscript = contextBundle.promptBlock;
@@ -564,10 +569,28 @@ Return strictly JSON:
   let meetingId: string | undefined;
   const shouldBook = true; // Always book or reserve the Google Meet slot on client replies
 
-  const targetDate = new Date();
-  targetDate.setDate(targetDate.getDate() + 2);
-  targetDate.setHours(14, 30, 0, 0); // 2:30 PM BST
-  const scheduledIso = targetDate.toISOString();
+  // P1.9 — this was:
+  //
+  //     targetDate.setDate(targetDate.getDate() + 2);
+  //     targetDate.setHours(14, 30, 0, 0); // 2:30 PM BST
+  //
+  // `setHours` writes the MACHINE's wall clock. Measured on this machine (Asia/Dhaka), that
+  // line produced 09:30 in Europe/London — five hours from the 2:30 PM the comment claimed,
+  // and it would land somewhere else again on a UTC cloud host. The comment described an
+  // intention; the code implemented the deployment's accident.
+  //
+  // Two further things it got wrong: adding two calendar days by mutating a Date can land on
+  // a Saturday, and it never asked whether the slot was inside anyone's working hours.
+  const meetingZone = DEFAULT_BUSINESS_HOURS.timeZone;
+  const proposedSlot = nextBusinessSlot(clock.now(), {
+    hours: DEFAULT_BUSINESS_HOURS,
+    minLeadMinutes: 2 * 24 * 60,
+    durationMinutes: 20,
+    slotMinutes: 30,
+  });
+  // No slot inside the lookahead means no proposal. Inventing one would put a time in front
+  // of a customer that the calendar cannot honour.
+  const scheduledIso = proposedSlot === null ? null : proposedSlot.toISOString();
 
   let existingMeeting = globalStore.meetings.find(
     (m) => m.prospectEmail?.toLowerCase() === conversation.contactEmail?.toLowerCase()
@@ -584,6 +607,9 @@ Return strictly JSON:
       prospectEmail: conversation.contactEmail,
       companyName: conversation.companyName,
       category: conversation.category,
+      // Both halves, so the meeting can be restated in the customer's terms later (§30).
+      startAtUtc: scheduledIso,
+      timeZone: meetingZone,
       scheduledTime: scheduledIso,
       durationMinutes: 20,
       meetUrl: "https://meet.google.com/pending-calendar-creation",
