@@ -1,8 +1,119 @@
 rules_version = '2';
+
+// =============================================================================
+// P0.0 — Firestore security rules.
+//
+// WHAT THESE REPLACE
+// ------------------
+//     match /{document=**} { allow read, write: if true; }
+//
+// Every document in the project was readable and writable by anyone on the
+// internet holding the public API key — which is committed to this repository.
+// That is not only a data-exfiltration hole. It is the reachable prompt-injection
+// channel S4 and S18 describe: the knowledge and company-brain documents are
+// stringified into every outbound prompt, so an attacker who can write them can
+// dictate what the system says to customers. It is also how the send-mode switch
+// is flipped, because `oauth_connections` is a top-level collection and the
+// action gateway takes the LAST matching row's token.
+//
+// WHY DENY-ALL IS THE CORRECT RULE HERE
+// -------------------------------------
+// The browser bundle imports `firebase/auth` and never `firebase/firestore`:
+// every read and write the product performs goes through the Express API. So no
+// legitimate *client* touches Firestore at all, and the honest rule is that none
+// may. Anything narrower would be permitting access nobody uses, which is surface
+// with no corresponding function.
+//
+// ⚠️  DO NOT DEPLOY THESE RULES YET — READ THIS FIRST  ⚠️
+// -------------------------------------------------------
+// The server currently reaches Firestore with the *client* SDK and is
+// UNAUTHENTICATED. `server/firebase.ts` imports `signInAnonymously` and never
+// calls it; the comment there records that anonymous auth was removed precisely
+// because these rules were open. Rules apply to the client SDK, so deploying
+// this file before the server moves to firebase-admin would deny the server too
+// and stop the application completely.
+//
+// The order that works:
+//   1. Provide the server with Google credentials — a service account JSON at
+//      GOOGLE_APPLICATION_CREDENTIALS, or `gcloud auth application-default login`.
+//      (As of 2026-09-06 no credential of any kind is available in the working
+//      environment, which is why the migration below is not yet done: it could be
+//      written but not verified, and an unverified rewrite of every datastore call
+//      site is the kind of change that must not ship on a clean compile alone.)
+//   2. Migrate `server/` from `firebase/firestore` to `firebase-admin/firestore`
+//      (roadmap P0.6, ~102 call sites across 14 files). The Admin SDK bypasses
+//      these rules as a privileged principal, which is what makes deny-all safe.
+//   3. Verify the app works end to end against the admin path.
+//   4. `firebase deploy --only firestore:rules`.
+//   5. Rotate the committed `apiKey` and OAuth client in
+//      firebase-applet-config.json, and purge them from git history. Closing the
+//      rules does not un-publish a credential that has been public.
+//
+// Steps 1 and 5 need console access. Steps 2-4 are code and are blocked on 1.
+// =============================================================================
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // Default: deny. Every path not matched below falls through to this, so a
+    // collection added later is closed until somebody deliberately opens it —
+    // the opposite of the previous rule, where a new collection was public the
+    // moment it was created.
+    // -------------------------------------------------------------------------
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
+
+    // -------------------------------------------------------------------------
+    // NOT A RULE — a template, deliberately left inert.
+    //
+    // If a future client ever needs to read Firestore directly, this is the shape
+    // it must take, and it mirrors `server/middleware/tenant.ts` exactly so the
+    // two cannot drift:
+    //
+    //   - The signed token GRANTS. `request.auth.token.orgIds` (or `.orgId`) is
+    //     the only source of authority, because the datastore is the thing being
+    //     protected and cannot also be the thing that authorises access to it.
+    //   - The datastore may only REVOKE. An ABSENT member document is not a
+    //     denial — most users legitimately have no record, since the claim is the
+    //     grant. A PRESENT document that does not say ACTIVE is a denial.
+    //   - `oauth_connections` stays denied to every client regardless. It holds
+    //     provider tokens; there is no client that has any business reading it.
+    //
+    // Written out rather than described, so that enabling it is a matter of
+    // deleting the deny-all above rather than of designing something under time
+    // pressure:
+    //
+    //   function tokenOrgs() {
+    //     return request.auth.token.orgIds is list
+    //       ? request.auth.token.orgIds
+    //       : (request.auth.token.orgId is string ? [request.auth.token.orgId] : []);
+    //   }
+    //
+    //   function memberNotRevoked(orgId) {
+    //     let path = /databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid);
+    //     return !exists(path) || get(path).data.status == 'ACTIVE';
+    //   }
+    //
+    //   function inOrg(orgId) {
+    //     return request.auth != null
+    //       && orgId in tokenOrgs()
+    //       && memberNotRevoked(orgId);
+    //   }
+    //
+    //   match /organizations/{orgId} {
+    //     allow read: if inOrg(orgId);
+    //     allow write: if false;              // server-only, even for members
+    //     match /{sub=**} {
+    //       allow read: if inOrg(orgId);
+    //       allow write: if false;            // every write goes through the API
+    //     }
+    //   }
+    //
+    //   match /oauth_connections/{id} {
+    //     allow read, write: if false;        // provider tokens; no client, ever
+    //   }
+    // -------------------------------------------------------------------------
   }
 }
