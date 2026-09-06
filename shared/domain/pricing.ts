@@ -200,7 +200,38 @@ export function extractMoneyLiterals(text: unknown): Money[] {
   const found: Money[] = [];
   // A symbol, then digits with optional thousands separators, then optional pence. The decimal
   // part is bounded to two digits so a version number or a date cannot be read as an amount.
-  const pattern = /£\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?/g;
+  //
+  // THE ALTERNATION ORDER AND THE `+` ARE LOAD-BEARING. This was:
+  //
+  //     /£\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?/g
+  //
+  // with `*` on the comma group. Against "£4999" the first alternative matches "499", the
+  // group matches zero times, the optional pence group matches zero times, and the OVERALL
+  // MATCH SUCCEEDS — so the engine never backtracks into the `\d+` alternative. Measured:
+  //
+  //     "£4999"  -> 49900        "£12345" -> 12300
+  //     "£499"   -> 49900        "£1000"  -> 10000
+  //
+  // "£4999" and "£499" produced byte-identical output, and 49900 is exactly the price book's
+  // £499.00 — so a draft reading "Our price is £4999 per month" passed auditPricingClaims with
+  // zero findings and the auditor recorded "Every amount stated is in the price book". A
+  // ten-times-wrong price reached the customer with a clean audit. That is this module's own
+  // stated failure mode ("a substring test, so '£4,499' contains it") reproduced in the code
+  // written to replace it, and it failed in the permissive direction.
+  //
+  // `+` makes the grouped alternative require at least one comma, so a plain run of digits can
+  // only be matched by `\d+`, in full. `(?!\d)` stops a truncated read of a malformed amount
+  // ("£4,9999" is not silently read as £4,999) — it falls back to a SHORTER match rather than
+  // no match at all, because an amount the auditor cannot read exactly must still surface as
+  // an amount that is not in the price book, not vanish into a clean report.
+  //
+  // Measured, not assumed: `(?!\d)` alone is sufficient to fix the truncation — swapping `+`
+  // back to `*` while keeping the lookahead disagrees with this pattern on 0 of 288 generated
+  // inputs, whereas the shipped version disagrees on 105. The `+` is therefore redundant and
+  // kept deliberately: it states the rule (the grouped form requires a comma) in the pattern
+  // rather than relying on a lookahead three tokens away to imply it, so removing either one
+  // alone still leaves a correct extractor.
+  const pattern = /£\s?(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?(?!\d)/g;
 
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {

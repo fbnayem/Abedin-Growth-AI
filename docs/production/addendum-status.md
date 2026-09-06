@@ -1395,6 +1395,169 @@ quotes to Firestore where the facts already are.
 
 ---
 
+## 1m. Four controls that reported success without checking anything (landed 2026-09-07)
+
+A 69-agent investigation of the P1.5–P1.8 remainders returned 15 defects that survived
+adversarial verification (47 were refuted). Every one was re-verified against the working tree
+before anything was changed here; four are fixed in this pass, and they share a shape. Each was
+recorded somewhere as working — in a comment, in a status entry, or in a test that asserted an
+identifier appeared in the source — and each did nothing.
+
+### A second correction to my own work, first (§2)
+
+Section 1i and the P1.8 commit both rest on this claim, which is written in the code:
+
+> a lookup failure now BLOCKS rather than silently degrading to the default
+
+It did not block. `quoteLookupFailed` was assigned in two places, logged in one, and **never
+read again**. No branch tested it, it reached no field of the ReplyPlan, and the prompt was
+built identically whether the quote lookup had failed or not. Repo-wide there were four
+occurrences plus one test.
+
+That test is the part worth stating plainly:
+
+    expect(source).toContain('quoteLookupFailed')
+
+A write-only variable satisfies it. I wrote a check on the source text and treated it as
+evidence about behaviour — §50 exactly, in the commit whose message argued for the opposite.
+The status document's own wording at the time ("the failure is now recorded rather than
+swallowed") was the honest one; the comment in the code was not, and the comment is what a
+future reader would have believed.
+
+With `DATABASE_URL` unset, `getQuotes` throws on **every** call, so the intended control was
+absent on every pricing reply the system would have sent.
+
+### The suppression guard could never fire
+
+    if (nbaResult.action === 'DO_NOTHING' as any || nbaResult.action === 'SUPPRESS_NO_ACTION' as any) {
+       return;
+    }
+
+Neither string is a member of `NextBestActionType`. Without the casts TypeScript reports "this
+comparison appears to be unintentional because the types have no overlap" — which IS the defect,
+stated by the compiler. The casts silenced it. Measured by running the decision engine over real
+inbound text:
+
+    unsubscribe request   isUnsub=true   action=SUPPRESS   guard fires? NO
+    out-of-office reply   isOOO=true     action=NO_REPLY   guard fires? NO
+
+So **a prospect who asked to be removed from the list was drafted a sales reply**, and an
+autoresponder was answered as though a person had written it. The decision engine was correct
+at both points; the one branch in the system that says "do not reply" was unreachable, making
+the pipeline's effective default always to send — §14 with the sign inverted.
+
+`ACTION_SUPPRESSES_REPLY` is now a `Record` over the whole union rather than a set of the
+suppressing ones, so adding a member to `NextBestActionType` is a **compile error** until
+somebody decides whether it replies; a Set would classify a new action as "reply" silently.
+`suppressesReply()` takes `unknown` and fails closed — an action arriving from a model, a
+stored row, or a member nobody classified suppresses, because sending is the permission.
+
+The same predicate now also runs **after** composing. Two branches inside the composer already
+returned an empty draft carrying a suppressing action — prompt injection detected in the inbound
+text (§18), and now the refused pricing reply — and the pipeline queued the empty body as an
+outbox row regardless. One predicate at both boundaries, so they cannot drift apart.
+
+### The money check read £4999 as £499
+
+    /£\s?(\d{1,3}(?:,\d{3})*|\d+)(?:\.(\d{1,2}))?/g
+
+Against "£4999" the grouped alternative matches "499", the comma group matches zero times, the
+pence group matches zero times, and **the overall match succeeds** — so the engine never
+backtracks into the `\d+` alternative. Measured:
+
+    "£4999" -> 49900      "£12345" -> 12300      "£1000" -> 10000
+    "£499"  -> 49900      "£4999.50" -> 49900
+
+"£4999" and "£499" produced byte-identical output, and 49900 is exactly the price book's
+£499.00. A draft reading *"Our price is £4999 per month"* therefore passed `auditPricingClaims`
+with zero findings and the auditor recorded **"Every amount stated is in the price book"**. A
+ten-times-wrong price reached the customer with a clean audit.
+
+This is this module's own stated failure mode — its header criticises the old substring check
+because *"£4,499 contains it"* — reproduced in the code written to replace it, failing in the
+permissive direction. Verified fixed at runtime: "£499" passes, "£4999" is flagged.
+
+### Two price checks disagreed about what "approved pricing" means
+
+`independentAuditor` computed `pricingContext.quotableAmounts` from the customer's approved
+quote, used it for check 10, and then called `verifyClaims(sanitizedBody)` with one argument —
+so check 11 silently fell back to the **list** price book. Where a binding quote exists the two
+contradict outright: a draft stating the negotiated £399 passes check 10 and is flagged by
+check 11; a draft stating list £499 is flagged by check 10 and passes check 11.
+`claimGrounding.ts` states the reason this must not happen — *"two independent price checks
+that disagree about what 'approved pricing' means is how one of them silently stops applying"* —
+and the wiring reintroduced it. Latent only because nothing populates `input.quote` yet, which
+is not a defence.
+
+### Evidence
+
+`npm test`: **719 tests across 26 files**, up from 688 across 25. `tsc` exit 0, production
+build clean, **10 guardrails** green.
+
+**Mutation-tested 17/17**, including reverting each of the four fixes, and three over-corrections
+that a weaker suite would have accepted: suppressing *everything*, blocking *every* reply rather
+than only pricing replies, and returning a suppressing action alongside a sendable body.
+
+One **equivalent mutant, measured rather than asserted**: reverting `+` to `*` in the money
+pattern while keeping the `(?!\d)` lookahead disagrees with the fixed pattern on 0 of 288
+generated inputs, whereas the shipped pattern disagrees on 105. The lookahead alone is
+sufficient; the `+` is kept because it states the rule in the pattern rather than relying on a
+lookahead three tokens away to imply it. The harness records it as `equivalent` and would
+report a *failure* if the suite ever started catching it, since that would mean the tests had
+begun asserting the spelling of the regex.
+
+A tenth guardrail, `check-no-cast-comparisons`, forbids a comparison operand cast to `any`.
+Its sibling `check-no-cast-call-arguments` could not see this defect: there is no object
+literal and no call, only `'STRING' as any` beside an `===`. A comparison is the one place
+`as any` cannot be "narrowing a genuinely unknown value" — if the two sides cannot be equal,
+that is the answer. Baseline zero, no allow-list entries, **mutation-tested 19/19**.
+
+Its own self-check caught a gap while being written (`(foo as any) === bar` has a paren between
+the cast and the operator), and the mutation harness then found **two ways to disable it
+silently**: emptying `SCAN_ROOTS` left one file reaching the scanner via `SCAN_FILES`, so
+every "did we scan anything" check passed at 1 file of 146; and emptying the self-check sample
+arrays disabled every self-assertion while the scan still ran. **Both holes were also present in
+`check-no-cast-call-arguments`, which I reported last session as mutation-tested 13/13** — true
+of the mutations I wrote, and those two were not among them. Both guardrails now verify each
+scan root individually and assert their own sample sets are non-empty; the older harness still
+passes 13/13.
+
+### A material consequence to be aware of
+
+With PostgreSQL unprovisioned, the quote lookup throws on every call, so **every reply that
+would have stated a price is now refused** and the refusal names the cause. That is the correct
+direction — quoting the rack rate to somebody who may have negotiated a different price is a
+commercial error nobody would ever find — and it makes the datastore blocker visible in
+operation instead of silently resolving to list pricing. Non-pricing replies are unaffected;
+verified at runtime, drafting normally at 449 characters while the pricing enquiry was refused.
+
+### Also found by the investigation, NOT yet fixed
+
+Recorded so they are not lost, and so this entry does not read as though the list was cleared:
+
+- `listFacts` caps at 500 documents with **no `orderBy`**, so the window is ordered by
+  document id — a sha256 prefix, uncorrelated with time. `recordFact` finds the fact to
+  supersede from exactly this list, so an active fact outside the window yields `CREATE` and a
+  **second active document for the same key**, the first never given `validUntil` or
+  `supersededBy`. Both then render into the same prompt as simultaneously in force. The
+  docstring ("beyond this the oldest are not loaded") is false.
+- `memoryFacts` normalisation collapses `Head count`, `Head-count` and `head.count` onto
+  one key, so one message can supersede its own fact and the audit trail reads as the customer
+  changing position mid-message — with both observations carrying the same `sourceMessageId`.
+- `processNewEmail`'s outer `catch` logs and returns. The webhook's `.catch` never fires and
+  the endpoint returns 200 OK to Google, so a dropped customer email is reported as success at
+  every layer.
+- `budgetTracker.recordModelCall(500, 0.01)` is a **literal**, recorded before the call and
+  charged even when it fails, while the two real model calls on the path are never recorded.
+  3 × 500 tokens can never reach the 8000-token ceiling, so §46's budget cannot bind.
+- `geminiClient` fails over across five model ids and records **which one answered nowhere**,
+  so cost cannot be attributed and a bad reply cannot be reproduced (§21).
+- `/api/logs` orders by `timestamp`; the only `AIRunLog` shape uses `createdAt`. Nothing
+  writes the collection, so it returns `[]` — and would keep returning `[]` after a writer was
+  added, silently, with HTTP 200.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally

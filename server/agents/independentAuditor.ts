@@ -235,8 +235,25 @@ export async function auditReplyAgainstPlan(input: {
 
   
   // 11. Claim-Level Grounding (Part L)
+  //
+  // This called `verifyClaims(sanitizedBody)` with one argument, so `permittedAmounts`
+  // defaulted to `priceBookAmounts()` — the LIST price book — while check 10 above ran the
+  // same `auditPricingClaims` against `pricingContext.quotableAmounts`, computed 29 lines
+  // earlier from this customer's approved quote. Two independent price checks over two
+  // different permitted sets, in the same function, on the same text.
+  //
+  // Where a binding quote exists they contradict each other outright: a draft stating the
+  // negotiated £399 passes check 10 and is flagged ungrounded by check 11; a draft stating the
+  // list £499 is flagged by check 10 and passes check 11. claimGrounding.ts says exactly why
+  // that must not happen — "two independent price checks that disagree about what 'approved
+  // pricing' means is how one of them silently stops applying" — and the wiring reintroduced
+  // it. Latent only because nothing populates `input.quote` yet, which is not a defence.
   const groundingEngine = new ClaimGroundingEngine();
-  const groundingResult = await groundingEngine.verifyClaims(sanitizedBody);
+  const groundingResult = await groundingEngine.verifyClaims(
+    sanitizedBody,
+    pricingContext.quotableAmounts,
+    input.groundedNonPriceAmounts ?? []
+  );
   if (!groundingResult.isGrounded) {
       score -= 30;
       issuesDetected.push(...groundingResult.ungroundedClaims);

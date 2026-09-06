@@ -864,6 +864,63 @@ export type NextBestActionType =
   | "NO_REPLY"
   | "SUPPRESS";
 
+/**
+ * Whether each action means "send nothing at all".
+ *
+ * WHY THIS IS A RECORD OVER THE UNION, NOT A SET OF THE SUPPRESSING ONES
+ * ---------------------------------------------------------------------
+ * The inbound pipeline's suppression guard read:
+ *
+ *     if (nbaResult.action === 'DO_NOTHING' as any || nbaResult.action === 'SUPPRESS_NO_ACTION' as any)
+ *
+ * Neither string is a member of this union. The two casts are the only reason the compiler did
+ * not report the comparison as impossible, and the guard was therefore dead: measured by
+ * running the decision engine, an unsubscribe request returns `SUPPRESS` and an out-of-office
+ * autoresponder returns `NO_REPLY`, and both fell straight through into composition and outbox
+ * queueing. The one branch in the system that says "do not reply" could never fire, so the
+ * pipeline's effective default was always to draft — §14 with the sign inverted.
+ *
+ * A `Record` keyed by the whole union means adding a member to `NextBestActionType` is a
+ * COMPILE ERROR until somebody decides whether it replies. A `Set` of the suppressing ones
+ * would silently classify every new action as "reply", which is the permissive direction.
+ */
+export const ACTION_SUPPRESSES_REPLY: Readonly<Record<NextBestActionType, boolean>> = Object.freeze({
+  ANSWER_ONLY: false,
+  ANSWER_AND_QUALIFY: false,
+  ANSWER_AND_ASK_ONE_QUESTION: false,
+  ANSWER_AND_OFFER_DEMO: false,
+  SEND_BOOKING_CTA: false,
+  PROVIDE_PRICING: false,
+  REQUEST_PRICING_REQUIREMENTS: false,
+  PROVIDE_TECHNICAL_EXPLANATION: false,
+  REQUEST_TECHNICAL_REQUIREMENTS: false,
+  HANDLE_OBJECTION: false,
+  PROVIDE_ROI_CONTEXT: false,
+  PROVIDE_TRIAL_INFORMATION: false,
+  START_ONBOARDING: false,
+  REQUEST_ONBOARDING_INFORMATION: false,
+  ESCALATE_TO_SALES: false,
+  ESCALATE_TO_TECHNICAL: false,
+  ESCALATE_TO_FOUNDER: false,
+  SCHEDULE_FOLLOW_UP: false,
+  NO_REPLY: true,
+  SUPPRESS: true,
+});
+
+/**
+ * Does this action mean we send nothing?
+ *
+ * Takes `unknown` and FAILS CLOSED. An action that arrives from a model, a stored row or a
+ * future member nobody classified is not a licence to email a customer: sending is the
+ * permission here, so anything unrecognised suppresses (§14). The alternative —
+ * `MAP[action] === true` on a plain lookup — returns `false` for an unknown string and sends.
+ */
+export function suppressesReply(action: unknown): boolean {
+  if (typeof action !== 'string') return true;
+  if (!Object.prototype.hasOwnProperty.call(ACTION_SUPPRESSES_REPLY, action)) return true;
+  return ACTION_SUPPRESSES_REPLY[action as NextBestActionType];
+}
+
 export interface NextBestActionResult {
   action: NextBestActionType;
   reason: string;

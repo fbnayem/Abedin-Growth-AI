@@ -2,7 +2,7 @@ import { CanaryRolloutService } from './canary.service';
 import { BudgetTracker } from '../policies/workflowBudgets';
 import { MetricsService } from './metrics.service';
 import { LedgerService } from './ledgers.service';
-import { BuyingStage } from "../../shared/domain/models";
+import { BuyingStage, suppressesReply } from "../../shared/domain/models";
 import { db } from '../db/index';
 import { messages, conversations, contacts, accounts, conversationFacts, outboxMessages } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
@@ -337,8 +337,24 @@ export class InboundPipeline {
       );
 
       // 7. Compose Reply if needed
-      if (nbaResult.action === 'DO_NOTHING' as any || nbaResult.action === 'SUPPRESS_NO_ACTION' as any) {
-         console.log("NBA determined no reply is needed:", nbaResult.action);
+      //
+      // This was:
+      //
+      //     if (nbaResult.action === 'DO_NOTHING' as any || nbaResult.action === 'SUPPRESS_NO_ACTION' as any)
+      //
+      // Neither literal is a member of NextBestActionType, and the two casts are the only
+      // reason the compiler did not say so. The guard was dead. Measured by running the
+      // decision engine over real inputs:
+      //
+      //     unsubscribe     isUnsub=true   action=SUPPRESS   guard fires? NO
+      //     out of office   isOOO=true     action=NO_REPLY   guard fires? NO
+      //
+      // So a prospect who asked to be removed from the list was sent a drafted sales reply,
+      // and an out-of-office autoresponder was answered as though a human had written it.
+      // `suppressesReply` is exhaustive over the union and fails closed on anything it does
+      // not recognise, because sending is the permission (§14).
+      if (suppressesReply(nbaResult.action)) {
+         console.log(`[InboundPipeline] Suppressed: action=${nbaResult.action} — ${nbaResult.reason}`);
          return;
       }
 
@@ -399,6 +415,22 @@ export class InboundPipeline {
         rawInboundText: email.textBody || email.htmlBody || '',
         knownRelevantFacts,
       });
+
+      // 7b. The planner can suppress too, and until now nothing listened.
+      //
+      // Two branches inside composeAutonomousSalesReply return an empty draft carrying a
+      // suppressing action: prompt injection detected in the inbound text (§18), and a quote
+      // lookup that failed while the plan intended to state a price (§14). Both returned
+      // `{ subject: "", body: "", replyPlan: { nextBestAction: "SUPPRESS" | "NO_REPLY" } }` —
+      // and the pipeline carried straight on and queued the empty body as an outbox row.
+      // Same predicate as the pre-compose guard, so the two boundaries cannot drift apart.
+      if (suppressesReply(draft.replyPlan.nextBestAction)) {
+        console.warn(
+          `[InboundPipeline] Planner suppressed the reply: ${draft.replyPlan.nextBestAction} — ` +
+            draft.replyPlan.reason
+        );
+        return;
+      }
 
       // 8. Independent Audit
       //

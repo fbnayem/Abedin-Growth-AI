@@ -35,10 +35,19 @@ const identity = {
   identityConfidence: 0.9,
 };
 
+/**
+ * A NON-PRICING enquiry, deliberately.
+ *
+ * This used to ask about pricing. Once a failed quote lookup began blocking pricing replies
+ * (§14 — we cannot state a price without knowing whether this customer negotiated one, and
+ * `getQuotes` throws with DATABASE_URL unset), every test below would have exercised the
+ * REFUSAL branch while claiming to test the drafting path — and all but one would still have
+ * passed. The tests here are about the composer running at all, so they must reach it.
+ */
+const NON_PRICING_ENQUIRY = 'Hello, does your system integrate with our existing phone lines?';
+
 const wellFormedInput = () => {
-  const understanding = evaluateEmailUnderstandingRuleBased(
-    'Hello, could you tell me about your pricing and availability?'
-  );
+  const understanding = evaluateEmailUnderstandingRuleBased(NON_PRICING_ENQUIRY);
   return {
     organizationId: ORG,
     identity,
@@ -50,7 +59,7 @@ const wellFormedInput = () => {
       UNASSESSED_MEETING_READINESS
     ),
     buyingStage: BuyingStage.DISCOVERY,
-    rawInboundText: 'Hello, could you tell me about your pricing and availability?',
+    rawInboundText: NON_PRICING_ENQUIRY,
     knownRelevantFacts: [] as string[],
   };
 };
@@ -65,6 +74,13 @@ describe('the live inbound drafting path', () => {
       expect(typeof draft.subject).toBe('string');
       expect(typeof draft.body).toBe('string');
       expect(draft.body.length).toBeGreaterThan(0);
+    });
+
+    it('the fixture really does reach the drafter, not the pricing refusal', () => {
+      // Guards the test above against silently passing through a different branch: if this
+      // fixture ever becomes a pricing enquiry again, the quote-lookup block takes over and
+      // these tests stop testing the composer.
+      expect(wellFormedInput().nextBestAction.pricingAllowed).toBe(false);
     });
 
     it('the OLD argument object is exactly what the compiler now rejects', () => {

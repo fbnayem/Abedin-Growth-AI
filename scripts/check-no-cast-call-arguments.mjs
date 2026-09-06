@@ -146,6 +146,18 @@ const MUST_NOT_MATCH = [
   'f({ a: 1 } as SomeType)',                // a real type, which the compiler still checks
 ];
 
+// The self-check needs a self-check: emptying these two arrays disables every assertion below
+// while leaving the scan intact, and the run still reported "ok". Verified against this file.
+if (MUST_MATCH.length === 0 || MUST_NOT_MATCH.length === 0) {
+  violations.push({
+    file: '(self-check)',
+    line: 0,
+    message:
+      'the self-check sample sets are empty, so the scanner proves nothing about itself ' +
+      `before judging the tree (MUST_MATCH=${MUST_MATCH.length}, MUST_NOT_MATCH=${MUST_NOT_MATCH.length}).`,
+  });
+}
+
 for (const sample of MUST_MATCH) {
   if (hits(sample) === 0) {
     violations.push({
@@ -167,7 +179,23 @@ for (const sample of MUST_NOT_MATCH) {
 
 // ---------------------------------------------------------------- scan
 const files = [];
-for (const root of SCAN_ROOTS) walk(join(ROOT, root), files);
+// Each root is walked separately and its yield checked, rather than trusting one total. With a
+// single total, emptying SCAN_ROOTS still left `server.ts` from SCAN_FILES, so `scanned` was 1
+// and the "did we scan anything" check passed while coverage fell from 145 files to one.
+for (const root of SCAN_ROOTS) {
+  const before = files.length;
+  walk(join(ROOT, root), files);
+  if (files.length === before) {
+    violations.push({
+      file: '(scan)',
+      line: 0,
+      message: `scan root '${root}' yielded no files — it was removed, renamed, or the walker is broken.`,
+    });
+  }
+}
+if (SCAN_ROOTS.length === 0) {
+  violations.push({ file: '(scan)', line: 0, message: 'SCAN_ROOTS is empty; nothing is covered.' });
+}
 for (const file of SCAN_FILES) files.push(join(ROOT, file));
 
 let scanned = 0;

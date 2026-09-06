@@ -723,6 +723,59 @@ export async function composeAutonomousSalesReply(input: {
     }
   }
 
+  // ...and this is the half that was written down and not implemented.
+  //
+  // The comment above claimed a lookup failure "now BLOCKS rather than silently degrading to
+  // the default". It did not. `quoteLookupFailed` was assigned, logged, and never read again:
+  // no branch tested it, it reached no field of the ReplyPlan, and the prompt was built
+  // identically whether the lookup had failed or not. The test guarding the claim was
+  //
+  //     expect(source).toContain('quoteLookupFailed')
+  //
+  // which a write-only variable satisfies — a check on the source text rather than on the
+  // property (§50). With DATABASE_URL unset `getQuotes` throws on EVERY call, so the intended
+  // control was absent on every reply the system would have sent.
+  //
+  // The block is scoped to where it costs something. If the plan was never going to state a
+  // price, not knowing the customer's quote history changes nothing. If it WAS, then quoting
+  // the rack rate to somebody who may have negotiated a different price is a commercial error
+  // nobody would ever find — so we refuse, and the refusal names the cause.
+  if (quoteLookupFailed !== null && input.nextBestAction.pricingAllowed) {
+    console.error(
+      "[salesDecisionEngine] REFUSING to draft a pricing reply — " + quoteLookupFailed
+    );
+    return {
+      subject: "",
+      body: "",
+      replyPlan: {
+        contact: {
+          name: input.identity.name,
+          company: input.identity.company,
+          email: input.identity.email,
+        },
+        product: "Abedin Voice AI",
+        primaryIntent: input.emailUnderstanding.primaryIntent,
+        secondaryIntents: input.emailUnderstanding.secondaryIntents,
+        buyingStage: input.buyingStage,
+        purchaseReadiness: 0,
+        meetingReadiness: 0,
+        questionsToAnswer: [],
+        knownRelevantFacts: input.knownRelevantFacts ?? [],
+        objections: [],
+        missingInformation: [],
+        specialistsRequired: [],
+        nextBestAction: "NO_REPLY",
+        sendBookingLink: false,
+        sendOnboardingLink: false,
+        reason:
+          "Refused to state pricing: " +
+          quoteLookupFailed +
+          " Sending list pricing to a customer whose negotiated price we cannot read is not a " +
+          "safe default (§14).",
+      },
+    };
+  }
+
   const firstName = input.identity.name?.replace(/^Dr\.\s+/i, "").split(" ")[0] || "there";
   const companyName = input.identity.company || "your team";
 
