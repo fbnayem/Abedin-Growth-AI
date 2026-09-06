@@ -205,7 +205,12 @@ export const messages = pgTable(
     bcc: jsonb('bcc'),
     subject: text('subject'),
     textBody: text('text_body'),
-    sanitizedHtmlBody: text('sanitized_html_body'),
+    // S16/S35 — renamed 2026-09-07. It was `sanitizedHtmlBody`/`sanitized_html_body`,
+    // and it held raw provider HTML: the name asserted a property that no code in the
+    // repository provided, and a reviewer reading the schema would reasonably conclude a
+    // sanitizer existed. `htmlAsText` is the rendering that is safe to read.
+    rawHtmlBody: text('raw_html_body'),
+    htmlAsText: text('html_as_text'),
     rawMetadata: jsonb('raw_metadata'),
     receivedAt: timestamp('received_at', { withTimezone: true }),
     sentAt: timestamp('sent_at', { withTimezone: true }),

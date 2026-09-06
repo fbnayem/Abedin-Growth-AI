@@ -702,7 +702,13 @@ export interface AIRunLog {
   // --- §21 reproducibility. Optional so existing readers keep working.
 
   /** What the run decided, as distinct from whether it finished. */
-  disposition?: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'FAILED';
+  /**
+   * S28 — AUTOMATED means the message was classified as machine-generated (a bounce, an
+   * auto-reply, a mailing list) and NO model was asked about it. Distinct from SUPPRESSED,
+   * which is a decision a model participated in: collapsing them would hide a bounce loop
+   * inside the ordinary suppression count.
+   */
+  disposition?: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED' | 'FAILED';
   /** Where a failed run stopped. */
   stage?: string | null;
   conversationId?: string | null;

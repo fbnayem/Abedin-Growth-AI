@@ -41,7 +41,7 @@ export interface RunLogInput {
   agentType: string;
   actionType: string;
   status: 'SUCCESS' | 'FAILED';
-  disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'FAILED';
+  disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED' | 'FAILED';
   /** System-generated prose. NEVER customer text (§18). */
   summary: string;
   stage?: string | null;
@@ -69,7 +69,7 @@ export interface RunLogInput {
  */
 export interface RunOutcomeSummary {
   ok: boolean;
-  disposition?: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED';
+  disposition?: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED';
   stage?: string | null;
   detail: string;
 }
@@ -84,7 +84,7 @@ export interface RunOutcomeSummary {
  */
 export function runLogFieldsFor(outcome: RunOutcomeSummary): {
   status: 'SUCCESS' | 'FAILED';
-  disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'FAILED';
+  disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED' | 'FAILED';
   summary: string;
   stage: string | null;
 } {

@@ -271,7 +271,15 @@ describe('4. a dropped email is no longer reported as success', () => {
 
   it('every early exit returns an outcome — no bare `return;` survives in the pipeline body', () => {
     // A bare return would be `undefined`, which is exactly the void the outcome type replaces.
-    expect(pipeline).not.toMatch(/^\s*return;\s*$/m);
+    //
+    // Scoped to `runPipeline` 2026-09-07. It scanned the whole FILE, which caught the first
+    // void-returning private helper added to the module (`applyBounceSuppression`, whose
+    // `return;` is correct — it reports nothing and must not abort ingestion). The invariant
+    // was always about the pipeline body; asserting it over the file made an unrelated,
+    // correct edit fail, which is how a true invariant gets weakened by someone in a hurry.
+    const body = pipelineBody();
+    expect(body.length).toBeGreaterThan(2000);
+    expect(body).not.toMatch(/^\s*return;\s*$/m);
   });
 
   it('the caller READS the outcome rather than awaiting a void', () => {
@@ -326,6 +334,20 @@ describe('5. the log endpoint can actually return a log', () => {
     expect(view).toContain('bg-red-100');
   });
 });
+
+/**
+ * The body of `runPipeline`, from its signature to the end of the class.
+ *
+ * Deliberately generous at the end: it includes everything after the signature rather than
+ * trying to brace-match, so a `return;` added anywhere below `runPipeline` is still caught. The
+ * only thing it excludes is the helpers declared ABOVE it.
+ */
+function pipelineBody(): string {
+  const src = stripped('server/services/inboundPipeline.ts');
+  const start = src.indexOf('private async runPipeline(');
+  if (start < 0) throw new Error('runPipeline not found — this test is measuring nothing');
+  return src.slice(start);
+}
 
 function stripped(path: string): string {
   return readFileSync(path, 'utf8')

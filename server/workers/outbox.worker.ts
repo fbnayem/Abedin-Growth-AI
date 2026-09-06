@@ -222,7 +222,10 @@ export class OutboxWorker {
                 sender: 'SYSTEM',
                 recipients: [job.payload.to],
                 subject: job.payload.subject,
-                sanitizedHtmlBody: job.payload.htmlBody,
+                // Renamed with the inbound field. This one is our OWN html, but a column
+                // whose name means different things in different rows is worse than one
+                // that is merely blunt.
+                rawHtmlBody: job.payload.htmlBody,
                 textBody: job.payload.textBody,
                 status: 'SENT',
                 isAutomated: true,

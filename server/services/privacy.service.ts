@@ -22,7 +22,8 @@ export class PrivacyService {
         await db.delete(conversationFacts).where(eq(conversationFacts.conversationId, conv.id));
         await db.update(messages).set({
             textBody: '[REDACTED DUE TO PRIVACY REQUEST]',
-            sanitizedHtmlBody: '[REDACTED DUE TO PRIVACY REQUEST]'
+            rawHtmlBody: '[REDACTED DUE TO PRIVACY REQUEST]',
+            htmlAsText: '[REDACTED DUE TO PRIVACY REQUEST]'
         }).where(eq(messages.conversationId, conv.id));
     }
     return true;

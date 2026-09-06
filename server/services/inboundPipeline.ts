@@ -29,6 +29,10 @@ import {
 import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
 import { recordFacts, listActiveFacts } from '../lib/factStore';
 import { observationsFromMemory } from '../domain/memoryFacts';
+import { classifyAutomation, type AutomationVerdict } from '../domain/automatedMail';
+import { firestore } from '../firebase';
+import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
+import { orgPath } from '../tenancy/orgScope';
 
 const ledgerService = new LedgerService();
 
@@ -47,7 +51,13 @@ type AuditDecision = 'PASS' | 'BLOCK' | 'HUMAN_REVIEW_REQUIRED';
 export type InboundOutcome =
   | {
       ok: true;
-      disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED';
+      /**
+       * S28 — AUTOMATED is distinct from SUPPRESSED on purpose. A suppressed message is one
+       * the planner decided not to answer; an automated one was never eligible to be
+       * answered, and no model was asked about it. Collapsing the two would hide the fact
+       * that a bounce loop is running.
+       */
+      disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED';
       detail: string;
       modelCalls: ModelCallRecord[];
       conversationId?: string | null;
@@ -305,6 +315,56 @@ export class InboundPipeline {
     return outcome;
   }
 
+  /**
+   * S28/S26 — a permanent bounce suppresses the recipient.
+   *
+   * `hardBounced` is one of five flags the ActionGateway already reads before every send
+   * (`executeEmailSend`), and until now NOTHING WROTE ANY OF THEM. A read with no writer is
+   * a control that cannot fire: the gateway has been checking a field that was always
+   * undefined, and reporting "not suppressed" every time.
+   *
+   * Only a PERMANENT failure suppresses. A 4.x.x is a temporary condition — a full mailbox,
+   * a greylisting delay — and treating it as permanent would silently retire a live
+   * customer over a transient server state.
+   *
+   * This never throws. A suppression write that fails must not abort the pipeline, but it
+   * must be loud: the alternative is a bounce loop nobody can see.
+   */
+  private async applyBounceSuppression(
+    organizationId: string,
+    contactId: string,
+    automation: AutomationVerdict
+  ): Promise<void> {
+    if (automation.permanentFailure !== true) return;
+    if (!firestore) {
+      console.error(
+        '[InboundPipeline] PERMANENT BOUNCE but the datastore is unavailable, so the ' +
+          `recipient could NOT be suppressed (contact ${contactId}, ` +
+          `status ${automation.dsnStatus ?? 'unknown'}). This address will be mailed again.`
+      );
+      return;
+    }
+    try {
+      await updateDoc(doc(firestore, orgPath(organizationId, 'contacts'), contactId), {
+        hardBounced: true,
+        emailStatus: 'BOUNCED',
+        hardBouncedAt: new Date(),
+        hardBounceReason: `${automation.dsnStatus ?? 'unknown'}: ${automation.reason}`,
+      });
+      console.warn(
+        `[InboundPipeline] Contact ${contactId} suppressed after a permanent delivery ` +
+          `failure (${automation.dsnStatus ?? 'no status'}` +
+          `${automation.failedRecipient === null ? '' : `, ${automation.failedRecipient}`}).`
+      );
+    } catch (e) {
+      console.error(
+        '[InboundPipeline] FAILED to suppress a hard-bounced recipient. The gateway will ' +
+          `keep sending to contact ${contactId}.`,
+        e
+      );
+    }
+  }
+
   private async runPipeline(
     email: GmailMessage,
     organizationId: string,
@@ -324,6 +384,19 @@ export class InboundPipeline {
         );
         return { ok: false, stage: 'TENANT', detail: 'No valid organisation id on the message.' };
       }
+
+      // S28 — what kind of message is this, before anything is spent on it.
+      //
+      // Nothing classified inbound mail at all: `automationClassification` was a column
+      // with no writer, and the only bounce-address check in the repository lived inside
+      // `isSuppressed`, whose sole caller is the independent auditor — which is stubbed to
+      // a constant on this path. A mailer-daemon delivery failure therefore ran the entire
+      // pipeline and was answered as though the prospect had written it.
+      //
+      // The verdict is computed here, from headers and MIME structure only, so it is
+      // available to the message record. The REFUSAL happens after the message is stored:
+      // a bounce is evidence and must be kept, it just must not be replied to.
+      const automation = classifyAutomation({ headers: email.headers, body: email.parsed });
 
       const startTime = Date.now();
       const budgetTracker = new BudgetTracker();
@@ -369,7 +442,13 @@ export class InboundPipeline {
         sender: email.from,
         subject: email.subject,
         textBody: email.textBody,
-        sanitizedHtmlBody: email.htmlBody,
+        // S16/S35 — renamed. The column was called `sanitizedHtmlBody` and held provider
+        // HTML that nothing had sanitized: a name asserting a property no code provided.
+        rawHtmlBody: email.untrustedHtmlBody,
+        // The TEXT rendering, which is what anything that reads the content should use.
+        htmlAsText: email.htmlAsText,
+        // S28 — the column that had no writer.
+        automationClassification: automation.classification,
         status: 'RECEIVED',
         receivedAt: new Date(),
       });
@@ -381,6 +460,24 @@ export class InboundPipeline {
       // stamped with a version that does not include the message it is replying to.
       const inboundVersion = await incrementInboundVersion(organizationId, conversationId);
       console.log(`[InboundPipeline] conversation ${conversationId} -> inbound version ${inboundVersion}`);
+
+      // S28 — the gate. Placed here, before the first model call, because the cheapest
+      // thing to do with a bounce is nothing, and the most expensive is to reason about it.
+      if (automation.replyPermitted === false) {
+        console.warn(
+          `[InboundPipeline] ${automation.classification} from ${email.from}: ${automation.reason} ` +
+            `Signals: ${automation.signals.join('; ') || 'none'}`
+        );
+        await this.applyBounceSuppression(organizationId, contactId, automation);
+        return {
+          ok: true,
+          disposition: 'AUTOMATED',
+          detail: `${automation.classification}: ${automation.reason}`,
+          modelCalls,
+          conversationId,
+          messageId,
+        };
+      }
 
       // 4. Update Conversation Memory
       const convMsgs = await db
@@ -405,7 +502,10 @@ export class InboundPipeline {
            id: m.id,
            sender: m.direction === 'INBOUND' ? 'PROSPECT' : 'AGENT',
            subject: m.subject,
-           bodyText: m.textBody || m.sanitizedHtmlBody || "",
+           // The TEXT rendering first: `rawHtmlBody` is provider markup, and handing it
+           // to the model as "what the customer said" is how tag names end up quoted
+           // back at a prospect.
+           bodyText: m.textBody || m.htmlAsText || "",
            sentAt: m.receivedAt ? m.receivedAt.toISOString() : new Date().toISOString()
          }))
       } as any;
@@ -458,7 +558,10 @@ export class InboundPipeline {
 
 
       // 5. Email Understanding & Intent
-      const understanding = evaluateEmailUnderstandingRuleBased(email.textBody || email.htmlBody);
+      // Was `email.textBody || email.htmlBody`, so an HTML-only email ran the
+      // out-of-office and unsubscribe substring checks against MARKUP — matching tag
+      // names and attribute values rather than anything the sender wrote.
+      const understanding = evaluateEmailUnderstandingRuleBased(email.textBody || email.htmlAsText);
 
       // 6. Next Best Action (NBA)
       // The two `{} as any` arguments here read as placeholders and behaved as ones: neither
@@ -586,7 +689,7 @@ export class InboundPipeline {
             id: messageId,
             sender: 'PROSPECT',
             subject: email.subject ?? null,
-            bodyText: email.textBody || email.htmlBody || '',
+            bodyText: email.textBody || email.htmlAsText || '',
             sentAt: new Date().toISOString(),
           },
         ],
@@ -636,7 +739,7 @@ export class InboundPipeline {
         emailUnderstanding: understanding,
         nextBestAction: nbaResult,
         buyingStage: BuyingStage.DISCOVERY,
-        rawInboundText: email.textBody || email.htmlBody || '',
+        rawInboundText: email.textBody || email.htmlAsText || '',
         contextBundle,
       });
 

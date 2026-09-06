@@ -4,6 +4,7 @@ import { classifyResponse, classifyThrown, ProviderError } from '../lib/provider
 import type { EmailProvider, RefreshableCredential } from '../providers/types';
 import type { SentMessageLookup } from '../lib/reconciliation';
 import { bareMessageId, headerLine, isWellFormedMessageId } from '../lib/messageIdentity';
+import { HeaderBag, walkGmailPayload, type ParsedBody } from '../lib/mime';
 import type { Capability } from '../lib/capabilities';
 
 export interface SendEmailOptions {
@@ -35,9 +36,25 @@ export interface GmailMessage {
   to: string;
   date: string;
   textBody: string;
-  htmlBody: string;
+  /**
+   * S16/S35 — renamed from `htmlBody`, and stored under a name that says what it is.
+   *
+   * This is provider HTML exactly as it arrived. It has not been sanitized, it must never be
+   * rendered, and the column it lands in used to be called `sanitizedHtmlBody` — a name that
+   * asserted a property nothing in the repository provided. Use `htmlAsText` for anything that
+   * reads the content.
+   */
+  untrustedHtmlBody: string;
+  /** A TEXT rendering of the HTML. Safe to show, safe to give to a model. */
+  htmlAsText: string;
   inReplyTo?: string;
   references?: string;
+  /** S15 — the RFC 5322 Message-ID. The column existed; nothing wrote it. */
+  messageIdHeader: string | null;
+  /** Every header, for classification. `payload.headers` was carried and never read. */
+  headers: HeaderBag;
+  /** The structural result of the MIME walk: DSN parts, attachments, truncation. */
+  parsed: ParsedBody;
 }
 
 // P1.11 — the adapter now states its contract instead of merely happening to satisfy one.
@@ -171,49 +188,40 @@ export class GmailService implements EmailProvider, RefreshableCredential, SentM
     return this.parseMessage(data);
   }
 
+  /**
+   * S16 — the MIME walk moved to `lib/mime.ts`, where it can be tested against the shapes
+   * Google actually sends. What was here was eleven lines that ignored charset, appended both
+   * halves of a `multipart/alternative`, recursed into `message/rfc822` so a forwarded email's
+   * text became the prospect's own words, dereferenced `part.body.data` without a guard, left
+   * RFC 2047 subjects as `=?UTF-8?B?...?=`, and dropped the `message/delivery-status` part of a
+   * bounce while keeping its human-readable preamble — which is how a delivery failure came to
+   * look exactly like a reply.
+   */
   private parseMessage(data: any): GmailMessage {
-    const headers = data.payload.headers || [];
-    const getHeader = (name: string) => headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
-    
-    // Simplistic MIME parser for demonstration
-    let textBody = '';
-    let htmlBody = '';
-    
-    const parseParts = (parts: any[]) => {
-      for (const part of parts) {
-        if (part.mimeType === 'text/plain' && part.body.data) {
-          textBody += Buffer.from(part.body.data, 'base64').toString('utf8');
-        } else if (part.mimeType === 'text/html' && part.body.data) {
-          htmlBody += Buffer.from(part.body.data, 'base64').toString('utf8');
-        } else if (part.parts) {
-          parseParts(part.parts);
-        }
-      }
-    };
-    
-    if (data.payload.parts) {
-      parseParts(data.payload.parts);
-    } else if (data.payload.body?.data) {
-       if (data.payload.mimeType === 'text/html') {
-          htmlBody = Buffer.from(data.payload.body.data, 'base64').toString('utf8');
-       } else {
-          textBody = Buffer.from(data.payload.body.data, 'base64').toString('utf8');
-       }
-    }
+    const headers = new HeaderBag(data?.payload?.headers);
+    const parsed = walkGmailPayload(data?.payload);
 
     return {
-      id: data.id,
-      threadId: data.threadId,
-      snippet: data.snippet,
-      payload: data.payload,
-      subject: getHeader('subject'),
-      from: getHeader('from'),
-      to: getHeader('to'),
-      date: getHeader('date'),
-      textBody,
-      htmlBody,
-      inReplyTo: getHeader('in-reply-to'),
-      references: getHeader('references'),
+      id: typeof data?.id === 'string' ? data.id : '',
+      threadId: typeof data?.threadId === 'string' ? data.threadId : '',
+      snippet: typeof data?.snippet === 'string' ? data.snippet : '',
+      payload: data?.payload,
+      // `.get` decodes RFC 2047 encoded words; `.raw` does not. Anything a human or a model
+      // will read goes through `.get`.
+      subject: headers.get('subject') ?? '',
+      from: headers.get('from') ?? '',
+      to: headers.get('to') ?? '',
+      date: headers.raw('date') ?? '',
+      textBody: parsed.textBody,
+      untrustedHtmlBody: parsed.untrustedHtmlBody,
+      htmlAsText: parsed.htmlAsText,
+      // A Message-ID is a structural identifier, not display text: it must not be
+      // encoded-word-decoded, or a hostile display name could reshape it.
+      inReplyTo: headers.raw('in-reply-to') ?? '',
+      references: headers.raw('references') ?? '',
+      messageIdHeader: headers.raw('message-id'),
+      headers,
+      parsed,
     };
   }
 
