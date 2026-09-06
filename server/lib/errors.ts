@@ -72,6 +72,18 @@ export const ErrorCodes = {
   WEBHOOK_VERIFICATION_FAILED: 401,
   NOT_FOUND: 404,
   VERSION_CONFLICT: 409,
+  /**
+   * P1.5 — the contact already exists at the id derived from its address.
+   *
+   * 409 rather than 200-with-the-existing-record, because the caller asked to CREATE. Silently
+   * returning the existing contact would hide that a re-post is a no-op, and quietly
+   * overwriting it would reset the suppression and consent flags the gateway reads.
+   */
+  CONTACT_EXISTS: 409,
+  /** A merge was refused: same record, cross-tenant, or already merged away. */
+  MERGE_REFUSED: 422,
+  /** More rows point at the record than one transaction can reparent. */
+  TOO_MANY_REFERENCES: 422,
   ILLEGAL_TRANSITION: 422,
   TERMINAL_STATE: 422,
   UNKNOWN_TARGET_STATE: 422,

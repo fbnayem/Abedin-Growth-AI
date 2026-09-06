@@ -23,6 +23,8 @@ import {
   parseOrRespond,
 } from "./server/lib/validation";
 import { normalizeEmailKey } from "./server/lib/emailKey";
+import { createContactIfAbsent, ensureAccount, mergeContacts } from "./server/lib/identityStore";
+import { accountDomain, contactDocId, plusAddressTag, suggestedBaseAddress } from "./server/lib/identity";
 import { requestId, sendCaught, sendError, terminalErrorHandler } from "./server/lib/errors";
 import {
   expectedVersionFrom,
@@ -266,13 +268,156 @@ app.get("/api/health", (req: Request, res: Response) => {
     };
   }
 
+  /**
+   * P1.5 — Creating a contact, once, for all three types.
+   *
+   * Each of these was its own `addDoc`, which asks Firestore for a fresh RANDOM id. Posting
+   * the same person twice produced two documents and nothing noticed. That is not untidiness:
+   * ActionGateway decides whether someone may be emailed by loading ONE contact document and
+   * reading its suppression flags, so an unsubscribe recorded on document A left the person
+   * mailable through document B.
+   *
+   * The id is now derived from the normalised address, so the same person is the same
+   * document, and the create is a transaction that REFUSES when the document exists. Refusing
+   * rather than overwriting is the point — an overwrite would reset `suppressed` and
+   * `consentGiven`, turning the create endpoint into a way to clear an unsubscribe.
+   */
+  async function createContact(
+    req: Request,
+    res: Response,
+    idPrefix: string,
+    type: 'LEAD' | 'INVESTOR' | 'PARTNER',
+    status: string
+  ) {
+    const input = parseOrRespond(createContactSchema, req, res);
+    if (input === null) return;
+
+    const orgId = orgScope(req);
+    const outcome = await createContactIfAbsent(orgId, input.email, (id) => ({
+      ...buildContactDocument(input, idPrefix, type, status),
+      id,
+      organizationId: orgId,
+    }));
+
+    if (outcome.ok === false) {
+      if (outcome.code === 'ALREADY_EXISTS') {
+        return sendError(
+          req,
+          res,
+          'CONTACT_EXISTS',
+          'A contact with this email address already exists in this organisation.',
+          {
+            details: {
+              contactId: outcome.id,
+              // Returned so a caller can decide between updating the existing record and
+              // merging. Not acted on automatically: a re-post is not evidence of anything.
+              existingStatus: outcome.existing.status ?? null,
+              existingType: outcome.existing.type ?? null,
+            },
+          }
+        );
+      }
+      if (outcome.code === 'UNUSABLE_EMAIL') {
+        return sendError(req, res, 'VALIDATION_ERROR', outcome.message);
+      }
+      return sendError(req, res, 'STORE_UNAVAILABLE', outcome.message);
+    }
+
+    // The account record for the contact's company domain. `accounts` was declared in the
+    // schema and written by nothing, so every contact's accountId has always been null and the
+    // resolver's DOMAIN_MATCH branch has always returned an undefined account.
+    //
+    // Failure here does not fail the request: the contact exists and is correct, and an
+    // account is a grouping convenience. It is logged rather than swallowed.
+    try {
+      const account = await ensureAccount(orgId, input.email, {
+        name: input.companyName ?? accountDomain(input.email),
+        website: input.companyWebsite ?? null,
+        industry: input.industry ?? null,
+      });
+      if (account.ok && account.created) {
+        console.log(`[contacts] Created account ${account.id} for ${accountDomain(input.email)}`);
+      }
+    } catch (e: any) {
+      console.error('[contacts] Account creation failed (contact was still created):', e?.message);
+    }
+
+    // A plus-tag is reported, never merged on. See lib/identity: a missed merge leaves a
+    // visible duplicate, a wrong merge writes one person's history onto another's.
+    const tag = plusAddressTag(input.email);
+    const body: Record<string, unknown> = { ...outcome.data };
+    if (tag !== null) {
+      body.possibleDuplicateOf = suggestedBaseAddress(input.email);
+      body.possibleDuplicateReason = `Address carries the tag "${tag}"; a human should confirm.`;
+    }
+
+    res.status(201).json(body);
+  }
+
   app.post("/api/leads", async (req: Request, res: Response) => {
     try {
-      const input = parseOrRespond(createContactSchema, req, res);
-      if (input === null) return;
-      const payload = buildContactDocument(input, 'lead', 'LEAD', 'NEW');
-      await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
-      res.json(payload);
+      await createContact(req, res, 'lead', 'LEAD', 'NEW');
+    } catch(e: any) { sendCaught(req, res, e); }
+  });
+
+  /**
+   * P1.5 — Merge one contact into another (§15, §14).
+   *
+   * Deterministic ids stop NEW duplicates. They do nothing about the ones seven addDoc call
+   * sites have been creating for the life of the app, so the merge is the other half.
+   *
+   * Two things about this endpoint are deliberate. It names the survivor and the duplicate
+   * explicitly rather than guessing which record to keep — that is a judgement about whose
+   * history is authoritative, and it belongs to a person. And it is idempotent by resume
+   * rather than by pretending: re-running reparents rows created since the last attempt,
+   * because a Firestore transaction cannot enumerate them itself.
+   */
+  app.post("/api/contacts/:survivorId/merge", async (req: Request, res: Response) => {
+    try {
+      const survivorId = req.params.survivorId;
+      const duplicateId = typeof req.body?.duplicateId === 'string' ? req.body.duplicateId : null;
+
+      if (!duplicateId) {
+        return sendError(
+          req,
+          res,
+          'VALIDATION_ERROR',
+          'A merge names both records: pass duplicateId in the body.'
+        );
+      }
+
+      const outcome = await mergeContacts(orgScope(req), survivorId, duplicateId, {
+        mergedBy: req.tenant?.uid,
+        resume: req.body?.resume === true,
+      });
+
+      if (outcome.ok === false) {
+        if (outcome.code === 'NOT_FOUND') {
+          return sendError(req, res, 'NOT_FOUND', outcome.message);
+        }
+        if (outcome.code === 'STORE_UNAVAILABLE') {
+          return sendError(req, res, 'STORE_UNAVAILABLE', outcome.message);
+        }
+        if (outcome.code === 'TOO_MANY_REFERENCES') {
+          return sendError(req, res, 'TOO_MANY_REFERENCES', outcome.message, {
+            details: { found: outcome.found },
+          });
+        }
+        return sendError(req, res, 'MERGE_REFUSED', outcome.message, {
+          details: { refusal: outcome.code },
+        });
+      }
+
+      // The caller is told what the merge did to the permission state, because that is the
+      // part with consequences: a survivor that has just inherited an unsubscribe is no longer
+      // mailable, and an operator who merged two records to "tidy up" needs to know that.
+      res.json({
+        survivorId: outcome.survivorId,
+        duplicateId: outcome.duplicateId,
+        reparented: outcome.reparented,
+        inheritedSuppression: outcome.inheritedSuppression,
+        consentRevoked: outcome.consentRevoked,
+      });
     } catch(e: any) { sendCaught(req, res, e); }
   });
 
@@ -440,72 +585,78 @@ app.get("/api/health", (req: Request, res: Response) => {
 
 
   app.post("/api/leads/batch-generate", async (req: Request, res: Response) => {
-    try {
-      const { count = 3, location = 'UK', industry = 'Dental' } = req.body;
-      const results: any[] = [];
-      for(let i=0; i<count; i++) {
-        const payload = {
-          id: "lead_" + Date.now() + "_" + i,
-          type: "LEAD",
-          name: "Generated Lead " + (i+1),
-          title: "Decision Maker",
-          companyName: `${location} ${industry} Clinic ${i+1}`,
-          primaryEmail: `lead${i}@example.com`,
-          status: "DISCOVERED",
-          aiScore: Math.floor(Math.random() * 20) + 70,
-          createdAt: new Date().toISOString()
-        };
-        await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
-        results.push(payload);
-      }
-      res.json(results);
-    } catch(e: any) { sendCaught(req, res, e); }
+    // P1.13 / P1.5 — This handler fabricated contacts and wrote them to the live
+    // collection: "Generated Lead 1" at lead0@example.com, with a random
+    // aiScore between 70 and 89 so the result looked like research had happened. The UI
+    // presents it as "Discover leads", so an operator had no way to tell the rows apart
+    // from real ones.
+    //
+    // It is refused rather than left in place for two reasons. Fabricated records in the
+    // CRM are a correctness problem on their own — they are indistinguishable from
+    // researched contacts once written. And they entered through `addDoc`, which bypasses
+    // the derived id P1.5 relies on, so every call reintroduced exactly the un-keyed
+    // duplicates that work exists to make unrepresentable.
+    //
+    // 501 is the honest answer: the feature is not implemented. A stub that returns
+    // plausible data does not tell anyone that.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      'Discovery is not implemented. This endpoint previously returned fabricated ' +
+        'leads written into the live contact list; it no longer writes anything. ' +
+        'Add contacts through POST /api/leads, or connect a real discovery provider.'
+    );
   });
 
   app.post("/api/investors/batch-generate", async (req: Request, res: Response) => {
-    try {
-      const { count = 3, location = 'Global', industry = 'AI' } = req.body;
-      const results: any[] = [];
-      for(let i=0; i<count; i++) {
-        const payload = {
-          id: "inv_" + Date.now() + "_" + i,
-          type: "INVESTOR",
-          name: "Generated Investor " + (i+1),
-          title: "Partner",
-          companyName: `${location} ${industry} Ventures ${i+1}`,
-          primaryEmail: `investor${i}@example.com`,
-          status: "DISCOVERED",
-          aiScore: Math.floor(Math.random() * 20) + 70,
-          createdAt: new Date().toISOString()
-        };
-        await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
-        results.push(payload);
-      }
-      res.json(results);
-    } catch(e: any) { sendCaught(req, res, e); }
+    // P1.13 / P1.5 — This handler fabricated contacts and wrote them to the live
+    // collection: "Generated Investor 1" at investor0@example.com, with a random
+    // aiScore between 70 and 89 so the result looked like research had happened. The UI
+    // presents it as "Discover investors", so an operator had no way to tell the rows apart
+    // from real ones.
+    //
+    // It is refused rather than left in place for two reasons. Fabricated records in the
+    // CRM are a correctness problem on their own — they are indistinguishable from
+    // researched contacts once written. And they entered through `addDoc`, which bypasses
+    // the derived id P1.5 relies on, so every call reintroduced exactly the un-keyed
+    // duplicates that work exists to make unrepresentable.
+    //
+    // 501 is the honest answer: the feature is not implemented. A stub that returns
+    // plausible data does not tell anyone that.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      'Discovery is not implemented. This endpoint previously returned fabricated ' +
+        'investors written into the live contact list; it no longer writes anything. ' +
+        'Add contacts through POST /api/investors, or connect a real discovery provider.'
+    );
   });
 
   app.post("/api/partners/batch-generate", async (req: Request, res: Response) => {
-    try {
-      const { count = 3, location = 'Global', industry = 'Tech' } = req.body;
-      const results: any[] = [];
-      for(let i=0; i<count; i++) {
-        const payload = {
-          id: "part_" + Date.now() + "_" + i,
-          type: "PARTNER",
-          name: "Generated Partner " + (i+1),
-          title: "Director",
-          companyName: `${location} ${industry} Corp ${i+1}`,
-          primaryEmail: `partner${i}@example.com`,
-          status: "DISCOVERED",
-          aiScore: Math.floor(Math.random() * 20) + 70,
-          createdAt: new Date().toISOString()
-        };
-        await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
-        results.push(payload);
-      }
-      res.json(results);
-    } catch(e: any) { sendCaught(req, res, e); }
+    // P1.13 / P1.5 — This handler fabricated contacts and wrote them to the live
+    // collection: "Generated Partner 1" at partner0@example.com, with a random
+    // aiScore between 70 and 89 so the result looked like research had happened. The UI
+    // presents it as "Discover partners", so an operator had no way to tell the rows apart
+    // from real ones.
+    //
+    // It is refused rather than left in place for two reasons. Fabricated records in the
+    // CRM are a correctness problem on their own — they are indistinguishable from
+    // researched contacts once written. And they entered through `addDoc`, which bypasses
+    // the derived id P1.5 relies on, so every call reintroduced exactly the un-keyed
+    // duplicates that work exists to make unrepresentable.
+    //
+    // 501 is the honest answer: the feature is not implemented. A stub that returns
+    // plausible data does not tell anyone that.
+    sendError(
+      req,
+      res,
+      'NOT_IMPLEMENTED',
+      'Discovery is not implemented. This endpoint previously returned fabricated ' +
+        'partners written into the live contact list; it no longer writes anything. ' +
+        'Add contacts through POST /api/partners, or connect a real discovery provider.'
+    );
   });
 
 
@@ -809,11 +960,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/investors", async (req: Request, res: Response) => {
     try {
-      const input = parseOrRespond(createContactSchema, req, res);
-      if (input === null) return;
-      const payload = buildContactDocument(input, 'inv', 'INVESTOR', 'DISCOVERED');
-      await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
-      res.json(payload);
+      await createContact(req, res, 'inv', 'INVESTOR', 'DISCOVERED');
     } catch(e: any) { sendCaught(req, res, e); }
   });
 
@@ -834,11 +981,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/partners", async (req: Request, res: Response) => {
     try {
-      const input = parseOrRespond(createContactSchema, req, res);
-      if (input === null) return;
-      const payload = buildContactDocument(input, 'part', 'PARTNER', 'DISCOVERED');
-      await addDoc(collection(firestore, orgPath(orgScope(req), 'contacts')), payload);
-      res.json(payload);
+      await createContact(req, res, 'part', 'PARTNER', 'DISCOVERED');
     } catch(e: any) { sendCaught(req, res, e); }
   });
 

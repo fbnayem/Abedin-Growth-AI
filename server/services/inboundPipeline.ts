@@ -13,6 +13,8 @@ import { incrementInboundVersion, computeApprovalDigest } from './draftIntegrity
 import { isValidOrgId } from '../tenancy/orgScope';
 // Import agents (we will build/refactor these)
 import { IdentityResolverService } from './identityResolver.service';
+import { referencedMessageIds, resolveThread, type ThreadCandidate } from '../domain/threadResolution';
+import { inArray } from 'drizzle-orm';
 import { evaluateEmailUnderstandingRuleBased, determineNextBestAction, composeAutonomousSalesReply } from '../agents/salesDecisionEngine';
 import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
 
@@ -41,6 +43,138 @@ function runIndependentAudit(): { decision: AuditDecision; reason: string } {
 }
 
 export class InboundPipeline {
+  /**
+   * P1.5 — Find the conversation this message belongs to, or start one.
+   *
+   * The decision itself is in domain/threadResolution, which is pure and therefore testable
+   * against the case that matters: a candidate found by a header the SENDER controls. This
+   * method does the lookups and the write.
+   *
+   * The order is deliberate. The provider's own thread id is tried first because Gmail
+   * computed it server-side from the whole message; the reply headers are tried second
+   * because anyone can set them. Both are confirmed against the tenant and the contact before
+   * anything is appended — an unconfirmed match would let a stranger's email join a customer's
+   * thread, and the composer would then draft using that thread's history (§18).
+   */
+  private async resolveConversation(
+    email: GmailMessage,
+    organizationId: string,
+    contactId: string
+  ): Promise<string> {
+    const signals = {
+      organizationId,
+      contactId,
+      providerThreadId: email.threadId,
+      inReplyTo: email.inReplyTo,
+      references: email.references,
+    };
+
+    let byProviderThread: ThreadCandidate | null = null;
+    if (typeof email.threadId === 'string' && email.threadId.length > 0) {
+      const rows = await db
+        .select()
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.organizationId, organizationId),
+            eq(conversations.providerThreadId, email.threadId)
+          )
+        )
+        .limit(1);
+      if (rows.length > 0) {
+        byProviderThread = {
+          conversationId: rows[0].id,
+          organizationId: rows[0].organizationId,
+          contactId: rows[0].contactId,
+          providerThreadId: rows[0].providerThreadId,
+        };
+      }
+    }
+
+    // The referenced Message-IDs, bounded by the parser because the sender chooses how many
+    // arrive. Looked up in one query rather than one per id.
+    const byReference: ThreadCandidate[] = [];
+    const referenced = referencedMessageIds(signals);
+    if (byProviderThread === null && referenced.length > 0) {
+      const parents = await db
+        .select()
+        .from(messages)
+        .where(
+          and(
+            eq(messages.organizationId, organizationId),
+            inArray(messages.providerMessageId, referenced)
+          )
+        );
+
+      // Preserve the parser's ordering — nearest ancestry first — rather than whatever order
+      // the datastore returned.
+      const byMessageId = new Map(parents.map((m) => [m.providerMessageId, m]));
+      const conversationIds = referenced
+        .map((id) => byMessageId.get(id)?.conversationId)
+        .filter((id): id is string => typeof id === 'string');
+
+      if (conversationIds.length > 0) {
+        const rows = await db
+          .select()
+          .from(conversations)
+          .where(
+            and(
+              eq(conversations.organizationId, organizationId),
+              inArray(conversations.id, conversationIds)
+            )
+          );
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        for (const id of conversationIds) {
+          const row = byId.get(id);
+          if (row) {
+            byReference.push({
+              conversationId: row.id,
+              organizationId: row.organizationId,
+              contactId: row.contactId,
+              providerThreadId: row.providerThreadId,
+            });
+          }
+        }
+      }
+    }
+
+    const resolution = resolveThread(signals, { byProviderThread, byReference });
+
+    if (resolution.kind === 'EXISTING') {
+      console.log(
+        `[InboundPipeline] message ${email.id} joins conversation ${resolution.conversationId} ` +
+          `(${resolution.method}, confidence ${resolution.confidence}).`
+      );
+      return resolution.conversationId;
+    }
+
+    // A rejected candidate is logged rather than silently dropped: a mismatch here is either a
+    // bug in our threading or somebody probing it, and both are worth seeing.
+    if (resolution.rejected) {
+      console.warn(
+        `[InboundPipeline] REFUSED to append message ${email.id} to conversation ` +
+          `${resolution.rejected.conversationId}: it ${resolution.rejected.why}. ` +
+          `Starting a new thread instead.`
+      );
+    }
+
+    const newConversationId = `conv_${uuidv4()}`;
+    await db.insert(conversations).values({
+      id: newConversationId,
+      organizationId,
+      contactId,
+      status: 'NEW',
+      category: 'CUSTOMER',
+      providerThreadId: email.threadId ?? null,
+      subject: email.subject,
+    });
+    console.log(
+      `[InboundPipeline] Started conversation ${newConversationId} for message ${email.id}: ` +
+        resolution.reason
+    );
+    return newConversationId;
+  }
+
   async processNewEmail(email: GmailMessage, organizationId: string) {
     try {
       // P1.1 — This argument was accepted and then dropped: nothing downstream used it, so
@@ -71,22 +205,19 @@ export class InboundPipeline {
         return;
       }
 
-      // 2. Load Conversation
-      let conversationId = identity.contactId; // hack
-      if (!conversationId) {
-        const newConvId = `conv_${Date.now()}`;
-        await db.insert(conversations).values({
-           id: newConvId,
-           organizationId,
-           contactId: identity.contactId,
-           accountId: (identity as any).accountId || null,
-           status: 'NEW',
-           category: 'CUSTOMER',
-           providerThreadId: email.threadId,
-           subject: email.subject
-        });
-        conversationId = newConvId;
-      }
+      // 2. Which conversation does this message belong to?
+      //
+      // P1.5 — This was `let conversationId = identity.contactId; // hack`, followed by an
+      // `if (!conversationId)` that the guard above makes unreachable. So no conversation
+      // row has ever been written, and every message was stored with a CONTACT id in a
+      // column whose foreign key points at `conversations`.
+      //
+      // Behaviourally the cost is larger than the broken key: keying a conversation by WHO
+      // someone is means every thread with that person is one transcript, and that
+      // transcript is what the reply composer reads as context. `providerThreadId`,
+      // `inReplyTo` and `references` were captured into columns and never consulted.
+      const contactId = identity.contactId;
+      const conversationId = await this.resolveConversation(email, organizationId, contactId);
 
       // 3. Store the Message in DB
       const messageId = `msg_${Date.now()}`;
@@ -127,7 +258,11 @@ export class InboundPipeline {
 
       const convData = {
          id: conversationId,
-         contactName: (identity as any).matchedLeadId || email.from, // simplified
+         // P1.5 — This was `(identity as any).matchedLeadId`, which is a contact ID, not a
+         // name. It is interpolated into the conversation-memory prompt, so the model has
+         // been reading a database key as the customer's name. The `as any` is why the
+         // compiler never mentioned that the field does not exist on the declared type.
+         contactName: identity.name || email.from,
          contactEmail: email.from,
          companyName: "Unknown",
          category: 'CUSTOMER',

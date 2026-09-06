@@ -280,6 +280,191 @@ Test records created for these probes were deleted afterwards and their absence 
 
 ---
 
+## 1f. Remediation progress — P1.5 (landed 2026-09-06)
+
+### The duplicate was never a tidiness problem
+
+Seven handlers created contacts with `addDoc`, which asks Firestore for a fresh **random**
+document id. Posting the same person twice produced two documents and nothing anywhere noticed.
+`contacts_org_email_key_unique` is declared in the PostgreSQL schema and has never once been
+consulted on a live write, because this deployment stores contacts in Firestore.
+
+What makes that a safety defect rather than an untidiness one is how consent is read.
+`ActionGateway` decides whether a person may be emailed by loading **one** contact document by
+id and reading `suppressed`, `unsubscribed`, `hardBounced`, `complained` and `consentGiven` off
+it. With duplicates those flags live on whichever copy happened to receive the unsubscribe — so
+a person who unsubscribed through document A remained mailable through document B. §14 says
+unknown consent must never default to permission; duplicates turn a *known* refusal back into
+an unknown one.
+
+The document id is now the constraint. It is derived from the normalised address, so the same
+person is deterministically the same document, and the create is a transaction that **refuses**
+when the document already exists. Refusing rather than overwriting is the point: `setDoc`
+without the check would make every re-post reset the suppression flags, turning the create
+endpoint into a way to clear an unsubscribe.
+
+A hash rather than the address itself, for three reasons. A forward slash is legal in an email
+local part and illegal in a Firestore id; ids appear in logs and URLs, where an email address is
+personal data that does not belong; and a fixed-length id cannot exceed the 1500-byte limit
+whatever arrives. The id carries a scheme tag, so a future change to normalisation cannot
+silently orphan every existing document while appearing to work on new ones.
+
+### The mistakes here are not symmetric, and the design follows that
+
+Plus-addressing and dots are deliberately **not** folded. `alice+news@example.com` is the same
+mailbox as `alice@example.com` at Gmail and a different one at a provider that treats `+` as an
+ordinary character.
+
+Failing to merge two records for one person leaves a duplicate: visible, correctable, and
+caught by the merge operation. Merging two records for different people writes one person's
+conversation history, consent state and suppression flags onto another's, and the composer then
+drafts to the second person using the first person's transcript. That is unrecoverable and
+invisible. So a plus-tag is *reported* on the create response for a human to judge, and never
+acted on.
+
+### Merging combines two permission states, and there is a safe direction
+
+Deterministic ids stop new duplicates; they do nothing about those already in the store. The
+merge is the other half, and its rule is the §14 one applied to two records at once:
+
+- **Suppression unions.** A signal on either record lands on the survivor. A suppression is a
+  statement the person made about the world; a second record where they never said it is a fact
+  about our bookkeeping, not about their wishes.
+- **Consent does not union.** Affirmative consent survives only when *neither* record is
+  suppressed. Someone who opted in through a form and later unsubscribed has withdrawn, and a
+  merge must not resurrect the earlier opt-in because it sits on a different document.
+
+The asymmetry is the whole design: suppression is contagious across a merge and consent is not.
+The merged-away record is retained for the audit trail, marked `MERGED` with `supersededBy`, and
+left explicitly unmailable so a stray writer holding the old id does not find something sendable.
+
+A Firestore transaction cannot run a query, so referencing rows are enumerated first and
+re-read by reference inside the transaction, where each is confirmed to still point at the
+record being merged away. That closes the interesting half of the race. It cannot close the
+other half — a row *created* between the query and the commit — so the operation is **resumable**,
+and re-running reparents stragglers without recording the merge twice. Above 400 referencing
+rows it refuses outright: a merge that moved some of them would leave the rest pointing at a
+record marked `MERGED`, which is the dangling reference the operation exists to remove.
+
+### Three defects found while doing this
+
+**The resolver bypassed the normalisation it depends on.** The exact-match query compared
+`contacts.primary_email` with `eq` while uniqueness is enforced on `email_key`. The stored key
+was normalised and the lookup was not, so an inbound `Alice@Example.COM` did not match a stored
+`alice@example.com`, resolved to nothing, and the message was dropped by the caller's
+`if (!identity.contactId) return`. This is the exact defect the shared key was written to fix,
+still live on the read side.
+
+**The domain pattern was built from an untrusted header.** `ilike(primaryEmail, '%@' + domain)`
+where `domain` came from splitting the `From` header. `%` and `_` are LIKE wildcards, so a
+sender whose address ends `@%` produced the pattern `%@%` — matching the first contact in the
+tenant and handing the sender that contact's account. A hostname cannot contain either
+character, so the domain is now required to look like one. Domain matches also no longer set
+`contactId`: knowing a colleague is a contact does not tell us who this is.
+
+**The resolver's return value did not match its declared type.** It was cast `as any` and
+returned `isResolved`, `matchedLeadId`, `confidence` and `suggestedAction` — none of which exist
+on `ClientIdentityResolution`. The one consumer read `(identity as any).matchedLeadId` and used
+it as `contactName`, so the conversation-memory prompt has been receiving a **database key as
+the customer's name**. The cast is why the compiler never mentioned it.
+
+### Threading: the hack, and the attack it has to survive
+
+`InboundPipeline` contained `let conversationId = identity.contactId; // hack`, followed by an
+`if (!conversationId)` that the guard above makes unreachable. **No conversation row has ever
+been written**, and every message was stored with a contact id in a column whose foreign key
+points at `conversations`. Behaviourally the larger cost is that keying a conversation by *who
+someone is* makes every thread with that person one transcript — and that transcript is what the
+composer reads as context. `providerThreadId`, `inReplyTo` and `references` were captured into
+columns and never consulted.
+
+`In-Reply-To` and `References` are headers anybody can set. Choosing a conversation by matching
+them against stored Message-IDs would let an attacker who learns or guesses a Message-ID graft
+their email onto someone else's thread, and the composer would draft a reply using that
+thread's history — the §18 shape, arriving through routing rather than through prompt text.
+
+So a header match is a hint and the confirmation is the control: the referenced message must
+belong to a conversation with the same tenant **and** the same contact. When it does not, the
+answer is a new conversation. That costs a split thread, which is visible and repairable; the
+alternative costs a disclosed one, which is neither. Subject-line matching is not implemented
+and should not be. The provider's own thread id is tried first because Gmail computed it
+server-side from the whole message, and it is confirmed too.
+
+### The discovery buttons were fabricating contacts
+
+`POST /api/{leads,investors,partners}/batch-generate` wrote `"Generated Lead 1"` at
+`lead0@example.com` into the live contacts collection, with a random `aiScore` between 70 and 89
+so the result looked researched. The UI presents these as "Discover Leads". They now answer
+**501**: fabricated records are indistinguishable from real ones once written, and they entered
+through `addDoc`, reintroducing exactly the un-keyed duplicates this work makes unrepresentable.
+This is the first piece of P1.13; the rest of that item is untouched.
+
+### Evidence
+
+`npm test`: **417 tests across 16 files**, up from 377. The 40 new ones are invariants, and
+they were **mutation-tested**: eleven deliberate breakages — suppression no longer unioning,
+consent surviving a suppression, cross-tenant merge permitted, the thread candidate no longer
+confirmed against the contact or the tenant, unbounded reference parsing, case-sensitivity
+restored, an invented id for an unusable address, plus-address folding — were each introduced at
+source and **every one was caught**.
+
+The guardrail written for this failed its own mutation test first, and that is worth recording.
+`addDoc\(\s*collection\([^)]*'contacts'` cannot match the real call, because `[^)]*` stops at the
+first `)` of `orgPath(orgScope(req)` and never reaches the collection name. It reported "ok"
+against a file containing the exact call it forbids. It now matches brackets instead, and fires
+on the single-line, multi-line, double-quoted and deeply-nested forms while ignoring a commented
+example. Same lesson as the P1.12 line-by-line hole and the NUL check: a check that looks right
+is not a check that works.
+
+Runtime, over HTTP, against Firestore:
+
+| Probe | Result |
+|---|---|
+| `POST /api/leads` | `201` with a derived id `ct_c1_<32 hex>` |
+| the same address again | `409 CONTACT_EXISTS` naming the existing contact |
+| `  P15.Alice@P15-VERIFY-EXAMPLE.COM  ` | `409`, same id — case and whitespace collide |
+| `P15 Alice <P15.ALICE@...>` via `/api/investors` | `409`, same id — across endpoints |
+| a different address | `201`, different id |
+| no usable address | `400`, no invented id |
+| body carrying `consentGiven`/`organizationId` | `201`, both dropped |
+| merge of a consented record with an unsubscribed one | `200`; survivor `unsubscribed=true`, `consentGiven=false` |
+| the conversation pointing at the merged record | reparented onto the survivor |
+| the merged-away record | `supersededBy`, `status=MERGED`, `consentGiven=false` |
+| re-running the merge | `422 ALREADY_SUPERSEDED` |
+| re-running with `resume` after a straggler appeared | `200`, straggler reparented, source recorded once |
+| merge into self / missing target / no `duplicateId` | `422` / `404` / `400` |
+| the three `batch-generate` routes | `501 NOT_IMPLEMENTED` |
+
+Every record these probes created was deleted afterwards and the verification organisation
+confirmed empty.
+
+### What changed status
+
+**S29 and S15 remain PARTIAL, and it is worth being exact about why**, because a great deal of
+this section's content is now done.
+
+**S29** has a shared normalisation module used by every writer, a derived document id that makes
+a duplicate unrepresentable on the store that actually runs, account records that are created
+for the first time, and a transactional merge that reparents and writes `supersededBy`. What
+holds it at PARTIAL: the ~30 remaining `server.ts` handlers still use the Firebase **client**
+SDK, so the transaction runs under rules that are currently `allow read, write: if true`
+(P0.0) — a client that talks to Firestore directly can still create a contact at any id it
+likes, bypassing every check here. There is also no backfill: contacts written before today keep
+their random ids, and finding those duplicates is a job the merge endpoint enables but does not
+perform.
+
+**S15** now has real thread resolution with the confirmation rule, conversations that are
+actually created, and `Message-ID`/`References` parsed rather than merely stored. What holds it
+at PARTIAL: outbound `In-Reply-To` still carries a Gmail internal id rather than the RFC
+Message-ID, we do not generate or record our own Message-ID on outbound mail, and the MIME
+handling S16 describes — charset, transfer-encoding, RFC 2047 — remains untouched, so the
+`textBody` this threading operates on is still whatever the naive parser produced.
+
+**No status moves.** Both sections were already PARTIAL and neither has reached the point where
+the datastore itself enforces what the application now checks.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -384,7 +569,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S12 | Error envelope (stable codes, requestId, no raw leakage) | PARTIAL | CRITICAL | `server.ts:109` (×32); `actionGateway.ts:97`; `server/middleware/auth.ts:47` | 32 handlers return raw `e.message` at 500; 11 of 15 required codes absent; no requestId; no error middleware; send-safety decided by substring-matching error text |
 | S13 | Provider capability model | PARTIAL | CRITICAL | `actionGateway.ts:258-265`; `server.ts:502-531`; `gmailWorkspaceService.ts:23-28` | No scopes stored anywhere; Gmail-connected is treated as Calendar-connected; the real token/expiry/account are discarded and `'mock_token'` written instead |
 | S14 | UNKNOWN != PERMITTED (consent / jurisdiction defaults) | PARTIAL | CRITICAL | `actionGateway.ts:170-171`, `:177`, `:185`; `outreachPolicy.ts:20` | Unknown country → `'US'`, unknown consent → `true`; both block rules neutered by hardcoded `isB2B: true`; the only fail-closed policy file is dead |
-| S15 | Email threading, identity normalization, duplicate prevention | PARTIAL | HIGH | `inboundPipeline.ts:35`; `gmail.service.ts:106-119`; `db/schema.ts:104` | `providerThreadId` is written and never queried; `Message-ID` never parsed; outbound `In-Reply-To` carries a Gmail internal id; dedupe is a racy SELECT with no unique index |
+| S15 | Email threading, identity normalization, duplicate prevention | PARTIAL | HIGH | `inboundPipeline.ts:35`; `gmail.service.ts:106-119`; `db/schema.ts:104` | `providerThreadId` is written and never queried; `Message-ID` never parsed; outbound `In-Reply-To` carries a Gmail internal id; dedupe is a racy SELECT with no unique index. *Superseded by §1f: thread resolution, conversation creation and Message-ID parsing landed 2026-09-06; held at PARTIAL by outbound Message-ID handling and the MIME parser.* |
 | S16 | MIME parsing, encodings, what reaches the model | PARTIAL | HIGH | `gmail.service.ts:80-104`, `:136-143`; `inboundPipeline.ts:65` | Hardcoded utf8 decode ignores charset; no quoted-printable, no RFC 2047, no multipart/report; `sanitizedHtmlBody` stores raw HTML; outbound headers built by unescaped interpolation |
 | S17 | Attachment handling (limits, allowlist, sniffing, scanning, retention) | NOT_STARTED | HIGH | `gmail.service.ts:84-94`, `:110`; `server.ts:58` | Attachments silently dropped by the MIME walk while the raw payload is retained; no size cap, allowlist, sniffing, scanning, storage or retention exists |
 | S18 | Indirect prompt injection via untrusted email | PARTIAL | CRITICAL | `aiSecurity.service.ts:3-15`; `geminiClient.ts:125`; `multiAgentReplySystem.ts:299-303`, `:445`; `firestore.rules:5` | **Both sanitizers are unreachable** — §6.3 concedes the text-channel exploit "is not executable on the live path" — so no defence exists on any live path; no authority separation; raw transcripts interpolated into prompts; the auditor is stubbed to PASS. The reachable injection channel is a **write** channel: the world-writable prompt corpus and outbox |
@@ -399,7 +584,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 
 | S27 | Deliverability: sender identity health and fabricated metrics | NOT_STARTED | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
 | S28 | Bounce, DSN and automated-mail classification before replying | NOT_STARTED | CRITICAL | `inboundPipeline.ts:112`; `models.ts:814-834`; `salesDecisionEngine.ts:133-134`; `schema.ts:122` | Zero classification of bounce/DSN/OOO/auto-reply; the one intent gate compares against strings the engine never returns; the address blacklist is unreachable; nothing writes `automationClassification` |
-| S29 | Contact/account dedup, normalization and merge | PARTIAL | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all** |
+| S29 | Contact/account dedup, normalization and merge | PARTIAL | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all**. *Superseded by §1f: derived ids, account creation and a transactional merge landed 2026-09-06; held at PARTIAL by the open Firestore rules and the absence of a backfill.* |
 | S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | PARTIAL | HIGH | `actionGateway.ts:238-241`; `multiAgentReplySystem.ts:520-523`; `ScheduleMeetingModal.tsx:30-33,76`; `schema.ts` (72 `timestamp` cols) | Business hours gated on raw `getUTCHours()`; "BST" emitted as free text; meeting instants built with server-local `setHours`; all timestamp columns are `without time zone`; no injectable clock |
 | S31 | Calendar conflict invariant: busy → zero create requests | PARTIAL | CRITICAL | `outbox.worker.ts:78`, `:95` (the only `dispatchAction` call site, hardcoding `EMAIL_SEND`); `actionGateway.ts:247-252`, `:282`, `:287`, `:300`; `server.ts:672` | **There is no partial implementation.** `executeCalendarCreate` is unreachable — `dispatchAction` has exactly one call site repo-wide and it always passes `ActionType.EMAIL_SEND`. The live booking path (`server.ts:672`) is a bare `addDoc` with no provider call and no conflict logic |
 | S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `actionGateway.ts:97`, `:102-103`, `:222`; `outbox.service.ts:52,73` | Reconciliation is a comment; detection is case-sensitive substring matching that misses `504 Gateway Timeout`; AMBIGUOUS is a free-text value in a terminal FAILED row |
