@@ -1,3 +1,4 @@
+import { readUsage, reportModelCall } from './lib/modelCallLog';
 import { GoogleGenAI } from "@google/genai";
 
 let aiInstance: GoogleGenAI | null = null;
@@ -153,8 +154,15 @@ export async function safeGenerateJSON<T = any>(options: {
 
   const agent = options.agentName ?? 'unnamed-agent';
   const failures: string[] = [];
+  // §21 — which model answered is the difference between a reproducible reply and an anecdote.
+  // Failover across five ids with different prices and capabilities was previously invisible:
+  // the caller got an identical `T` whichever one responded, and nothing wrote the id down.
+  const category = options.category || 'SMART';
+  const startedAt = Date.now();
+  let attempts = 0;
 
   for (const model of candidateModels) {
+    attempts++;
     try {
       const response = await ai.models.generateContent({
         model,
@@ -170,6 +178,18 @@ export async function safeGenerateJSON<T = any>(options: {
       const rawText = response.text || "";
       if (rawText.trim()) {
         const parsed = extractCleanJSON<T>(rawText);
+        reportModelCall({
+          agentName: agent,
+          category,
+          model,
+          outcome: 'ANSWERED',
+          attempts,
+          // Not defaulted to zero: a provider that reports no usage has told us nothing, and
+          // "this call cost nothing" is a stronger claim than we can make (§14).
+          ...readUsage((response as any)?.usageMetadata),
+          durationMs: Date.now() - startedAt,
+          failures: [...failures],
+        });
         return parsed;
       }
       failures.push(`${model}: empty response`);
@@ -189,6 +209,21 @@ export async function safeGenerateJSON<T = any>(options: {
     `[geminiClient] All ${candidateModels.length} candidate models failed for ${agent}; ` +
       `returning fallbackData. This is NOT a generated answer. Attempts: ${failures.join(' | ')}`
   );
+
+  // Recorded as well as logged. A run log that contains only successes reports a system that
+  // never fails, and `model: null` is the honest value here — no model produced this answer.
+  reportModelCall({
+    agentName: agent,
+    category,
+    model: null,
+    outcome: 'FALLBACK',
+    attempts,
+    promptTokens: null,
+    outputTokens: null,
+    totalTokens: null,
+    durationMs: Date.now() - startedAt,
+    failures: [...failures],
+  });
 
   return options.fallbackData;
 }

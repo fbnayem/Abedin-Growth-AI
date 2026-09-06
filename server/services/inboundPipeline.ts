@@ -1,5 +1,6 @@
 import { CanaryRolloutService } from './canary.service';
 import { BudgetTracker } from '../policies/workflowBudgets';
+import { withModelCallCollector, type ModelCallRecord } from '../lib/modelCallLog';
 import { MetricsService } from './metrics.service';
 import { LedgerService } from './ledgers.service';
 import { BuyingStage, suppressesReply } from "../../shared/domain/models";
@@ -27,6 +28,31 @@ import { recordFacts, listActiveFacts } from '../lib/factStore';
 import { observationsFromMemory } from '../domain/memoryFacts';
 
 type AuditDecision = 'PASS' | 'BLOCK' | 'HUMAN_REVIEW_REQUIRED';
+
+/**
+ * What processing one inbound message actually did.
+ *
+ * `ok: true` means the pipeline reached a decision it stands behind — including deciding NOT to
+ * reply. `ok: false` means it did not finish, and the message has not been dealt with.
+ *
+ * The distinction is the point. Before this, `processNewEmail` returned `void`, so "suppressed
+ * because the customer asked to unsubscribe" and "threw a TypeError on line 400" were the same
+ * value, and every layer above reported success for both.
+ */
+export type InboundOutcome =
+  | {
+      ok: true;
+      disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED';
+      detail: string;
+      modelCalls: ModelCallRecord[];
+    }
+  | {
+      ok: false;
+      /** Where it stopped, so a failure is triageable without reading a stack trace. */
+      stage: 'TENANT' | 'IDENTITY' | 'BUDGET' | 'UNHANDLED';
+      detail: string;
+      modelCalls?: ModelCallRecord[];
+    };
 
 /**
  * P0.11 — Placeholder for the independent audit, returning a SAFE decision rather than a
@@ -183,7 +209,47 @@ export class InboundPipeline {
     return newConversationId;
   }
 
-  async processNewEmail(email: GmailMessage, organizationId: string) {
+  /**
+   * Process one inbound message, and SAY WHAT HAPPENED.
+   *
+   * This returned `void` and ended in `catch (e) { console.error(...); }`. Every failure on the
+   * path — the throwing Drizzle proxy, a TypeError in the composer, a BUDGET_EXCEEDED throw —
+   * terminated it identically and silently: the caller awaited a promise that resolved
+   * normally, the webhook's `.catch` never fired, and Google was answered 200 OK. **A dropped
+   * customer email was reported as success at every layer above.**
+   *
+   * A void return cannot distinguish "suppressed on purpose" from "threw on line 400", so the
+   * outcome is now a value. The method still does not throw — an inbound webhook that 500s
+   * invites a redelivery storm — but the failure is in the return type where a caller must look
+   * at it (§2, §14).
+   */
+  async processNewEmail(email: GmailMessage, organizationId: string): Promise<InboundOutcome> {
+    const budgetTracker = new BudgetTracker();
+    const modelCalls: ModelCallRecord[] = [];
+
+    return withModelCallCollector(
+      {
+        record: (call) => {
+          modelCalls.push(call);
+          // From the provider, not a literal. `null` stays null all the way into the tracker:
+          // an unmeasured call is unmeasured, not free.
+          //
+          // This CAN throw BUDGET_EXCEEDED, deliberately: a ceiling that only reports after
+          // the work is finished is not a ceiling. The throw surfaces inside the pipeline and
+          // is caught below as a failure outcome, which is where it belongs.
+          budgetTracker.recordModelCall(call.totalTokens);
+        },
+      },
+      () => this.runPipeline(email, organizationId, budgetTracker, modelCalls)
+    );
+  }
+
+  private async runPipeline(
+    email: GmailMessage,
+    organizationId: string,
+    budgetTracker: BudgetTracker,
+    modelCalls: ModelCallRecord[]
+  ): Promise<InboundOutcome> {
     try {
       // P1.1 — This argument was accepted and then dropped: nothing downstream used it, so
       // every inbound message was processed, stored and replied to under one implied tenant.
@@ -195,7 +261,7 @@ export class InboundPipeline {
           '[InboundPipeline] Refusing to process a message with no valid organisation id. ' +
             'An unattributable message is not processed under a default tenant.'
         );
-        return;
+        return { ok: false, stage: 'TENANT', detail: 'No valid organisation id on the message.' };
       }
 
       const startTime = Date.now();
@@ -210,7 +276,7 @@ export class InboundPipeline {
       if (!identity.contactId) {
         console.log("Could not resolve contact. Dropping message or creating lead.");
         // In real system, create new lead or route to unknown queue
-        return;
+        return { ok: false, stage: 'IDENTITY', detail: 'Could not resolve the sender to a contact.' };
       }
 
       // 2. Which conversation does this message belong to?
@@ -365,10 +431,19 @@ export class InboundPipeline {
       // not recognise, because sending is the permission (§14).
       if (suppressesReply(nbaResult.action)) {
          console.log(`[InboundPipeline] Suppressed: action=${nbaResult.action} — ${nbaResult.reason}`);
-         return;
+         return { ok: true, disposition: 'SUPPRESSED', detail: `${nbaResult.action}: ${nbaResult.reason}`, modelCalls };
       }
 
-      budgetTracker.recordModelCall(500, 0.01); // Mock cost
+      // The line that stood here was:
+      //
+      //     budgetTracker.recordModelCall(500, 0.01); // Mock cost
+      //
+      // A constant token count and a constant cost, recorded BEFORE the call, charged even when
+      // the call failed or returned fallbackData — while the two real model calls on this path
+      // were never recorded at all. Three calls at a fabricated 500 tokens cannot reach an
+      // 8000-token ceiling, so no amount of real spending could trip the budget. Usage is now
+      // reported by the client that makes the call, through the collector opened around this
+      // whole method, and calls the provider says nothing about count as UNMEASURED, not zero.
 
       // P1.6/P1.8 — facts recorded earlier in THIS pipeline are now read back and given to
       // the planner. Until now nothing called `listActiveFacts`: facts were written on every
@@ -439,7 +514,7 @@ export class InboundPipeline {
           `[InboundPipeline] Planner suppressed the reply: ${draft.replyPlan.nextBestAction} — ` +
             draft.replyPlan.reason
         );
-        return;
+        return { ok: true, disposition: 'SUPPRESSED', detail: `${draft.replyPlan.nextBestAction}: ${draft.replyPlan.reason}`, modelCalls };
       }
 
       // 8. Independent Audit
@@ -465,7 +540,7 @@ export class InboundPipeline {
 
       if (auditDecision === 'BLOCK') {
          console.error("Draft blocked by auditor:", auditReason);
-         return;
+         return { ok: true, disposition: 'BLOCKED', detail: auditReason, modelCalls };
       }
 
       // 9. Transactional Outbox Insert
@@ -519,8 +594,41 @@ export class InboundPipeline {
       console.log(`--- Pipeline Completed. Outbox job created: ${outboxStatus} ---`);
       MetricsService.getInstance().recordLatency("INBOUND_PROCESSING", Date.now() - startTime);
 
+      // What the budget actually saw, rather than the fabricated constant it used to be fed.
+      // `tokensArePartial` is reported because a total assembled from calls the provider said
+      // nothing about is a lower bound, and printing it bare would read as the whole spend.
+      const spend = budgetTracker.snapshot();
+      console.log(
+        `[InboundPipeline] ${spend.modelCalls} model call(s), ` +
+          `${spend.tokens} reported token(s)${spend.tokensArePartial ? ' (PARTIAL — ' + spend.unmeasuredCalls + ' call(s) unmeasured)' : ''}, ` +
+          `${spend.elapsedMs}ms. Models: ${modelCalls.map((c) => c.model ?? 'NONE(fallback)').join(', ') || 'none'}`
+      );
+
+      return { ok: true, disposition: 'QUEUED', detail: `outbox=${outboxStatus}`, modelCalls };
+
     } catch (e) {
-      console.error("Error in inbound pipeline:", e);
+      // This was `console.error(...)` and nothing else — no rethrow, no durable record, no
+      // marking for retry or human attention. Every defect on this path terminated here
+      // identically and silently, the caller's promise resolved normally, and the webhook
+      // returned 200 OK to Google. An inbound customer email was dropped while every layer
+      // above it reported success.
+      //
+      // Still not rethrown: a webhook that 500s invites a redelivery storm, and the retry
+      // decision belongs to the caller. But the failure is now IN THE RETURN VALUE, where a
+      // caller has to look at it to ignore it.
+      const message = e instanceof Error ? e.message : String(e);
+      const budgetHit = message.startsWith('BUDGET_EXCEEDED');
+      console.error(
+        `[InboundPipeline] FAILED for message ${email?.id ?? 'unknown'} in organisation ` +
+          `${organizationId}: ${message}`,
+        e
+      );
+      return {
+        ok: false,
+        stage: budgetHit ? 'BUDGET' : 'UNHANDLED',
+        detail: message,
+        modelCalls,
+      };
     }
   }
 }

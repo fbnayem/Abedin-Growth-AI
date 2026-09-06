@@ -474,10 +474,27 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/logs", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'ai_logs')), orderBy('timestamp', 'desc'), limit(50)));
+      // This ordered by `timestamp`. The only AIRunLog shape in the repository uses
+      // `createdAt` and has no `timestamp` field at all — and Firestore EXCLUDES documents
+      // that lack the ordered field, so this route would have returned [] even after a writer
+      // was added, silently, with HTTP 200. An empty observability surface reading as "no
+      // problems" is the §14 failure applied to logs.
+      //
+      // Nothing writes this collection yet (there is no run-log writer), so it returns []
+      // today for a second, honest reason. `writerExists` says which of the two it is instead
+      // of leaving the caller to guess from an empty array.
+      const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'ai_run_logs')), orderBy('createdAt', 'desc'), limit(50)));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
-      res.json(items);
+      res.json({
+        items,
+        writerExists: false,
+        note:
+          items.length === 0
+            ? 'No run logs exist: nothing in this deployment writes ai_run_logs yet. An empty ' +
+              'list here is an absent writer, not a quiet system.'
+            : null,
+      });
     } catch(e: any) { sendCaught(req, res, e); }
   });
 

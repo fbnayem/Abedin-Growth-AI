@@ -234,8 +234,11 @@ export function App() {
         setConversations(freshInbox);
       }
       if (logsRes.ok && isJson(logsRes)) {
+        // /api/logs returns { items, writerExists, note }. It was a bare array, and it ordered
+        // by a field the log shape does not have, so it could only ever return []. The wrapper
+        // exists so an empty list can say WHY it is empty rather than reading as a quiet system.
         const freshLogs = await logsRes.json();
-        setAiLogs(freshLogs);
+        setAiLogs(Array.isArray(freshLogs) ? freshLogs : (freshLogs?.items ?? []));
       }
     } catch (e) {
       if (e instanceof TypeError && e.message === 'Failed to fetch') {
@@ -335,7 +338,10 @@ export function App() {
           const s = await setRes.json();
 
         }
-        if (logsRes.ok && isJson(logsRes)) setAiLogs(await logsRes.json());
+        if (logsRes.ok && isJson(logsRes)) {
+          const payload = await logsRes.json();
+          setAiLogs(Array.isArray(payload) ? payload : (payload?.items ?? []));
+        }
         if (autoRes.ok && isJson(autoRes)) setAutopilotStatus(await autoRes.json());
       } catch (e) {
         if (e instanceof TypeError && e.message === 'Failed to fetch') {

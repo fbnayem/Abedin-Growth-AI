@@ -41,8 +41,32 @@ export class GmailHistorySyncService {
              const fullMessage = await gmailService.getMessage(messageId);
              if (fullMessage) {
                console.log("Fetched full message", fullMessage.id);
-               // Pass to unified inbound pipeline
-               await inboundPipeline.processNewEmail(fullMessage, gmailAuth.organizationId);
+               // Pass to unified inbound pipeline.
+               //
+               // The result is READ. It used to return `void`, so this await could not tell a
+               // deliberate suppression from a TypeError thrown on line 400 — both resolved
+               // normally and the sync continued as though the message had been handled.
+               const outcome = await inboundPipeline.processNewEmail(
+                 fullMessage,
+                 gmailAuth.organizationId
+               );
+               // `outcome.ok === false` rather than `!outcome.ok`: without `strict`, TypeScript
+               // does not narrow a discriminated union through the negative arm of a truthiness
+               // test, and the `as any` that would silence it is the habit this branch is
+               // removing everywhere else.
+               if (outcome.ok === false) {
+                 // Not rethrown: one unprocessable message must not abandon the rest of the
+                 // history page. But it is named, with the stage it stopped at, so a run that
+                 // dropped messages does not look identical to one that did not.
+                 console.error(
+                   `[GmailHistorySync] message ${fullMessage.id} was NOT processed ` +
+                     `(${outcome.stage}): ${outcome.detail}`
+                 );
+               } else {
+                 console.log(
+                   `[GmailHistorySync] message ${fullMessage.id}: ${outcome.disposition} — ${outcome.detail}`
+                 );
+               }
              }
            }
          }

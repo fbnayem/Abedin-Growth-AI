@@ -1641,6 +1641,106 @@ arguments that carry the meaning.
 
 ---
 
+## 1o. Four places the system reported health it never measured (landed 2026-09-07)
+
+The last group from the investigation. Each of these made the system look observed.
+
+### A dropped customer email was reported as success at every layer
+
+`processNewEmail` returned `void` and ended in `catch (e) { console.error(...); }` — no
+rethrow, no durable record, nothing marked for retry or human attention. Every defect on the
+path terminated it identically: the caller in `gmailHistorySync` awaited a promise that
+resolved normally, the webhook's `.catch` never fired, and Google was answered **200 OK**.
+
+A `void` return cannot distinguish "suppressed because the customer asked to unsubscribe" from
+"threw a TypeError on line 400". The outcome is now a value — `{ ok: true, disposition }` or
+`{ ok: false, stage }` — and every early exit returns one, so a bare `return;` no longer
+exists in the method. It still does not throw, because a webhook that 500s invites a redelivery
+storm and the retry decision belongs to the caller; but the failure is **in the return type,
+where a caller has to look at it in order to ignore it**. `gmailHistorySync` now reads it and
+names the stage rather than continuing as though the message had been handled.
+
+### The budget was counting a literal
+
+    budgetTracker.recordModelCall(500, 0.01); // Mock cost
+
+A constant token count and a constant cost, recorded on the line **before** the call, so it was
+charged when the call failed, when it failed over to another model, and when `safeGenerateJSON`
+returned `fallbackData` instead of an answer. The two real model calls on that path were never
+recorded at all.
+
+So the ceilings were evaluating a fiction: three calls at a made-up 500 tokens cannot reach 8000,
+which means **no amount of real spending could ever trip this budget** — while the number it
+reported was invented. That is worse than having no budget, because an absent control is visibly
+absent.
+
+Usage now comes from the provider, reported by the client that makes the call. Where the
+provider reports nothing, the call is counted as **UNMEASURED rather than zero** — "this call
+cost nothing" is a stronger claim than we can make, and it is the same fabrication as the
+made-up 500 pointing the other way (§14). `tokensArePartial` says so, so a total assembled
+from partial data cannot be read as complete.
+
+**Cost is not enforced, and now says so at runtime.** Converting tokens to pounds needs a
+per-model price table for the five models this client fails over between, and no authoritative
+figures for them exist in this repository. Writing one would invent exactly what the £0.01 had
+already invented. `maxCostPerReply` stays in the config and `costEnforcement` states plainly
+that nothing enforces it, rather than a cost meter that silently reads zero forever (§2).
+`maxModelCallsPerReply` is the ceiling that binds today, and it binds on a real count.
+
+### Nothing recorded which model answered
+
+`geminiClient` fails over across five model ids with different capabilities and different
+prices, and the caller received an identical `T` in every case. Cost could not be attributed
+even in principle, and a reply that went wrong could not be reproduced — §21 reproducibility
+needs the model id, which is what the unused `model` column in the schema was for.
+
+Every call now reports the model that actually answered, the number of candidates tried, the
+provider's token counts, and one line per failed candidate. A total failover records
+**`model: null`**: `fallbackData` is a failure that happens to type-check, and naming a model
+would attribute an answer to one that never produced it.
+
+The collector is scoped with `AsyncLocalStorage` rather than threaded through a dozen
+signatures or held in a module-level array. Threading it would be forgotten at the thirteenth
+call site; a module-level array would let two inbound emails **spend each other's budget**. The
+storage scopes it to one logical request, which is the boundary a per-reply budget is defined
+over.
+
+### The log endpoint could not have returned a log
+
+`/api/logs` read `ai_logs` ordered by `timestamp`. The only `AIRunLog` shape in the
+repository uses `createdAt` and has no `timestamp` field — and **Firestore excludes documents
+that lack the ordered field**, so this route would have returned `[]` even after a writer was
+added, silently, with HTTP 200. An observability surface that looks healthy while showing
+nothing is §14 applied to logs.
+
+It now reads `ai_run_logs` ordered by `createdAt`, and an empty result states which of the two
+reasons it is empty for, rather than leaving a caller to infer "no problems" from an empty
+array. **There is still no writer** — that is named in the response body, not hidden by it.
+
+### Evidence
+
+`npm test`: **765 tests across 28 files**, up from 737 across 27. `tsc` exit 0, build clean,
+10 guardrails green. **Mutation-tested 22/22.**
+
+One survivor on the first run was the important one: changing the fallback record's
+`model: null` to `model: primaryModel` **survived**, because the test asserted a hand-built
+record rather than what the client actually reports — the same shape of mistake as the
+`quoteLookupFailed` substring check in section 1m. It is now exercised through the real client:
+with no API key the SDK rejects before any network call, so the genuine failover path runs in
+about half a second. Measured: two agents, four candidates each, `model=null`,
+`outcome=FALLBACK`, `tokens=null`, budget reporting 2 calls and 0 reported tokens marked
+PARTIAL with cost enforcement declared absent.
+
+### Still open from the investigation
+
+- **No run-log writer.** The endpoint, the shape and the per-call record now exist and agree;
+  nothing writes a row. This is the remaining half of the §21 run-log requirement and the
+  reason `writerExists: false` is in the response.
+- **The ledger tables have no writers either** (recorded in section 1l): a schema and a read
+  path with no data path at either end.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
