@@ -33,7 +33,13 @@ import {
  * the path itself carries the tenant, which is the same reason orgPath exists.
  */
 
-/** A conversation's fact history is bounded; beyond this the oldest are not loaded. */
+/**
+ * The cap on facts loaded for one conversation.
+ *
+ * NOT "the oldest are not loaded" — that was the old docstring and it was false. The window is
+ * unordered, so which facts fall outside it is arbitrary. `listFactPage` reports when the cap
+ * was exceeded so a caller can tell a complete history from a partial one.
+ */
 export const MAX_FACTS_PER_CONVERSATION = 500;
 
 function factsPath(orgId: string, conversationId: string): string {
@@ -65,7 +71,8 @@ export type FactWriteOutcome =
   | { ok: true; action: 'CREATE' | 'SUPERSEDE' | 'CONFIRM'; factId: string }
   | { ok: false; code: FactRejection['code']; message: string }
   | { ok: false; code: 'STORE_UNAVAILABLE'; message: string }
-  | { ok: false; code: 'CONFLICT'; message: string };
+  | { ok: false; code: 'CONFLICT'; message: string }
+  | { ok: false; code: 'HISTORY_TRUNCATED'; message: string };
 
 /**
  * Read every fact for a conversation, history included.
@@ -75,13 +82,73 @@ export type FactWriteOutcome =
  * defining mistake was treating the current value as the only thing worth keeping.
  */
 export async function listFacts(orgId: string, conversationId: string): Promise<StoredFact[]> {
-  if (!firestore) return [];
+  return (await listFactPage(orgId, conversationId)).facts;
+}
+
+/**
+ * Was the loaded set cut short?
+ *
+ * Separated from the query so the decision is testable without Firestore. Mutating the inlined
+ * form to `const truncated = false` made the refusal in `recordFact` unreachable and survived
+ * the whole suite — the tests asserted the fetch limit and the branch, but nothing asserted the
+ * value that reaches the branch.
+ */
+export function exceededCap(loadedCount: number): boolean {
+  return loadedCount > MAX_FACTS_PER_CONVERSATION;
+}
+
+/**
+ * A conversation's facts, and whether that is ALL of them.
+ *
+ * WHY THE TRUNCATION FLAG EXISTS
+ * ------------------------------
+ * The query was `fsQuery(collection(...), fsLimit(MAX_FACTS_PER_CONVERSATION))` with no
+ * ordering, so the 500-document window was sliced by Firestore's implicit `__name__` order.
+ * Document ids here are `ft_` + a sha256 prefix — uncorrelated with time, with the key, with
+ * anything. The docstring on MAX_FACTS_PER_CONVERSATION said "beyond this the oldest are not
+ * loaded"; which 500 survived was determined by a hash.
+ *
+ * That is not merely a stale read, because `recordFact` finds the fact to supersede from
+ * exactly this list. If the currently-active fact for a key fell outside the window, `current`
+ * was null, `planFactWrite` returned CREATE, and a SECOND ACTIVE DOCUMENT was written for the
+ * same key — the first never given `validUntil`, never given `supersededBy`. Both would then
+ * render into the same prompt as simultaneously in force, and the §20 supersession chain would
+ * be broken with nothing reported to anyone.
+ *
+ * The fix is not a bigger limit; any limit has this edge. It is that a caller must be able to
+ * tell a complete history from a partial one, so "I found no active fact for this key" can be
+ * distinguished from "I did not look at all of them" (§14).
+ *
+ * NO `orderBy` IS ADDED, DELIBERATELY. Firestore EXCLUDES documents that lack the ordered
+ * field, so ordering by `validFrom` would silently drop any legacy document written without it
+ * — reintroducing this same class of defect through the fix for it. The truncation flag is the
+ * property that makes the window safe; the ordering only decides which arbitrary subset is
+ * loaded, and the caller is now told when the subset is arbitrary.
+ */
+export async function listFactPage(
+  orgId: string,
+  conversationId: string
+): Promise<{ facts: StoredFact[]; truncated: boolean }> {
+  if (!firestore) return { facts: [], truncated: false };
+  // One more than the cap, so exceeding it is observable rather than inferred from a count
+  // that happens to equal the limit.
   const snap = await getDocs(
-    fsQuery(collection(firestore, factsPath(orgId, conversationId)), fsLimit(MAX_FACTS_PER_CONVERSATION))
+    fsQuery(
+      collection(firestore, factsPath(orgId, conversationId)),
+      fsLimit(MAX_FACTS_PER_CONVERSATION + 1)
+    )
   );
   const facts: StoredFact[] = [];
   snap.forEach((d: any) => facts.push({ ...(d.data() as StoredFact), id: d.id }));
-  return facts;
+
+  const truncated = exceededCap(facts.length);
+  if (truncated) {
+    console.warn(
+      `[factStore] Conversation ${conversationId} has more than ${MAX_FACTS_PER_CONVERSATION} ` +
+        'facts. The loaded set is a partial, unordered window: treat "not found" as unknown.'
+    );
+  }
+  return { facts: truncated ? facts.slice(0, MAX_FACTS_PER_CONVERSATION) : facts, truncated };
 }
 
 /** The facts currently in force for a conversation. */
@@ -107,11 +174,29 @@ export async function recordFact(
     return { ok: false, code: 'STORE_UNAVAILABLE', message: 'Datastore unavailable.' };
   }
 
-  const existing = await listFacts(orgId, conversationId);
+  const { facts: existing, truncated } = await listFactPage(orgId, conversationId);
   const current =
     activeFacts(existing).find((f) => f.key === observation.key?.trim?.()) ??
     activeFacts(existing).find((f) => f.key === observation.key) ??
     null;
+
+  // The dangerous conclusion is CREATE-because-nothing-was-found, drawn from a window we know
+  // is incomplete: that writes a second active document for a key that already has one, with
+  // the first never superseded. Absence of evidence is not evidence of absence when the
+  // evidence is known to be partial (§14).
+  //
+  // Scoped to exactly that case. If a current fact WAS found, superseding it is correct
+  // whether or not the window was complete, so a long conversation keeps working.
+  if (current === null && truncated) {
+    return {
+      ok: false,
+      code: 'HISTORY_TRUNCATED',
+      message:
+        `Conversation ${conversationId} holds more than ${MAX_FACTS_PER_CONVERSATION} facts, so ` +
+        `no active fact for '${String(observation.key)}' could be ruled out. Refusing to create ` +
+        'a second active fact for a key that may already have one.',
+    };
+  }
 
   const newId = factId(conversationId, String(observation.key), observation.sourceMessageId, String(observation.value));
 

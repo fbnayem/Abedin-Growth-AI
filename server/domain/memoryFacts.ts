@@ -60,7 +60,15 @@ const LIST_FIELDS: { field: string; key: string }[] = [
 export function observationsFromMemory(
   memory: unknown,
   sourceMessageId: string,
-  options: { observedAt?: string } = {}
+  options: {
+    observedAt?: string;
+    /**
+     * Called for material that was deliberately NOT turned into a fact. Optional, but a caller
+     * that ignores it is choosing silence: the return value alone cannot distinguish "the model
+     * extracted nothing" from "the model extracted something contradictory and we dropped it".
+     */
+    onRejected?: (rejection: { key: string; rawKeys: string[]; reason: string }) => void;
+  } = {}
 ): FactObservation[] {
   if (memory === null || typeof memory !== 'object') return [];
 
@@ -95,11 +103,46 @@ export function observationsFromMemory(
   // supersedes independently — a changed renewal date does not disturb a stored headcount.
   const extracted = source.keyFactsExtracted;
   if (extracted !== null && typeof extracted === 'object' && !Array.isArray(extracted)) {
+    // COLLISIONS ARE RESOLVED BEFORE ANYTHING IS RECORDED.
+    //
+    // The normalisation below is deliberately lossy — it has to be, to turn a model's free-form
+    // key into a stable identifier. But "Head count", "Head-count" and "head.count" all become
+    // `head_count`, and `recordFacts` processes a batch SEQUENTIALLY and deliberately, so that
+    // two observations of the same key supersede in order. Together those two correct decisions
+    // produce a wrong result: one message could record a fact and then immediately supersede
+    // it, writing a `validUntil` and a supersession pointer, with both observations carrying
+    // the SAME sourceMessageId. The history would then read as the customer changing their
+    // position mid-message — the exact distortion the supersession design exists to prevent.
+    //
+    // When two raw keys collapse and DISAGREE, we do not know which the customer meant, and
+    // both recording one and inventing a supersession between them are fabrications. The group
+    // is dropped and reported. Identical values are a harmless duplicate and collapse to one.
+    const grouped = new Map<string, { rawKey: string; value: string }[]>();
     for (const [rawKey, rawValue] of Object.entries(extracted as Record<string, unknown>)) {
       if (typeof rawValue !== 'string') continue;
       const key = rawKey.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
       if (key.length === 0) continue;
-      add(`extracted.${key}`, rawValue.trim());
+      const value = rawValue.trim();
+      if (value.length === 0) continue;
+      const existing = grouped.get(key);
+      if (existing) existing.push({ rawKey, value });
+      else grouped.set(key, [{ rawKey, value }]);
+    }
+
+    for (const [key, entries] of grouped) {
+      const distinct = new Set(entries.map((e) => e.value));
+      if (distinct.size > 1) {
+        options.onRejected?.({
+          key: `extracted.${key}`,
+          rawKeys: entries.map((e) => e.rawKey),
+          reason:
+            `${entries.length} extracted keys normalise to '${key}' with ${distinct.size} ` +
+            'different values in a single message. Recording them would write a supersession ' +
+            'between two readings of the same message, so none is recorded.',
+        });
+        continue;
+      }
+      add(`extracted.${key}`, entries[0].value);
     }
   }
 

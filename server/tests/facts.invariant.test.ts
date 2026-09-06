@@ -244,8 +244,11 @@ describe('P1.6 — the ConversationMemory crash, and what replaces it', () => {
       .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
     expect(pipeline).not.toContain('(memory as any).facts');
     expect(pipeline).not.toContain('.delete(conversationFacts)');
-    // And the replacement is actually wired, not merely absent.
-    expect(pipeline).toContain('observationsFromMemory(memory, messageId)');
+    // And the replacement is actually wired, not merely absent. Matched loosely on the two
+    // arguments that carry the meaning — the memory and the message it came from — rather than
+    // on the exact call text, which broke when a third (options) argument was added and said
+    // nothing about whether the wiring was still correct.
+    expect(pipeline).toMatch(/observationsFromMemory\(memory,\s*messageId\b/);
     expect(pipeline).toContain('recordFacts(organizationId, conversationId, observations)');
   });
 

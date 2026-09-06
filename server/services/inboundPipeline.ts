@@ -303,7 +303,17 @@ export class InboundPipeline {
       // That label is load-bearing: these facts re-enter later prompts, and without a tier a
       // model’s summary of a stranger’s email would rank alongside something an operator
       // entered, which is how one injected sentence becomes a durable instruction (§18).
-      const observations = observationsFromMemory(memory, messageId);
+      //
+      // `onRejected` is passed rather than omitted: the returned array alone cannot tell "the
+      // model extracted nothing" from "the model extracted two contradictory readings of one
+      // key and we declined to invent a supersession between them".
+      const observations = observationsFromMemory(memory, messageId, {
+        onRejected: (r) =>
+          console.warn(
+            `[InboundPipeline] dropped extracted key '${r.key}' (raw: ${r.rawKeys.join(', ')}) ` +
+              `for conversation ${conversationId}: ${r.reason}`
+          ),
+      });
       const factOutcome = await recordFacts(organizationId, conversationId, observations);
       if (factOutcome.rejected.length > 0) {
         // Logged rather than thrown: a malformed fact from a model is routine, and it must

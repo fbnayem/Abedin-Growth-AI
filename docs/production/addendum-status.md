@@ -1558,6 +1558,89 @@ Recorded so they are not lost, and so this entry does not read as though the lis
 
 ---
 
+## 1n. Two silent corruptions of the fact history (landed 2026-09-07)
+
+The second group from the same investigation. Neither had a test, and neither would have been
+visible in a log — both produce a fact store that looks healthy and says something false about
+the customer.
+
+### A partial window read as "this key has no fact"
+
+`listFacts` capped at 500 documents with **no ordering**, so the window was sliced by
+Firestore's implicit `__name__` order — and ids here are `ft_` + a sha256 prefix,
+uncorrelated with time, with the key, with anything. The docstring said "beyond this the oldest
+are not loaded"; which 500 survived was decided by a hash.
+
+That is not merely a stale read. `recordFact` finds the fact to supersede **from exactly this
+list**. If the currently-active fact for a key fell outside the window, `current` was null,
+`planFactWrite` returned CREATE, and a **second active document** was written for the same key
+— the first never given `validUntil`, never given `supersededBy`. Both then render into the
+same prompt as simultaneously in force, and the §20 supersession chain is broken with nothing
+reported to anyone.
+
+The fix is not a larger limit; every limit has this edge. A caller must be able to tell a
+complete history from a partial one, so that "I found no active fact for this key" is
+distinguishable from "I did not look at all of them" (§14). `listFactPage` fetches one more
+than the cap and returns `truncated`; `recordFact` refuses with `HISTORY_TRUNCATED` in
+exactly one case — `current === null && truncated` — because a fact that WAS found can be
+superseded correctly whether or not the window was complete, and refusing every write would
+break a long conversation to fix a rare one.
+
+**No `orderBy` was added, deliberately.** Firestore excludes documents that lack the ordered
+field, so ordering by `validFrom` would silently drop any legacy document written without it —
+reintroducing this same class of defect through the fix for it. The flag is what makes the
+window safe; the ordering only decides which arbitrary subset is loaded.
+
+### One message that appears to change its own mind
+
+`rawKey.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_')` maps `Head count`, `Head-count`
+and `head.count` onto `head_count`. The normalisation is lossy by necessity. `recordFacts`
+processes a batch **sequentially and deliberately**, so two observations of the same key
+supersede in order — also correct, and documented as such.
+
+Together they produce a wrong result: one inbound message could record a fact and then
+immediately supersede it, writing a `validUntil` and a supersession pointer, with **both
+observations carrying the same `sourceMessageId`**. The history would read as the customer
+changing their position mid-message — the exact distortion the supersession design exists to
+prevent, and self-contradictory about a single message.
+
+When two raw keys collapse and **disagree**, we do not know which the customer meant. Recording
+one is a guess and recording a supersession between them is a fabrication, so the group is
+dropped and reported through `onRejected`. Identical values are a harmless duplicate and
+collapse to one; well-formed keys beside a collision are untouched. The pipeline passes a
+reporter rather than omitting it, because the returned array alone cannot distinguish "the
+model extracted nothing" from "the model extracted two contradictory readings and we declined".
+
+### Evidence
+
+`npm test`: **737 tests across 27 files**, up from 719 across 26. `tsc` exit 0, build clean,
+10 guardrails green.
+
+**Mutation-tested 16/16**, including both over-corrections: refusing *every* write when the
+window is truncated, and dropping a *harmless duplicate* by comparing entry count instead of
+distinct values.
+
+Two survivors on the first run were worth more than the fourteen that were caught. One was a bad
+mutation of mine — it replaced a string that did not carry the property. The other was real:
+`const truncated = false` made the refusal unreachable and **survived the entire suite**,
+because the tests asserted the fetch limit and the branch but nothing asserted the value that
+reaches the branch. The comparison is now `exceededCap()`, a pure exported function, tested at
+the boundary in both directions and pinned against being constant either way.
+
+Verified at runtime: a model emitting `{"Head count": "40", "head-count": "50", "Renewal Date":
+..., "budget": ...}` records `renewal_date` and `budget`, drops `head_count` with both raw
+keys named, and the truncation flag turns over at exactly 501 of 500.
+
+### One earlier test corrected, not deleted
+
+A P1.6 test asserted `expect(pipeline).toContain('observationsFromMemory(memory, messageId)')`
+and broke when a third argument was added. Its intent — that the pipeline does not read a member
+the type does not have — is unchanged and still asserted; the exact-call-text form said nothing
+about whether the wiring was correct, only about its spelling, so it now matches the two
+arguments that carry the meaning.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
