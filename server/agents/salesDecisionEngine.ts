@@ -1,3 +1,4 @@
+import { STANDARD_TIER, formatMoney } from '../../shared/domain/pricing';
 import {
   ComprehensiveIntent,
   BuyingStage,
@@ -552,14 +553,30 @@ export function determineNextBestAction(
 // ==========================================
 // PART 12-16: SPECIALIST AGENTS (CANONICAL KNOWLEDGE)
 // ==========================================
+/**
+ * P1.7 — The pricing prose is GENERATED from the price book, not written beside it.
+ *
+ * These fields used to be hand-written sentences containing the numbers. That is what allowed
+ * "Growth Tier" to cost £499 in one file and £599 in another: prose cannot be compared against
+ * anything, so nothing noticed. The numbers now come from shared/domain/pricing.ts and the
+ * sentences are rendered from them, so changing a price changes every place it is stated.
+ *
+ * The enterprise-discount line carries no figure, deliberately: there is no enterprise tier in
+ * the price book, and a sentence promising discounts we have not defined is a commitment made
+ * on no basis.
+ */
 export const CANONICAL_KNOWLEDGE = {
   pricing: {
-    standardPackage: "£499 / month per clinic location",
-    includedMinutes: "2,500 inbound voice conversation minutes per month included",
-    overageRate: "£0.12 per additional minute",
-    trial: "14-day zero-risk trial with 100% money-back guarantee",
-    enterpriseDiscount: "Custom volume tier discounts available for practices with >5 locations",
-    setupFee: "£0 onboarding and setup fee during current promotion",
+    standardPackage: `${formatMoney(STANDARD_TIER.monthly)} / month per clinic location`,
+    includedMinutes: `${STANDARD_TIER.includedVoiceMinutes.toLocaleString('en-GB')} inbound voice conversation minutes per month included`,
+    overageRate: `${formatMoney(STANDARD_TIER.overagePerMinute)} per additional minute`,
+    trial: STANDARD_TIER.trialDays
+      ? `${STANDARD_TIER.trialDays}-day zero-risk trial with 100% money-back guarantee`
+      : 'No trial is currently defined.',
+    enterpriseDiscount:
+      'Volume terms for practices with more than five locations are quoted individually and ' +
+      'are not available as a list price.',
+    setupFee: `${formatMoney(STANDARD_TIER.setupFee)} onboarding and setup fee`,
   },
   technical: {
     latency: "Ultra-low sub-500ms conversational turn-taking latency for human-grade phone dialogue",

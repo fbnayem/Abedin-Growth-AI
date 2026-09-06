@@ -1,3 +1,4 @@
+import { PRICE_BOOK, formatMoney } from '../shared/domain/pricing';
 import { isValidOrgId } from './tenancy/orgScope';
 import { normalizeEmailKey } from './lib/emailKey';
 import { db } from './db/index';
@@ -28,6 +29,30 @@ import { generateFourHundredHistoricalLeads } from "./seedLeadsGenerator";
 import { validateAndEnforceNoPhonePolicy, validateAndEnforceMeetingAndCalendarLinks } from "./agents/multiAgentReplySystem";
 
 const DB_FILE_PATH = path.join(process.cwd(), "server", "data_storage.json");
+
+
+/**
+ * P1.7 — The price book as a sentence, for the company-brain knowledge item.
+ *
+ * Generated rather than written, so a price change cannot leave this document disagreeing with
+ * the contract. Tiers that are not in the price book are not described here at all: a knowledge
+ * item marked `approvedForAI` is read by the composer as fact, and describing a tier nobody has
+ * defined is how an offer we cannot honour ends up in a customer's inbox.
+ */
+function describePriceBook(): string {
+  const tiers = PRICE_BOOK.map(
+    (tier) =>
+      `${tier.name} Tier: ${formatMoney(tier.monthly)}/mo (includes ` +
+      `${tier.includedVoiceMinutes.toLocaleString('en-GB')} voice minutes, ` +
+      `${tier.includedPhoneLines} phone line${tier.includedPhoneLines === 1 ? '' : 's'}, ` +
+      `${formatMoney(tier.overagePerMinute)} per additional minute, ` +
+      `${formatMoney(tier.setupFee)} setup fee)`
+  ).join(' ');
+  return (
+    `${tiers} Any other tier, volume discount or bespoke arrangement must be quoted ` +
+    'individually and approved before it is stated to a customer.'
+  );
+}
 
 export class DataStore {
   public companyBrain: CompanyBrain;
@@ -2142,8 +2167,17 @@ export class DataStore {
         workspaceId: "default",
         category: "PRICING",
         title: "Standard Commercial Subscription Tiers",
-        content:
-          "Starter Tier: £299/mo (includes 1,000 voice minutes, 1 phone line, Google Calendar integration). Growth Tier: £599/mo (3,000 voice minutes, 3 phone lines, custom CRM webhooks). Enterprise Tier: Custom quote with dedicated phone trunks and custom voice tuning.",
+        // P1.7 — This was a hand-written string asserting a "Starter Tier: £299/mo" and a
+        // "Growth Tier: £599/mo (3,000 voice minutes, 3 phone lines)". It carries
+        // `approvedForAI: true`, so it was stringified into outbound prompts as approved
+        // commercial knowledge — while the contract a customer signs said £499.00 and
+        // seedLeadsGenerator described the Growth Tier at £499 with 2,500 minutes.
+        //
+        // Three sources, three different answers, one of them in a contract. Rather than pick a
+        // winner (a commercial decision, not a refactor), the tiers nobody can evidence are
+        // removed and this renders from the one price book. PRICE_BOOK_CONFLICTS records what
+        // was dropped and why, so the decision is visible rather than lost in a diff.
+        content: describePriceBook(),
         source: "Commercial Pricing Guide",
         approvedForAI: true,
         isSensitive: false,

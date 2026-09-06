@@ -1,4 +1,6 @@
 import { ClaimGroundingEngine } from '../policies/claimGrounding';
+import { auditPricingClaims, pricingContextFor, type Quote } from '../../shared/domain/quote';
+import { formatMoney, type Money } from '../../shared/domain/pricing';
 import {
   ReplyPlan,
   ConversationDecisionLog,
@@ -52,6 +54,20 @@ export async function auditReplyAgainstPlan(input: {
   emailUnderstanding: EmailUnderstanding;
   nextBestAction: NextBestActionResult;
   conversationId: string;
+  /**
+   * P1.7 — The quote in force for this customer, if any. Passed in rather than looked up so
+   * the auditor stays a pure function of its inputs and can be tested against a withdrawn or
+   * expired quote without a datastore.
+   */
+  quote?: Quote | null;
+  /**
+   * Figures that are money but are NOT prices — an approved ROI claim such as "recovers
+   * £18,000 monthly". Without these every such sentence is reported, and a check that cries
+   * wolf gets switched off, which is worse than the check not existing.
+   */
+  groundedNonPriceAmounts?: readonly Money[];
+  /** Injectable for tests; a pricing check that depends on the wall clock cannot be tested. */
+  now?: string;
 }): Promise<AuditResult> {
   const checksPassed: string[] = [];
   const issuesDetected: string[] = [];
@@ -174,13 +190,47 @@ export async function auditReplyAgainstPlan(input: {
   }
 
   // 10. Quality Check: Pricing Integrity (Part 13 & 14)
-  if (input.replyPlan.nextBestAction === "PROVIDE_PRICING") {
-    if (sanitizedBody.includes("£499")) {
-      checksPassed.push("Canonical £499/mo standard package confirmed");
-    } else {
-      score -= 20;
-      issuesDetected.push("Pricing quote does not reference canonical £499 rate");
-    }
+  //
+  // P1.7 — This was:
+  //
+  //     if (input.replyPlan.nextBestAction === "PROVIDE_PRICING") {
+  //       if (sanitizedBody.includes("£499")) { ...pass... } else { score -= 20; }
+  //     }
+  //
+  // Three separate failures. It ran ONLY when the plan said the reply was about pricing, so a
+  // wrong price in any other reply was never examined. It was a substring test, so "our old
+  // price of £499" passed and "£4,499" contains it. And it could only detect the ABSENCE of an
+  // expected string — it had no way to notice the PRESENCE of a price we never charged, which
+  // is the failure that actually reaches a customer.
+  //
+  // The check now runs on every reply and asks the opposite question: is there any amount in
+  // this draft that this customer may not be quoted? A hallucinated £299, a stale £599 from
+  // the company-brain document, and a list price stated over a negotiated one are all the same
+  // violation under one rule.
+  const pricingContext = pricingContextFor(input.quote ?? null, input.now ?? new Date().toISOString());
+  const pricingFindings = auditPricingClaims(
+    sanitizedBody,
+    pricingContext.quotableAmounts,
+    input.groundedNonPriceAmounts ?? []
+  );
+
+  if (pricingFindings.length > 0) {
+    // A wrong price is not a style problem. It is a commercial commitment made to a customer in
+    // writing, so it costs enough to force a rewrite on its own rather than shading a score.
+    score -= 40;
+    for (const finding of pricingFindings) issuesDetected.push(finding.message);
+  } else {
+    checksPassed.push(
+      pricingContext.listPricingWithheld
+        ? `Every amount stated is on the customer's approved quote (list pricing withheld)`
+        : 'Every amount stated is in the price book'
+    );
+  }
+
+  if (pricingContext.listPricingWithheld) {
+    // Recorded because it is the mechanism, not a detail: the model was never shown list
+    // pricing for this customer, so it could not have quoted it.
+    checksPassed.push(pricingContext.rationale);
   }
 
   

@@ -1,3 +1,5 @@
+import { pricingContextFor } from '../../shared/domain/quote';
+import { STANDARD_TIER } from '../../shared/domain/pricing';
 import { safeGenerateJSON } from "../geminiClient";
 import { Conversation, ConversationMemory, CompanyBrain, EmailMessage, Meeting } from "../../shared/domain/models";
 import { globalStore } from "../dataStore";
@@ -281,6 +283,13 @@ export function sanitizeZeroPhoneNumbers(text: string): string {
  * 4. Meeting Scheduler & Calendar Locker Agent
  * 5. Strict Guardrail & Zero-Phone Compliance Agent
  */
+/**
+ * P1.7 — The pricing text the composer is allowed to show the model.
+ *
+ * `pricingContextFor` decides what goes in here. When the customer has a binding quote it
+ * emits the quote and NOT the price book, so list pricing is absent from the prompt rather
+ * than merely deprioritised in it — a model cannot state a number it was never shown.
+ */
 export async function executeMultiAgentReplyPipeline(
   conversation: Conversation,
   companyBrain?: CompanyBrain,
@@ -406,6 +415,11 @@ Return strictly JSON:
   // -------------------------------------------------------------
   // AGENT 3: Category-Tailored Solution & Response Composer Agent
   // -------------------------------------------------------------
+  // The quote in force for this customer, if the caller supplied one. Precedence is decided
+  // by pricingContextFor, not here.
+  const pricingContext = pricingContextFor((conversation as any).activeQuote ?? null, new Date().toISOString());
+  const pricingBlock = pricingContext.promptBlock;
+
   const composerPrompt = `
 You are Nayem Abedin, Founder & CEO of Abedin Tech (creators of Abedin Voice AI).
 Draft a concise, human-like email reply to ${conversation.contactName} (${firstName}) at ${conversation.companyName}.
@@ -417,7 +431,8 @@ ${agentAnalysis.extractedQuestionsAndInquiries.map((q: string, i: number) => `  
 
 3. TAILOR BY CATEGORY:
    - PARTNER / AGENCY: Confirm solving after-hours ad lead drop-offs, note the 30% recurring margin and 15-min setup for their pilot clinics.
-   - CLINIC CUSTOMER: Confirm 2-way Google Calendar / CRM sync and emergency triage vs routine booking in 1-2 sentences. Pricing is £499/mo per clinic (2,500 mins included, no setup fee).
+   - CLINIC CUSTOMER: Confirm 2-way Google Calendar / CRM sync and emergency triage vs routine booking in 1-2 sentences.
+${pricingBlock}
    - INVESTOR: Share sub-500ms streaming benchmarks and 10-slide Seed deck concisely.
 
 4. STRICT PROHIBITION ON PHONE NUMBERS & LINK ACCURACY:
@@ -547,8 +562,12 @@ Return strictly JSON:
         reminder1hSent: false,
       },
       contractTerms: {
-        monthlyFee: conversation.category === "PARTNER" ? 1499 : 499,
-        currency: "£",
+        // P1.7 — Was `monthlyFee: category === "PARTNER" ? 1499 : 499` with `currency: "£"`:
+        // a bare number with a symbol beside it rather than an amount. There is no partner tier
+        // in the price book, and 1499 appears nowhere else in the repository — so this line was
+        // inventing a commercial term. It now reads the one price book, in minor units.
+        monthlyFeeMinor: STANDARD_TIER.monthly.amountMinor,
+        currency: STANDARD_TIER.monthly.currency,
         sla: "99.9% 24/7 Call Uptime Guaranteed",
         practiceName: conversation.companyName,
       },

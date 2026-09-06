@@ -1,3 +1,4 @@
+import { STANDARD_TIER, formatMoney } from "../../shared/domain/pricing";
 import React, { useState, useEffect } from "react";
 import {
   X,
@@ -179,7 +180,13 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount: 499,
+          // P1.7 — Was `amount: 499` with no unit, beside a button reading "£499.00 GBP".
+          // Stripe amounts are in MINOR units, so a handler passing this straight through
+          // would have charged £4.99 — a hundredth of the contracted price. The endpoint
+          // currently refuses (it fabricated success before), so nothing has been charged
+          // wrongly; the ambiguity is removed before anyone implements it.
+          amountMinor: STANDARD_TIER.monthly.amountMinor,
+          currency: STANDARD_TIER.monthly.currency,
           paymentMethod: "CARD_ONLINE",
         }),
       });
@@ -465,7 +472,8 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
                 </div>
 
                 <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                  £499/mo • 14-Day Guarantee
+                  {formatMoney(STANDARD_TIER.monthly)}/mo
+                  {STANDARD_TIER.trialDays ? ` • ${STANDARD_TIER.trialDays}-Day Guarantee` : ""}
                 </span>
               </div>
 
@@ -491,7 +499,22 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
                     <strong>1. Service Scope:</strong> Abedin Tech provides {meeting.companyName} with proprietary 24/7 conversational voice AI receptionist software, sub-500ms response telephony routing, and real-time 2-way Google Calendar scheduling integration.
                   </p>
                   <p>
-                    <strong>2. Commercial Terms:</strong> Standard monthly software subscription of <strong>£499.00 GBP</strong> per month, billed monthly. Includes unlimited after-hours patient telephone answering, SMS confirmations, and HIPAA/UK GDPR compliant data handling.
+                    {/*
+                      P1.7 — This paragraph is the BINDING COMMERCIAL TERM a customer signs, and
+                      it had the price typed into it as literal text. Meanwhile the company-brain
+                      document that feeds every outbound prompt said the Growth Tier was £599.
+                      A contract and a sales email disagreeing about the price is not a display
+                      bug. Both now render from shared/domain/pricing.ts.
+                    */}
+                    <strong>2. Commercial Terms:</strong> Standard monthly software subscription of{" "}
+                    <strong>
+                      {formatMoney(STANDARD_TIER.monthly)} {STANDARD_TIER.monthly.currency}
+                    </strong>{" "}
+                    per month, billed monthly. Includes{" "}
+                    {STANDARD_TIER.includedVoiceMinutes.toLocaleString("en-GB")} inbound voice
+                    minutes per month, after-hours patient telephone answering, SMS confirmations,
+                    and HIPAA/UK GDPR compliant data handling. Additional minutes are charged at{" "}
+                    {formatMoney(STANDARD_TIER.overagePerMinute)} per minute.
                   </p>
                   <p>
                     <strong>3. 30-Day Money-Back Guarantee:</strong> If the practice is not 100% satisfied within the first 30 days of active telephony deployment, Abedin Tech will refund the full subscription fee with no questions asked.
@@ -574,12 +597,13 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
                     <span>First Month Deposit & Practice Activation</span>
                   </div>
                   <p className="text-xs text-blue-700">
-                    Process initial subscription payment of £499.00 to activate live clinic phone routing.
+                    Process initial subscription payment of {formatMoney(STANDARD_TIER.monthly)} to
+                    activate live clinic phone routing.
                   </p>
                 </div>
 
                 <span className="text-xs font-bold font-mono px-3 py-1 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
-                  £499.00 GBP
+                  {formatMoney(STANDARD_TIER.monthly)} {STANDARD_TIER.monthly.currency}
                 </span>
               </div>
 
@@ -594,7 +618,9 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
                       🎉 Payment Confirmed & Deal Closed Won!
                     </h3>
                     <p className="text-xs text-emerald-800 max-w-md mx-auto">
-                      First payment of £499.00 GBP successfully settled. Practice phone onboarding for <strong>{meeting.companyName}</strong> is now live.
+                      First payment of {formatMoney(STANDARD_TIER.monthly)}{" "}
+                      {STANDARD_TIER.monthly.currency} successfully settled. Practice phone onboarding
+                      for <strong>{meeting.companyName}</strong> is now live.
                     </p>
                   </div>
 
@@ -605,7 +631,9 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Plan:</span>
-                      <span className="font-bold text-slate-800">Growth Tier (£499/mo)</span>
+                      <span className="font-bold text-slate-800">
+                        {STANDARD_TIER.name} ({formatMoney(STANDARD_TIER.monthly)}/mo)
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Client Signatory:</span>
@@ -648,15 +676,28 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
                   <div className="bg-white rounded-xl p-4 border border-slate-200 space-y-2 text-xs">
                     <div className="flex justify-between py-1 border-b border-slate-100">
                       <span className="text-slate-600">Abedin Voice AI Practice License (Month 1):</span>
-                      <span className="font-bold text-slate-900">£499.00</span>
+                      <span className="font-bold text-slate-900">{formatMoney(STANDARD_TIER.monthly)}</span>
                     </div>
                     <div className="flex justify-between py-1 border-b border-slate-100">
                       <span className="text-slate-600">Turnkey Phone Onboarding & Calendar Integration:</span>
-                      <span className="font-bold text-emerald-600">FREE (Waived £350 setup)</span>
+                      {/*
+                        P1.7 — This said "FREE (Waived £350 setup)". The price book's setup fee
+                        is £0, and £350 appears nowhere else in the repository — so this was
+                        advertising a discount off a list price that does not exist. Claiming a
+                        waiver implies there is something to waive; if setup is genuinely free,
+                        saying so is both true and simpler.
+                      */}
+                      <span className="font-bold text-emerald-600">
+                        {STANDARD_TIER.setupFee.amountMinor === 0
+                          ? "Included"
+                          : formatMoney(STANDARD_TIER.setupFee)}
+                      </span>
                     </div>
                     <div className="flex justify-between py-1 pt-2 font-bold text-slate-900 text-sm">
                       <span>Total First Month Charge:</span>
-                      <span>£499.00 GBP</span>
+                      <span>
+                        {formatMoney(STANDARD_TIER.monthly)} {STANDARD_TIER.monthly.currency}
+                      </span>
                     </div>
                   </div>
 
@@ -675,7 +716,11 @@ export const LiveMeetingRoomModal: React.FC<LiveMeetingRoomModalProps> = ({
                       className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-all flex items-center gap-2 disabled:opacity-50"
                     >
                       <CreditCard className="w-4 h-4" />
-                      <span>{processingPayment ? "Processing Settlement..." : "Process First Payment (£499.00 GBP)"}</span>
+                      <span>
+                        {processingPayment
+                          ? "Processing Settlement..."
+                          : `Process First Payment (${formatMoney(STANDARD_TIER.monthly)} ${STANDARD_TIER.monthly.currency})`}
+                      </span>
                     </button>
                   </div>
                 </div>

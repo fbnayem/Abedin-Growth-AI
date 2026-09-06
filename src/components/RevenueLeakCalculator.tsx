@@ -1,3 +1,4 @@
+import { STANDARD_TIER, formatMoney } from "../../shared/domain/pricing";
 import React, { useState } from "react";
 import {
   Calculator,
@@ -42,12 +43,16 @@ export const RevenueLeakCalculator: React.FC<RevenueLeakCalculatorProps> = ({
   const monthlyRevenueLeak = Math.round(lostBookingsPerMonth * avgTicketValue);
   const annualRevenueLeak = monthlyRevenueLeak * 12;
 
-  // Monthly Abedin Cost comparison: £299/mo vs £2,500/mo receptionist
+  // P1.7 — This comment and the snippet below stated our price as £299/mo. There is no
+  // £299 tier. The snippet is copy an operator pastes into outreach, so the figure is an
+  // offer; it now renders from the price book.
   const estimatedCost = 299;
   const netMonthlyROI = monthlyRevenueLeak - estimatedCost;
   const roiMultiple = monthlyRevenueLeak > 0 ? (monthlyRevenueLeak / estimatedCost).toFixed(1) : "0";
 
-  const generatedPitchSnippet = `Based on a clinic volume of ~${dailyCalls} calls/day, ${lead?.companyName || "your practice"} is likely dropping ~${missedCallsPerMonth} calls/mo after hours. At a standard ${conversionRate}% booking rate and £${avgTicketValue} avg patient value, that is ~£${monthlyRevenueLeak.toLocaleString()}/mo in lost revenue recovered for under £299/mo.`;
+  const generatedPitchSnippet = `Based on a clinic volume of ~${dailyCalls} calls/day, ${lead?.companyName || "your practice"} is likely dropping ~${missedCallsPerMonth} calls/mo after hours. At a standard ${conversionRate}% booking rate and £${avgTicketValue} avg patient value, that is ~£${monthlyRevenueLeak.toLocaleString()}/mo in lost revenue, recoverable for ${formatMoney(
+    STANDARD_TIER.monthly
+  )}/mo.`;
 
   const handleCopy = () => {
     navigator.clipboard.writeText(generatedPitchSnippet);

@@ -1,3 +1,4 @@
+import { STANDARD_TIER, formatMoney } from "../../shared/domain/pricing";
 import React from "react";
 import {
   Sparkles,
@@ -60,11 +61,15 @@ Nayem`,
       category: "PRICING",
       label: "Too expensive / What is the cost?",
       badge: "ROI & Unit Economics",
-      description: "Frames the starter plan (£299/mo) against a single recovered private appointment (£140).",
+      // P1.7 — Was "the starter plan (£299/mo)". No £299 tier exists. This entry builds a
+      // suggestedBody an operator sends to a customer, so the figure is an offer.
+      description: `Frames the ${STANDARD_TIER.name.toLowerCase()} plan (${formatMoney(
+        STANDARD_TIER.monthly
+      )}/mo) against recovered private appointments.`,
       suggestedSubject: `Re: ${conversation.subject} - Abedin Voice AI pricing & ROI breakdown`,
       suggestedBody: `Hi ${firstName},
 
-Our starter clinic tier is £299/month flat (inclusive of all inbound minutes and calendar booking sync).
+Our ${STANDARD_TIER.name.toLowerCase()} clinic tier is ${formatMoney(STANDARD_TIER.monthly)}/month, including ${STANDARD_TIER.includedVoiceMinutes.toLocaleString("en-GB")} inbound minutes and calendar booking sync (${formatMoney(STANDARD_TIER.overagePerMinute)} per additional minute).
 
 To put that in perspective: with average appointment fees at £120–£200, recovering just 2 after-hours missed calls per month pays for the entire system, with every subsequent booking being pure practice profit.
 

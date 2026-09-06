@@ -492,8 +492,13 @@ export interface Meeting {
   contractSignedAt?: string;
   signedBy?: string;
   contractTerms?: {
-    monthlyFee: number;
-    currency: string;
+    /**
+     * P1.7 — Was `monthlyFee: number` beside `currency: string`, which let a bare 499 be
+     * written with a "£" next to it and never checked against anything. Minor units, so a
+     * float cannot drift a contract total by a penny, and the currency is a closed set.
+     */
+    monthlyFeeMinor: number;
+    currency: 'GBP';
     sla: string;
     practiceName: string;
   };

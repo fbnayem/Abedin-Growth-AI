@@ -642,6 +642,165 @@ sixteen of eighteen model call sites are unmigrated and `firestore.rules` is sti
 
 ---
 
+## 1h. Remediation progress — P1.7 (landed 2026-09-06)
+
+### The product had more than one price
+
+The price was written down in at least seventeen files as prose, and the figures did not agree.
+"Growth Tier" cost **£499/mo with 2,500 minutes** in `seedLeadsGenerator.ts` and **£599/mo with
+3,000 minutes** in `dataStore.ts` — the company-brain document, marked `approvedForAI`, that is
+stringified into every outbound prompt. The contract a customer signs in
+`LiveMeetingRoomModal.tsx` stated **£499.00 GBP**. `multiAgentReplySystem.ts` carried
+`monthlyFee: category === "PARTNER" ? 1499 : 499` — a bare number, no currency, and a partner
+tier that exists nowhere else in the repository.
+
+`CANONICAL_KNOWLEDGE.pricing` looks like the fix and is not. Every field is a human sentence
+("£499 / month per clinic location"), so nothing can compute with it, compare against it, or
+detect a departure from it. It is documentation that happens to live in a variable.
+
+Money is now structured data in one module, in **minor units**, with a currency. Pounds as a
+float is how a total drifts by a penny; `money()` refuses a non-integer. Prose is generated
+from the data, so changing a price changes every place it is stated.
+
+### The price book records a contradiction rather than resolving it
+
+Three sources gave three answers and one of them was a contract. A module that quietly adopted
+the higher figure would look authoritative while changing what customers are charged; adopting
+the lower would discard a decision somebody may have made deliberately. Neither is a refactor.
+
+So the price book contains **one tier** — the £499 standard package, the figure the contract,
+the auditor's canonical check and `CANONICAL_KNOWLEDGE` all agreed on — and
+`PRICE_BOOK_CONFLICTS` records the £299 and £599 tiers, what claimed them, and that they are
+**not quotable until somebody decides what they are**. §2's rule applies to prices as much as to
+statuses: this is a claim about the world and the evidence was contradictory.
+
+### Quote precedence is enforced by absence
+
+When a customer has a negotiated quote, the reply must state the quote and not the list price.
+The tempting implementation puts both in the prompt and instructs the model that the quote wins.
+That is a request, not a control — the list price is still in the context, and a model that
+states it produces a commercially wrong email to a customer who was promised something else.
+
+`pricingContextFor` emits **either** the quote **or** the price book, never both. A model
+cannot state a number it was never shown. Same principle as the prompt-authority separation in
+P1.10: a structural property beats an instruction, because instructions are advisory.
+
+A quote also has to be evidenced to bind. An `APPROVED` quote naming no approver does **not**
+bind — §14 applied to commercial state: a record of an approval nobody is accountable for is a
+record of an approval that may never have happened. Expired, withdrawn and superseded quotes
+fall back to list pricing rather than being restated as though still open, and `APPROVED` has
+no edge back to `DRAFT`, because the customer is holding the version they were sent.
+
+### The check that was supposed to catch a wrong price could not
+
+    if (input.replyPlan.nextBestAction === "PROVIDE_PRICING") {
+      if (sanitizedBody.includes("£499")) { ...pass... } else { score -= 20; }
+    }
+
+Three failures at once. It ran **only** when the plan said the reply was about pricing, so a
+wrong price in any other reply was never examined. It was a substring test, so "our old price of
+£499" passed and "£4,499" contains it. And it could only detect the **absence** of an expected
+string — it had no way to notice the **presence** of a price we never charged, which is the
+failure that reaches a customer.
+
+The check now runs on every reply and asks the opposite question: is there any amount here this
+customer may not be quoted? A hallucinated £349, a stale £599, and a list price stated over a
+negotiated one are the same violation under one rule. It costs 40 points rather than 20, because
+a wrong price is not a style problem — it is a commercial commitment made in writing.
+
+An **approved-ROI allowance** exists so "recovers £18,000 monthly" is not reported. A check that
+cries wolf gets switched off, which is worse than the check not existing.
+
+### A second copy of the same defect, in a different file
+
+`claimGrounding.ts` had its own version, and it was worse:
+
+    if (draftBody.includes('price') || draftBody.includes('$') || draftBody.includes('£')) {
+      if (!draftBody.includes('£499')) { ungroundedClaims.push('Unapproved pricing claim'); }
+    }
+
+It fires on any draft mentioning a dollar sign, and it passes as long as £499 appears
+*somewhere* — so **"our price is £299, down from £499" was grounded**. Two independent price
+checks that disagree about what "approved pricing" means is how one of them silently stops
+applying. Both now call the same function.
+
+That engine also reported `isGrounded: true` while checking nothing but prices, which told a
+caller that every capability, integration, SLA and compliance claim in the draft had been
+verified. It now names what it does not check, as data rather than a comment.
+
+### What the guardrail found that I had not
+
+Writing `check-single-price-source` surfaced four things the manual survey missed, and two of
+them were live commercial hazards:
+
+- **`LiveMeetingBattlecardModal.tsx`** told the operator, **during a live call**, that the
+  target deal was "£299/mo Starter Voice Plan". No £299 tier exists. A wrong number there is
+  spoken aloud and becomes an offer.
+- **`ObjectionMatrixResolver.tsx`** built a `suggestedBody` — an email an operator sends —
+  stating "Our starter clinic tier is £299/month flat".
+- **`LeadDetailModal.tsx`** generated a pricing reply promising "£499/month, which includes
+  **unlimited** after-hours answering". The price book includes 2,500 minutes with per-minute
+  overage. That one is not about the literal at all: "unlimited" is an offer we would have to
+  honour.
+- **A "FREE (Waived £350 setup)"** line advertising a discount off a list setup fee that exists
+  nowhere in the repository. Claiming a waiver implies there is something to waive.
+
+### And the fix that had not reached the running system
+
+The runtime probe failed on its first three attempts, and the third failure was the real one:
+**`server/data_storage.json` still contained the £599 knowledge item.** `dataStore.ts` seeds
+that file when it is absent and *loads* it when it is present, so changing the seed changed
+nothing about what the deployment actually serves — the contradictory pricing was still on disk,
+still `approvedForAI`, still going into prompts. A code fix that leaves the data wrong is not a
+fix, and only a probe against the shipped artifacts would have said so.
+
+### Evidence
+
+`npm test`: **480 tests across 18 files**, up from 444. The 36 new ones are invariants and were
+**mutation-tested** — eleven deliberate breakages (a binding quote no longer withholding list
+pricing; an unapproved, expired or superseded quote binding anyway; the audit no longer
+reporting unknown amounts; money accepting a float; currencies added together; a single decimal
+digit read as units rather than tens of pence; the price book unfrozen; the recorded conflicts
+dropped; the £599 tier reintroduced) — and **all eleven were caught**.
+
+`check-single-price-source` was verified against five cases, including three that must **not**
+fire. It allows fifteen files to carry non-price figures, each with a written reason, so an
+exception is a decision somebody made rather than a hole nobody noticed. Two files I had
+initially allow-listed turned out to state our own price and were fixed instead — the reasons
+had to be written down before that was visible.
+
+Runtime, against the built artifacts:
+
+| Probe | Result |
+|---|---|
+| the shipped frontend bundle | no £599, no £299/mo, no "£499.00 GBP" literal |
+| the shipped bundle's price | present as `49900` minor units, absent as a formatted literal |
+| the shipped server bundle | none of the three contradictory statements |
+| `CANONICAL_KNOWLEDGE` | states the price-book figure |
+| the enterprise line | no longer promises a discount nobody defined |
+| a negotiated quote | prompt contains £425 and **not** £499 |
+| a hallucinated £349 | caught |
+| list pricing over a negotiated rate | caught |
+| "£299, down from £499" | ungrounded — the old check passed it |
+| the price book | exactly one tier, the one that could be evidenced |
+
+### What changed status
+
+**S25 `NOT_STARTED -> PARTIAL`.** A quote object exists with line items, currency, approval
+status, version and a validity window; precedence over list pricing is mechanical; and the
+auditor and the grounding engine both check drafts against it. PARTIAL: **no quote is ever
+written yet** — there is no persistence, no endpoint and no UI, so `pricingContextFor` receives
+null on every live call and list pricing is what is emitted. The type and the mechanism are
+real; the record is not.
+
+**S24 does not move.** P1.7 lists it, but S24 is about specialist *disagreement* detection —
+`specialistsRequired` computed and read by nobody — and nothing here addresses that.
+
+**S1 does not move.** The pricing half of "a commitment is evidenced" is done; the rest of the
+section is untouched.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -650,11 +809,11 @@ sixteen of eighteen model call sites are unmigrated and `firestore.rules` is sti
 |---|---:|---|
 | `VERIFIED` | **0** | — |
 | `IMPLEMENTED_UNVERIFIED` | **1** | S1 |
-| `PARTIAL` | **30** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S18, S20, S21, S29, S30, S31, S32, S33, S34, S36, S37, S39, S40, S43, S46, S47 |
-| `NOT_STARTED` | **18** | S11, S17, S19, S22, S23, S24, S25, S26, S27, S28, S35, S38, S41, S42, S44, S45, S48, S49 |
+| `PARTIAL` | **31** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S18, S20, S21, S25, S29, S30, S31, S32, S33, S34, S36, S37, S39, S40, S43, S46, S47 |
+| `NOT_STARTED` | **17** | S11, S17, S19, S22, S23, S24, S26, S27, S28, S35, S38, S41, S42, S44, S45, S48, S49 |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-0 + 1 + 30 + 18 + 0 = **49 rows**.
+0 + 1 + 31 + 17 + 0 = **49 rows**.
 
 | Severity | Count |
 |---|---:|
@@ -756,7 +915,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S22 | AI run reproducibility (`ai_run_logs`) | NOT_STARTED | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | No writer exists; `agentName` is a dead parameter; model id unrecoverable across the failover loop; no tokens, cost, prompt/schema/policy version, or fallback flag |
 | S23 | Agent abstention | NOT_STARTED | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | No abstention member in any response schema; fallback data is fabricated content, not an abstention; `shouldBook` hardcoded `true`; the confidence gate is unreachable |
 | S24 | Specialist disagreement detection and resolution | NOT_STARTED | CRITICAL | `salesDecisionEngine.ts:610-616`; `server.ts:46`; `independentAuditor.ts:206-213` | `specialistsRequired` is computed and read by nothing; no two opinions are ever produced; the auditor is never called in production and returns six hardcoded `true` safety flags |
-| S25 | Quotes / quote snapshots vs public pricing | NOT_STARTED | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts:180-183` | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`; the auditor penalises replies that omit the £499 list price |
+| S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts:180-183` | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`; the auditor penalises replies that omit the £499 list price |
 | S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | NOT_STARTED | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | No campaign execution engine exists; none of the 14 required guards is implemented; a reply does not stop the sequence because both stop mechanisms query an empty Postgres |
 
 | S27 | Deliverability: sender identity health and fabricated metrics | NOT_STARTED | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
@@ -1103,7 +1262,7 @@ The same primitive reaches further than the outbox. Anyone can set `autonomyPaus
 
 ---
 
-### S25 — Quotes / quote snapshots vs public pricing · NOT_STARTED · HIGH
+### S25 — Quotes / quote snapshots vs public pricing · PARTIAL · HIGH
 
 **What exists.** A seven-column `quoteSnapshots` table and one read. **Zero writers anywhere** — no Postgres insert, no Firestore quotes collection.
 

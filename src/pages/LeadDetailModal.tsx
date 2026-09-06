@@ -1,3 +1,4 @@
+import { STANDARD_TIER, formatMoney } from "../../shared/domain/pricing";
 import React, { useState, useEffect } from "react";
 import {
   X,
@@ -345,7 +346,17 @@ ${companyBrain.companyName}`;
     if (intent === "DEMO_REQUESTED" || intent === "MEETING_REQUEST") {
       generated = `Hi ${lead.name.split(" ")[0]},\n\nFantastic! I would love to show you a live 10-minute demo of Abedin Voice AI running on a dedicated clinic line.\n\nI've sent a calendar invite for Thursday at 2:00 PM (or feel free to pick another time that suits you).\n\nLooking forward to speaking!\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`;
     } else if (intent === "PRICING" || intent === "PRICING_QUESTION") {
-      generated = `Hi ${lead.name.split(" ")[0]},\n\nThanks for asking about pricing. Our clinic plan starts at £499/month, which includes unlimited after-hours answering, 2-way Google Calendar integration, and clinical appointment qualification.\n\nMost clinics recover this cost within the first 3 captured patient consultations. Can we jump on a 5-minute call so I can show you how it works on your test number?\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`;
+      // P1.7 — Two problems, one of them not about the literal. The price was typed in, and
+      // the copy promised "unlimited after-hours answering" at that price while the price
+      // book includes 2,500 minutes with per-minute overage above it. This text is dropped
+      // into a draft an operator sends, so "unlimited" is an offer we would have to honour.
+      generated = `Hi ${lead.name.split(" ")[0]},\n\nThanks for asking about pricing. Our ${STANDARD_TIER.name.toLowerCase()} clinic plan is ${formatMoney(
+        STANDARD_TIER.monthly
+      )}/month, which includes ${STANDARD_TIER.includedVoiceMinutes.toLocaleString(
+        "en-GB"
+      )} inbound minutes of after-hours answering (${formatMoney(
+        STANDARD_TIER.overagePerMinute
+      )} per additional minute), 2-way Google Calendar integration, and clinical appointment qualification.\n\nCan we jump on a 5-minute call so I can show you how it works on your test number?\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`;
     } else if (intent === "TECHNICAL") {
       generated = `Hi ${lead.name.split(" ")[0]},\n\nGreat question regarding software compatibility. Abedin Voice AI operates with native webhook and calendar synchronization (Google Calendar, Microsoft 365, and clinical practice management software). It requires zero telephony hardware changes.\n\nCould I send over our 2-page integration guide or test a sample call with you?\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`;
     } else {

@@ -1,3 +1,4 @@
+import { STANDARD_TIER, formatMoney } from "../../shared/domain/pricing";
 import React, { useState } from "react";
 import {
   FileText,
@@ -66,7 +67,7 @@ export const LiveMeetingBattlecardModal: React.FC<LiveMeetingBattlecardModalProp
       ? `MEETING DOSSIER: ${lead?.name} - ${lead?.companyName}
 Industry: ${lead?.industry} | Location: ${lead?.country}
 Phone Volume: High | Expected Pain: Receptionist overhead & missed patient bookings.
-Target Deal: £299/mo Starter Voice Plan + CRM Calendar Sync.
+Target Deal: ${formatMoney(STANDARD_TIER.monthly)}/mo ${STANDARD_TIER.name} plan + CRM Calendar Sync.
 Key Defensibility: Sub-500ms voice response, 15-minute SIP setup, zero hallucination guardrails.`
       : `INVESTOR DOSSIER: ${investor?.name} - ${investor?.fundName}
 Stage: ${investor?.stage} | Check: ${investor?.typicalCheckSize} | Sectors: ${investor?.targetSectors?.join(", ")}
@@ -266,7 +267,14 @@ Moat: Vertical integration, clinic workflow lock-in, proprietary conversation tu
             <div>
               <div className="text-[10px] uppercase font-bold text-slate-400">Target Close Deal Structure</div>
               <div className="text-sm font-bold text-emerald-400">
-                {isCustomer ? "£299/mo Starter + £0.12/min Overcharge (14-Day Pilot)" : `${investor?.typicalCheckSize} Safe / Priced Seed Round`}
+                {/*
+                  P1.7 — This said "£299/mo Starter". There is no £299 tier: the price book has
+                  one standard tier at £499. An operator reads this line while ON a call with a
+                  customer, so a wrong number here is spoken aloud and becomes an offer.
+                */}
+                {isCustomer
+                  ? `${formatMoney(STANDARD_TIER.monthly)}/mo ${STANDARD_TIER.name} + ${formatMoney(STANDARD_TIER.overagePerMinute)}/min overage${STANDARD_TIER.trialDays ? ` (${STANDARD_TIER.trialDays}-Day Pilot)` : ""}`
+                  : `${investor?.typicalCheckSize} Safe / Priced Seed Round`}
               </div>
             </div>
             {onScheduleCall && (

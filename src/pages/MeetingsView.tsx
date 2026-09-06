@@ -1,3 +1,4 @@
+import { STANDARD_TIER, formatMoney } from "../../shared/domain/pricing";
 import React, { useState } from "react";
 import {
   Calendar,
@@ -183,7 +184,7 @@ export const MeetingsView: React.FC<MeetingsViewProps> = ({
                       {m.status === "MISSED"
                         ? "MISSED / NO-SHOW"
                         : m.firstPaymentPaid
-                        ? "CLOSED WON (£499)"
+                        ? `CLOSED WON (${formatMoney(STANDARD_TIER.monthly)})`
                         : m.contractSigned
                         ? "AGREEMENT SIGNED"
                         : m.category}

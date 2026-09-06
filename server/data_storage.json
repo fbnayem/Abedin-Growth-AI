@@ -36997,7 +36997,7 @@
       "workspaceId": "default",
       "category": "PRICING",
       "title": "Standard Commercial Subscription Tiers",
-      "content": "Starter Tier: £299/mo (includes 1,000 voice minutes, 1 phone line, Google Calendar integration). Growth Tier: £599/mo (3,000 voice minutes, 3 phone lines, custom CRM webhooks). Enterprise Tier: Custom quote with dedicated phone trunks and custom voice tuning.",
+      "content": "Standard Tier: £499/mo (includes 2,500 voice minutes, 1 phone line, £0.12 per additional minute, £0 setup fee) Any other tier, volume discount or bespoke arrangement must be quoted individually and approved before it is stated to a customer.",
       "source": "Commercial Pricing Guide",
       "approvedForAI": true,
       "isSensitive": false,
