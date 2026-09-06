@@ -260,15 +260,40 @@ describe('3. a quote lookup that fails blocks a pricing reply', () => {
     expect(draft.replyPlan.reason).toMatch(/quote|contact/i);
   });
 
-  it('a NON-pricing reply is unaffected by the same failure', async () => {
+  it('a NON-pricing reply is not stopped by the QUOTE failure', async () => {
     // The block must be scoped. If the plan was never going to state a price, an unreadable
     // quote history costs nothing, and blocking every reply would be its own defect.
+    //
+    // Migrated 2026-09-07 (S23). This asserted `nextBestAction !== 'NO_REPLY'` and a non-empty
+    // body, both of which came from the hand-written template that used to run when generation
+    // is disabled. That template is gone, so this input now stops for a DIFFERENT reason —
+    // and the distinction is precisely what the test is for. Asserting the reason rather than
+    // the action keeps the original claim ("the quote failure is scoped") testable, and would
+    // have caught the quote block widening to cover every reply.
     const input = inputFor('Does it integrate with our existing phone system?');
     expect(input.nextBestAction.pricingAllowed).toBe(false);
 
     const draft = await composeAutonomousSalesReply(input);
-    expect(draft.replyPlan.nextBestAction).not.toBe('NO_REPLY');
-    expect(draft.body.length).toBeGreaterThan(0);
+    expect(draft.abstention?.reason).toBe('GENERATION_DISABLED');
+    expect(draft.replyPlan.reason).not.toContain('Refused to state pricing');
+  });
+
+  it('the PRICING refusal and the abstention are distinguishable', async () => {
+    // Both end at NO_REPLY with an empty body, and they are not the same event: one is a
+    // §14 refusal to state a price we could not verify, the other is "no model answered".
+    // An operator triaging a queue must be able to tell them apart.
+    const priced = await composeAutonomousSalesReply(
+      inputFor('What does it cost? Please send me your pricing.')
+    );
+    const plain = await composeAutonomousSalesReply(
+      inputFor('Does it integrate with our existing phone system?')
+    );
+
+    expect(priced.abstention).toBeUndefined();
+    expect(priced.replyPlan.reason).toContain('Refused to state pricing');
+
+    expect(plain.abstention).toBeDefined();
+    expect(plain.replyPlan.reason).toContain('Abstained');
   });
 
   it('a refused pricing reply carries no quotable body a caller could send anyway', async () => {

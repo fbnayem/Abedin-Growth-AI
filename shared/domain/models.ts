@@ -414,11 +414,26 @@ export interface ConversationMemory {
   objectionsResolved: string[];
   commitmentsMade: string[];
   agreedTimeSlots: string[];
-  prospectSentiment: 'HIGHLY_INTERESTED' | 'EVALUATING' | 'PRICE_CONSCIOUS' | 'TECHNICAL_DEEP_DIVE' | 'SKEPTICAL' | 'READY_TO_BOOK';
+  /**
+   * S23 — `UNASSESSED` is the value for "no model read this conversation".
+   *
+   * The extractor used to fall back to `HIGHLY_INTERESTED` whenever the thread contained a
+   * prospect message at all, so a model outage produced a confident sentiment reading of a
+   * conversation nothing had read. Every other member is a claim; this one is its absence.
+   */
+  prospectSentiment: 'HIGHLY_INTERESTED' | 'EVALUATING' | 'PRICE_CONSCIOUS' | 'TECHNICAL_DEEP_DIVE' | 'SKEPTICAL' | 'READY_TO_BOOK' | 'UNASSESSED';
   keyFactsExtracted: Record<string, string>;
   threadSummaryChronological: string[];
   followUpCount: number;
   lastUpdated: string;
+  /**
+   * S23 — present when NO model read this conversation.
+   *
+   * Its absence is the claim. Downstream code that turns this memory into durable FACTS
+   * must check it: a fact recorded from an abstention has no source, and it re-enters every
+   * later prompt as though a customer had said it.
+   */
+  abstention?: { reason: string; detail: string };
 }
 
 export interface Conversation {
@@ -708,7 +723,7 @@ export interface AIRunLog {
    * which is a decision a model participated in: collapsing them would hide a bounce loop
    * inside the ordinary suppression count.
    */
-  disposition?: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED' | 'FAILED';
+  disposition?: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED' | 'ABSTAINED' | 'FAILED';
   /** Where a failed run stopped. */
   stage?: string | null;
   conversationId?: string | null;

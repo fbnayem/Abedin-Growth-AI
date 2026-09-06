@@ -30,6 +30,7 @@ import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
 import { recordFacts, listActiveFacts } from '../lib/factStore';
 import { observationsFromMemory } from '../domain/memoryFacts';
 import { classifyAutomation, type AutomationVerdict } from '../domain/automatedMail';
+import { describeAbstention } from '../domain/abstention';
 import { firestore } from '../firebase';
 import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { orgPath } from '../tenancy/orgScope';
@@ -57,7 +58,7 @@ export type InboundOutcome =
        * answered, and no model was asked about it. Collapsing the two would hide the fact
        * that a bounce loop is running.
        */
-      disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED';
+      disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'AUTOMATED' | 'ABSTAINED';
       detail: string;
       modelCalls: ModelCallRecord[];
       conversationId?: string | null;
@@ -534,13 +535,27 @@ export class InboundPipeline {
       // `onRejected` is passed rather than omitted: the returned array alone cannot tell "the
       // model extracted nothing" from "the model extracted two contradictory readings of one
       // key and we declined to invent a supersession between them".
-      const observations = observationsFromMemory(memory, messageId, {
-        onRejected: (r) =>
-          console.warn(
-            `[InboundPipeline] dropped extracted key '${r.key}' (raw: ${r.rawKeys.join(', ')}) ` +
-              `for conversation ${conversationId}: ${r.reason}`
-          ),
-      });
+      // S23 — an abstention records NOTHING.
+      //
+      // These observations become durable facts with provenance pointing at a real customer
+      // message, and every later prompt reads them back as things the customer said. A fact
+      // derived from a memory no model produced has a source that does not exist.
+      if (memory.abstention !== undefined) {
+        console.warn(
+          `[InboundPipeline] memory extraction abstained (${memory.abstention.reason}); ` +
+            `recording no facts for message ${messageId}. ${memory.abstention.detail}`
+        );
+      }
+      const observations =
+        memory.abstention !== undefined
+          ? []
+          : observationsFromMemory(memory, messageId, {
+              onRejected: (r) =>
+                console.warn(
+                  `[InboundPipeline] dropped extracted key '${r.key}' (raw: ${r.rawKeys.join(', ')}) ` +
+                    `for conversation ${conversationId}: ${r.reason}`
+                ),
+            });
       const factOutcome = await recordFacts(organizationId, conversationId, observations);
       if (factOutcome.rejected.length > 0) {
         // Logged rather than thrown: a malformed fact from a model is routine, and it must
@@ -742,6 +757,33 @@ export class InboundPipeline {
         rawInboundText: email.textBody || email.htmlAsText || '',
         contextBundle,
       });
+
+      // 7a. S23 — ABSTENTION IS NOT SUPPRESSION.
+      //
+      // A suppressed reply is a decision: the planner considered this conversation and
+      // chose not to answer. An abstention is the absence of a decision — no model could
+      // answer, or generation is disabled. Reporting them under one disposition would hide
+      // a total model outage inside the ordinary suppression count, which is the single
+      // most important thing an operator needs to see and the least visible.
+      //
+      // Checked BEFORE the suppression guard, because `abstainedReply` deliberately sets
+      // NO_REPLY so that the guard stops the draft even if this branch is ever removed.
+      // That belt-and-braces ordering means the more specific branch has to come first.
+      if (draft.abstention !== undefined) {
+        console.warn(
+          `[InboundPipeline] Composer abstained: ${describeAbstention(draft.abstention)}`
+        );
+        return {
+          ok: true,
+          disposition: 'ABSTAINED',
+          detail: describeAbstention(draft.abstention),
+          modelCalls,
+          conversationId,
+          messageId,
+          contextHash: contextBundle.contextHash,
+          contextIds: contextBundle.contextIds,
+        };
+      }
 
       // 7b. The planner can suppress too, and until now nothing listened.
       //

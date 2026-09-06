@@ -61,6 +61,21 @@ export function isRealActionEnabled(flag: RealActionFlag): boolean {
 }
 
 /**
+ * S23/P0.2 — whether the reply composer may call a model at all.
+ *
+ * This was read as a bare `process.env.USE_GENAI_FOR_REPLIES === 'true'` inside
+ * `composeAutonomousSalesReply` — a direct environment read at decision time, which is the
+ * shape this module exists to eliminate. It is here so there is one reader, it fails closed
+ * like the rest, and an operator surface can report it.
+ *
+ * Disabled does NOT mean "compose it some other way". It means the composer abstains: see
+ * server/domain/abstention.ts for why the alternative was worse than nothing.
+ */
+export function isGenerationEnabled(): boolean {
+  return process.env.USE_GENAI_FOR_REPLIES === 'true';
+}
+
+/**
  * The full flag set, for /api/readiness and operator surfaces. This is the SAME read the
  * gateway performs, so what an operator sees is what the system will enforce.
  */

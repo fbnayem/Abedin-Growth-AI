@@ -2,7 +2,6 @@ import { pricingContextFor } from '../../shared/domain/quote';
 import { buildContextBundle } from '../domain/contextBundle';
 import { DEFAULT_BUSINESS_HOURS, nextBusinessSlot, systemClock, type Clock } from '../../shared/domain/time';
 import { STANDARD_TIER } from '../../shared/domain/pricing';
-import { safeGenerateJSON } from "../geminiClient";
 import { Conversation, ConversationMemory, CompanyBrain, EmailMessage, Meeting } from "../../shared/domain/models";
 import { globalStore } from "../dataStore";
 

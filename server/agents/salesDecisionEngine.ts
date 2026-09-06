@@ -14,7 +14,9 @@ import {
   EmailMessage,
   EmailUnderstanding,
 } from "../../shared/domain/models";
-import { safeGenerateJSON } from "../geminiClient";
+import { generateJsonOrAbstain } from "../geminiClient";
+import { abstain, describeAbstention, type Abstention } from '../domain/abstention';
+import { isGenerationEnabled } from '../config/safeMode';
 import { globalStore } from "../dataStore";
 import { assemblePrompt } from "../lib/promptAssembly";
 import { CALENDAR_BOOKING_URL, GOOGLE_MEET_URL, WEBSITE_URL, ONBOARDING_URL } from "./trustedCtaRegistry";
@@ -630,6 +632,43 @@ export const CANONICAL_KNOWLEDGE = {
 // ==========================================
 // PART 17-20: GROUNDED FOUNDER REPLY COMPOSER
 // ==========================================
+/**
+ * What the composer produces.
+ *
+ * `abstention` is optional and its ABSENCE is the claim: a reply with no abstention field is
+ * one a model actually wrote. Declared explicitly rather than inferred so that a caller reading
+ * `draft.abstention` is checking a documented part of the contract, not a shape that happens to
+ * exist on one of two inferred branches.
+ */
+export interface ComposedReply {
+  subject: string;
+  body: string;
+  replyPlan: ReplyPlan;
+  /** S23 — present exactly when no model-written reply was produced. */
+  abstention?: Abstention;
+}
+
+/**
+ * S23 — the shape of "no reply was written".
+ *
+ * The plan is preserved so an operator can see what the system INTENDED, and the action is
+ * forced to NO_REPLY so `suppressesReply` — the one predicate both pipeline boundaries use —
+ * stops it even if a caller ignores the `abstention` field.
+ */
+function abstainedReply(replyPlan: ReplyPlan, abstention: Abstention) {
+  console.warn(`[SalesDecisionEngine] ABSTAINED: ${describeAbstention(abstention)}`);
+  return {
+    subject: "",
+    body: "",
+    replyPlan: {
+      ...replyPlan,
+      nextBestAction: "NO_REPLY" as const,
+      reason: `Abstained. ${describeAbstention(abstention)}`,
+    },
+    abstention,
+  };
+}
+
 export async function composeAutonomousSalesReply(input: {
   /**
    * Whose data this reply may read.
@@ -679,7 +718,7 @@ export async function composeAutonomousSalesReply(input: {
   /** Injected so a proposed meeting slot is testable on a DST boundary (§30). */
   clock?: Clock;
   threadHistory?: EmailMessage[];
-}): Promise<{ subject: string; body: string; replyPlan: ReplyPlan }> {
+}): Promise<ComposedReply> {
   // S. AI SECURITY / RED TEAM TESTS
   if (aiSecurityService.detectPromptInjection(input.rawInboundText)) {
       console.warn("[AiSecurity] Prompt injection detected in inbound text. Suppressing response.");
@@ -863,7 +902,32 @@ export async function composeAutonomousSalesReply(input: {
     reason: input.nextBestAction.reason,
   };
 
-  if (process.env.USE_GENAI_FOR_REPLIES === 'true') {
+  // S23 — one path, and an abstention. There is no third branch.
+  //
+  // What used to follow this `if` was a hand-written `switch` composing a complete,
+  // send-ready email per action: greeting, capability claims, LIST PRICING quoted straight
+  // from CANONICAL_KNOWLEDGE, a booking link and a signature. Two paths reached it — every
+  // model failing, and this flag not being `true` — and the flag is `false` in this
+  // deployment, so the canned template was not a rare fallback. It WAS the composer.
+  //
+  // It also bypassed the control P1.7 exists to provide: `pricingContextFor` decides what
+  // pricing a reply may state when a customer holds a binding quote, and the template
+  // interpolated the list price unconditionally. The precedence rule applied only on the
+  // path that required an environment variable nobody had set.
+  //
+  // And its `default:` arm composed a generic pitch for any action not in the switch — so
+  // an unrecognised decision produced a sales email rather than a refusal (§14).
+  if (isGenerationEnabled() === false) {
+    return abstainedReply(
+      replyPlan,
+      abstain(
+        'GENERATION_DISABLED',
+        'USE_GENAI_FOR_REPLIES is not "true", so no model may be called. This reply was not written, rather than being written from a template that cannot apply quote precedence.'
+      )
+    );
+  }
+
+  {
      console.log("[SalesDecisionEngine] Invoking powerful Gemini generation...");
 
      // P1.10 (§18) — AUTHORITY SEPARATION.
@@ -936,132 +1000,37 @@ Return JSON ONLY:
        );
      }
 
-     const aiResult = await safeGenerateJSON<{subject: string, body: string}>({
+     // `generateJsonOrAbstain`, not `safeGenerateJSON`: the latter returns `fallbackData`
+     // with the same type and shape as a real answer, so this call site could not tell a
+     // model outage from a reply.
+     const outcome = await generateJsonOrAbstain<{ subject: string; body: string }>({
        systemInstruction: assembled.systemInstruction,
        contents: assembled.contents,
        category: "SMART",
        agentName: "composeAutonomousSalesReply",
-       fallbackData: { subject: "", body: "" }
      });
 
-     if (aiResult && aiResult.body) {
-        return {
-           subject: aiResult.subject,
-           body: aiResult.body,
-           replyPlan
-        };
+     if (outcome.abstained === true) {
+        return abstainedReply(replyPlan, outcome);
      }
+
+     const aiResult = outcome.value;
+     if (!aiResult || typeof aiResult.body !== "string" || aiResult.body.trim() === "") {
+        // A model answered, and the answer is not usable. That is still an abstention: the
+        // alternative is to send an empty email, or to fill it in ourselves.
+        return abstainedReply(
+          replyPlan,
+          abstain(
+            'MODEL_RETURNED_NOTHING_USABLE',
+            'The model returned a response with no usable body.'
+          )
+        );
+     }
+
+     return {
+        subject: typeof aiResult.subject === "string" ? aiResult.subject : "",
+        body: aiResult.body,
+        replyPlan,
+     };
   }
-
-  let body = "";
-  const subject = input.rawInboundText.toLowerCase().includes("re:") ? "Re: Abedin Voice AI" : "Re: 24/7 AI Voice Receptionist for " + companyName;
-  switch (input.nextBestAction.action) {
-    case "PROVIDE_PRICING": {
-      body = `Hi ${firstName},
-
-Our standard clinic plan for Abedin Voice AI is ${CANONICAL_KNOWLEDGE.pricing.standardPackage}, which includes 2,500 monthly conversation minutes (600+ patient bookings), 24/7 Google Calendar syncing, and zero setup fee.
-
-How many monthly calls or clinic locations are you looking to cover at ${companyName}?
-
-Best,
-Nayem
-
-Nayem Abedin · Abedin Tech
-https://abedintech.com/voice-ai/`;
-      break;
-    }
-
-    case "PROVIDE_TECHNICAL_EXPLANATION": {
-      body = `Hi ${firstName},
-
-Abedin Voice AI operates with sub-500ms voice turnaround and syncs directly 2-way with Google Calendar, Outlook, and major practice management software so appointments lock in real time.
-
-For telephony, it connects via simple call forwarding or standard SIP trunking with no hardware required.
-
-Which practice management system or CRM does ${companyName} currently use?
-
-Best,
-Nayem
-
-Nayem Abedin · Abedin Tech
-https://abedintech.com/voice-ai/`;
-      break;
-    }
-
-    case "SEND_BOOKING_CTA": {
-      body = `Hi ${firstName},
-
-I'd be glad to show you a quick 10-minute live demonstration of Abedin Voice AI handling inbound calls in real time.
-
-You can grab a convenient slot directly on my booking calendar here:
-${CALENDAR_BOOKING_URL}
-
-Looking forward to speaking!
-
-Best,
-Nayem
-
-Nayem Abedin · Abedin Tech
-https://abedintech.com/voice-ai/`;
-      break;
-    }
-
-    case "START_ONBOARDING": {
-      body = `Hi ${firstName},
-
-Great! You can activate your 14-day zero-risk trial here in under 15 minutes:
-${ONBOARDING_URL}
-
-Once in, simply connect your Google Calendar. If you'd like a quick guided walkthrough on Google Meet, feel free to pick a time here: ${CALENDAR_BOOKING_URL}
-
-Best,
-Nayem
-
-Nayem Abedin · Abedin Tech
-https://abedintech.com/voice-ai/`;
-      break;
-    }
-
-    case "HANDLE_OBJECTION": {
-      body = `Hi ${firstName},
-
-Completely understand. As a quick reference, clinics typically recover 15–20 missed patient bookings per month while cutting front-desk phone load by over 65%.
-
-No pressure at all—whenever you're ready to test after-hours coverage, feel free to check out our demo at ${WEBSITE_URL}.
-
-Best,
-Nayem
-
-Nayem Abedin · Abedin Tech
-https://abedintech.com/voice-ai/`;
-      break;
-    }
-
-    case "NO_REPLY":
-    case "SUPPRESS": {
-      body = "";
-      break;
-    }
-
-    default: {
-      body = `Hi ${firstName},
-
-Thanks for reaching out! Abedin Voice AI answers your patient calls 24/7 with human conversational speed and locks bookings directly into your calendar and CRM.
-
-What is the biggest phone challenge ${companyName} is facing during peak or after-hours right now?
-
-Best,
-Nayem
-
-Nayem Abedin · Abedin Tech
-https://abedintech.com/voice-ai/`;
-      break;
-    }
-  }
-
-  return {
-    subject,
-    body,
-    replyPlan,
-  };
 }

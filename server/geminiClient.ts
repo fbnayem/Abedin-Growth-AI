@@ -1,4 +1,5 @@
 import { hashPrompt, readUsage, reportModelCall } from './lib/modelCallLog';
+import { abstain, answered, type ModelOutcome } from './domain/abstention';
 import { GoogleGenAI } from "@google/genai";
 
 let aiInstance: GoogleGenAI | null = null;
@@ -116,7 +117,7 @@ export function extractArray<T = any>(data: any): T[] | null {
  * a mistaken idea of which one is being sent, and guessing on their behalf is how untrusted
  * text quietly ends up in the instruction field.
  */
-export async function safeGenerateJSON<T = any>(options: {
+export interface GenerateJsonOptions {
   /** Legacy single-string form. Trusted content only. */
   prompt?: string;
   /** Trusted instructions. Use with `contents`. */
@@ -125,9 +126,23 @@ export async function safeGenerateJSON<T = any>(options: {
   contents?: string;
   category?: ModelCategory;
   temperature?: number;
-  fallbackData: T;
   agentName?: string;
-}): Promise<T> {
+}
+
+/**
+ * S23 — the same call, with the one distinction that matters preserved.
+ *
+ * `safeGenerateJSON` returns `T` whether a model answered or all five candidates failed, so
+ * a caller cannot tell an answer from a substitute. P1.10 made that failure logged and
+ * recorded; this makes it BRANCHABLE. A caller that must not act without a real answer uses
+ * this, and the compiler will not let it read `.value` without checking `.abstained` first.
+ *
+ * Abstention is not an error and is not thrown: it is an expected outcome, and putting it in
+ * a `catch` beside genuine faults is where it would get swallowed.
+ */
+export async function generateJsonOrAbstain<T = any>(
+  options: GenerateJsonOptions
+): Promise<ModelOutcome<T>> {
   const hasLegacy = typeof options.prompt === 'string';
   const hasSeparated = typeof options.systemInstruction === 'string';
 
@@ -184,6 +199,17 @@ export async function safeGenerateJSON<T = any>(options: {
       });
 
       const rawText = response.text || "";
+      // This guard is MEASURABLY EQUIVALENT to `if (true)`, and it stays.
+      //
+      // Removing it survived mutation testing, correctly. It only differs for a `rawText` whose
+      // `.trim()` is falsy — i.e. empty or whitespace-only — and `extractCleanJSON` ends in
+      // `JSON.parse`, which throws on every one of those. Measured across 211 whitespace-only
+      // strings (every 1- and 2-character combination of ten whitespace code points, plus the
+      // empty string): 0 inputs where removing the guard would not also end in a failure.
+      //
+      // It is kept for what it says rather than what it prevents: the failure is recorded as
+      // `${model}: empty response`, which is a different diagnosis from a JSON syntax error and
+      // is the one an operator needs when a provider starts returning 200s with no body.
       if (rawText.trim()) {
         const parsed = extractCleanJSON<T>(rawText);
         reportModelCall({
@@ -199,7 +225,7 @@ export async function safeGenerateJSON<T = any>(options: {
           failures: [...failures],
           promptHash,
         });
-        return parsed;
+        return answered(parsed);
       }
       failures.push(`${model}: empty response`);
     } catch (err: any) {
@@ -211,12 +237,12 @@ export async function safeGenerateJSON<T = any>(options: {
     }
   }
 
-  // Returning the fallback is a FAILURE that happens to type-check. It must be visible: the
-  // caller receives a well-formed object and cannot tell it apart from a real answer, so the
-  // only place that can say so is here.
+  // Reaching here is a FAILURE that used to type-check. It must be visible: the caller of the
+  // legacy wrapper receives a well-formed object it cannot tell apart from a real answer, so
+  // the only place that can say so is here.
   console.error(
     `[geminiClient] All ${candidateModels.length} candidate models failed for ${agent}; ` +
-      `returning fallbackData. This is NOT a generated answer. Attempts: ${failures.join(' | ')}`
+      `ABSTAINING. This is NOT a generated answer. Attempts: ${failures.join(' | ')}`
   );
 
   // Recorded as well as logged. A run log that contains only successes reports a system that
@@ -235,5 +261,29 @@ export async function safeGenerateJSON<T = any>(options: {
     promptHash,
   });
 
+  return abstain(
+    'MODEL_UNAVAILABLE',
+    `All ${candidateModels.length} candidate model(s) failed for ${agent}. ` +
+      `Failures: ${failures.join(' | ')}`
+  );
+}
+
+/**
+ * The legacy wrapper. Returns `fallbackData` where `generateJsonOrAbstain` abstains.
+ *
+ * Kept because roughly a dozen agents call it and converting them all in one change would
+ * mix a mechanical refactor into a safety fix. It is the shape S23 objects to — the caller
+ * cannot distinguish a model answer from a substitute — so the count of call sites is held by
+ * a ratchet (scripts/check-abstention-ratchet.mjs): it may fall, never rise.
+ *
+ * Do not add call sites. Use `generateJsonOrAbstain` and handle the abstention.
+ */
+export async function safeGenerateJSON<T = any>(
+  options: GenerateJsonOptions & { fallbackData: T }
+): Promise<T> {
+  const outcome = await generateJsonOrAbstain<T>(options);
+  // `outcome.abstained === false` rather than `!outcome.abstained`: without `strict`,
+  // TypeScript does not narrow a discriminated union through a negated truthiness test.
+  if (outcome.abstained === false) return outcome.value;
   return options.fallbackData;
 }

@@ -67,13 +67,43 @@ const wellFormedInput = () => {
 describe('the live inbound drafting path', () => {
   // -------------------------------------------------------------------------
   describe('the shape the pipeline actually passes', () => {
-    it('produces a draft instead of throwing', async () => {
-      // The regression. Before the fix this rejected with a TypeError.
+    it('returns an outcome instead of throwing', async () => {
+      // The regression this was written for: before the P1.8 fix this rejected with
+      // `TypeError: Cannot read properties of undefined (reading 'contactId')`, and the
+      // enclosing handler swallowed it.
+      //
+      // Migrated 2026-09-07 (S23). It used to assert `draft.body.length > 0`, which passed
+      // because the composer fell through to a hand-written template that always produced a
+      // body. That template is gone, so with generation disabled the honest result is an
+      // ABSTENTION — and asserting a non-empty body would now be asserting that the canned
+      // email came back.
       const draft = await composeAutonomousSalesReply(wellFormedInput());
       expect(draft).toBeTruthy();
       expect(typeof draft.subject).toBe('string');
       expect(typeof draft.body).toBe('string');
-      expect(draft.body.length).toBeGreaterThan(0);
+      expect(draft.replyPlan).toBeTruthy();
+    });
+
+    it('ABSTAINS RATHER THAN COMPOSING ONE ITSELF when generation is disabled', async () => {
+      // `USE_GENAI_FOR_REPLIES` is `false` in this deployment, and it was the flag that chose
+      // between a model and the template. So the template WAS the composer, and it quoted list
+      // pricing straight from CANONICAL_KNOWLEDGE — bypassing the quote-precedence rule P1.7
+      // exists to enforce.
+      const draft = await composeAutonomousSalesReply(wellFormedInput());
+      expect(draft.abstention).toBeDefined();
+      expect(draft.abstention!.reason).toBe('GENERATION_DISABLED');
+      expect(draft.body).toBe('');
+      // and it is stopped by the same predicate both pipeline boundaries use
+      expect(draft.replyPlan.nextBestAction).toBe('NO_REPLY');
+    });
+
+    it('THE CANNED TEMPLATES ARE GONE FROM THE SOURCE', async () => {
+      const src = readFileSync('server/agents/salesDecisionEngine.ts', 'utf8');
+      // Each of these is a line the template switch used to emit to a prospect.
+      expect(src).not.toContain('CANONICAL_KNOWLEDGE.pricing.standardPackage');
+      expect(src).not.toContain('Nayem Abedin · Abedin Tech');
+      expect(src).not.toContain('sub-500ms voice turnaround');
+      expect(src).not.toContain('case "SEND_BOOKING_CTA"');
     });
 
     it('the fixture really does reach the drafter, not the pricing refusal', () => {

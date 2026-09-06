@@ -2489,6 +2489,159 @@ mutant measured and excluded rather than papered over.
 
 ---
 
+## 1v. S23 — the fallback that was the composer, and eleven facts a customer never stated (2026-09-07)
+
+### The shape
+
+`safeGenerateJSON` returns `T` whether a model answered or all five candidates failed:
+
+    return options.fallbackData;   // same type, same shape, indistinguishable
+
+P1.10 made that failure logged and recorded — the observability half. The safety half was never
+done: the caller still receives a well-formed object and cannot branch on whether a model
+produced it. No response schema has an abstention member; `INSUFFICIENT_INFORMATION`,
+`LOW_CONFIDENCE`, `CONFLICTING_EVIDENCE` and `ABSTAIN` appear nowhere in executable code.
+
+### The finding: the fallback was not a fallback
+
+In `composeAutonomousSalesReply`, reaching the fallback dropped through to a hand-written
+`switch` composing a complete, send-ready email per action — greeting, capability claims, list
+pricing quoted from `CANONICAL_KNOWLEDGE`, a booking link, a signature.
+
+Two paths reached it: every model failing, and `USE_GENAI_FOR_REPLIES` not being `'true'`. **It is
+`false` in this deployment.** So the canned template was not a rare degraded mode. It was the
+composer, and it had been all along.
+
+Which means the control P1.7 exists to provide did not apply to any reply this system would
+actually have written: `pricingContextFor` decides what pricing a reply may state when a
+customer holds a binding quote, and the template interpolated the list price unconditionally.
+The precedence rule ran only on the path that required an environment variable nobody had set.
+Its `default:` arm also composed a generic pitch for any action not in the switch — so an
+unrecognised decision produced a sales email rather than a refusal (§14).
+
+### Worse: eleven facts
+
+The same shape in `extractAndSynthesizeMemory` — which IS live — did not stop at one email.
+A "fallback memory" was assembled from substring matches on the customer's own text and returned
+whenever the model failed **or returned an empty array for a field**:
+
+    if (fullText.includes("thursday")) fallbackTimeSlots.push("Thursday 2:30 PM BST");
+    commitmentsMade:    [...] : ["14-day zero-risk trial and Google Meet walkthrough ..."],
+    objectionsResolved: [...] : ["Sub-500ms voice response speed and zero double-booking"],
+    prospectSentiment:  prospectMsgs.length > 0 ? "HIGHLY_INTERESTED" : "EVALUATING",
+
+Measured, on one real sentence:
+
+    The customer wrote: "Hi - I'm away Thursday but saw the demo link. What does it cost?"
+
+    BEFORE - the fallback, when no model answered:
+      agreedTimeSlots   : ["Thursday 2:30 PM BST"]
+      commitmentsMade   : ["Dispatched Google Meet walkthrough room link: https://meet.google.com/..."]
+      objectionsResolved: ["Sub-500ms voice response speed and zero double-booking architecture"]
+      sentiment         : HIGHLY_INTERESTED
+      DURABLE FACTS RECORDED: 11
+
+    NOW    - the abstention:
+      DURABLE FACTS RECORDED: 0
+
+"I am away Thursday" became an **agreed meeting time**. A mention of the word "demo" became a
+**commitment we had sent a Meet link**. A resolved objection appeared for a concern nobody
+raised. And these do not stay in one reply: the pipeline passes this memory to
+`observationsFromMemory` and then to `recordFacts`, so each invention became a durable fact
+**with provenance pointing at a real customer message** — and every later prompt read it back as
+something the customer had said (§20, §18).
+
+The coalescing is what made it unavoidable: `aiMemory.x.length > 0 ? aiMemory.x : fallback.x`.
+An empty list from the model is an ANSWER — "no commitments were made" — and replacing it with a
+plausible substitute is §14 exactly, an absence of evidence becoming a positive claim.
+
+### The prompt was priming it
+
+The few-shot examples in the extractor's instruction were the same claims the fallback invented,
+down to the Meet URL and the named trial offer:
+
+    4. "commitmentsMade": ... (e.g. "Shared Google Meet demo link https://meet.google.com/...",
+       "Offered 14-day zero-risk trial", "Offered mobile live test call")
+
+A model shown those as examples of what a commitment looks like will find them. They are now
+descriptions of the RULE rather than instances of the answer, and the instruction says outright
+that an empty list is correct and expected.
+
+### What landed
+
+- **`server/domain/abstention.ts`** — `ModelOutcome<T>` as a discriminated union, not `T | null`,
+  because `null` collapses "no answer" into "an empty answer" — the same conflation that made a
+  dead Gmail credential look like a quiet inbox. Abstention is not thrown: it is an expected
+  outcome, and an exception would put it in a `catch` beside genuine faults, where it would be
+  swallowed.
+- **`generateJsonOrAbstain`** beside the legacy wrapper, which is retained so a mechanical
+  migration of a dozen agents does not ride along with a safety fix.
+- **The template switch is deleted** (107 lines). The composer produces a model-written reply or
+  abstains; there is no third branch.
+- **The extractor invents nothing** (82 lines of heuristics removed), and **an abstained
+  extraction records no facts at all**.
+- **`ABSTAINED` is a disposition of its own.** A suppressed reply is a decision; an abstention
+  is the absence of one. Reporting them together would hide a total model outage inside the
+  ordinary suppression count.
+- **`USE_GENAI_FOR_REPLIES` moved into `config/safeMode.ts`**, where the other flags are read
+  lazily and fail closed. A direct `process.env` read at decision time is the P0.2 defect.
+
+### Three dead things removed
+
+| Removed | Callers | Why it mattered anyway |
+|---|---|---|
+| `generateMemoryAwareReply` | 0 | complete send-ready email as `fallbackData`, used again as `aiResp.body \|\| fallbackBody` |
+| `generateMemoryAwareFollowUp` | 0 | same, asserting a specific unsourced revenue figure |
+| `inboxAgent.ts` | 0 | fallback invented an intent, `confidence: 0.88`, the questions the customer had supposedly asked, a full draft, and `policyStatus: "ALLOW"` — a policy decision manufactured for a model that never ran |
+
+Unreachable, all three. 370 lines whose failure mode is "email a fabricated claim to a customer",
+or in the third case "approve one", is a loaded gun in a drawer — and the LIVE composer had the
+same shape until this change, which is the argument for not leaving the pattern lying around.
+
+### The twelfth guardrail
+
+`check-abstention-ratchet` holds the legacy call-site count: it may fall, never rise. A ratchet
+makes "we will migrate the rest later" enforceable rather than an intention. It fell 12 -> 11
+during this change and refused to pass until the baseline was lowered.
+
+**Its first version was broken, and instructively.** It matched
+`safeGenerateJSON\s*(?:<[^;{}()]*>)?\s*\(` — the call, with an optional type argument — and
+reported **6 call sites where grep found 14**. The character class excludes `{`, `}` and `;`,
+so every call written as `safeGenerateJSON<{ subject: string; body: string }>({...})` — an inline
+object type, which is most of them — was invisible. A ratchet silently counting less than half of
+what it guards is worse than none, because the number it prints is mistaken for coverage. It
+matches the bare identifier now; there is nothing to get wrong about the shape of a call.
+
+The prompt-authority ratchet also fell, 14 -> 11, when the dead modules went.
+
+### Evidence
+
+`npm test`: **1026 tests across 35 files**, up from 983 across 34. `tsc` exit 0, build clean,
+**12 guardrails**. **Mutation-tested 20/20**, plus one equivalent mutant measured and excluded.
+
+Three of the four first-run survivors were source assertions standing in for behaviour: the
+composer's "unusable answer" guard, the extractor's `UNASSESSED` default, and an empty model
+response. Each is now exercised against a stubbed model rather than grepped for. The fourth was
+genuinely equivalent: `if (rawText.trim())` cannot be distinguished from `if (true)`, because
+`extractCleanJSON` ends in `JSON.parse`, which throws on every whitespace-only string —
+measured across 211 such inputs, 0 disagreements. The guard stays for the diagnosis it produces
+(`empty response` rather than a JSON syntax error), and that reasoning is at the call site.
+
+### Status
+
+- **S23: NOT_STARTED -> PARTIAL.** Abstention exists, is a value callers must branch on, and is
+  wired on the live drafting path and the live extraction path. Remainder: **11 legacy call
+  sites** still substitute silently; no confidence is ever SET by any caller, so `LOW_CONFIDENCE`
+  and `CONFLICTING_EVIDENCE` are declared and unreachable; and the policy engine's confidence
+  gate still has nothing to read.
+- **S20** improves materially — the largest source of fabricated facts in the repository is gone —
+  but stays PARTIAL: the fact store still writes to a datastore this deployment cannot reach.
+- **S18** improves: the extractor's few-shot examples no longer name the answers.
+- **S1** is now STALE and says so below: the active-code-graph document lists modules this change
+  deleted.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -2497,11 +2650,11 @@ mutant measured and excluded rather than papered over.
 |---|---:|---|
 | `VERIFIED` | **0** | — |
 | `IMPLEMENTED_UNVERIFIED` | **1** | S1 |
-| `PARTIAL` | **37** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S25, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S39, S40, S41, S43, S46, S47 |
-| `NOT_STARTED` | **11** | S11, S23, S24, S26, S27, S38, S42, S44, S45, S48, S49 |
+| `PARTIAL` | **38** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S25, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S39, S40, S41, S43, S46, S47 |
+| `NOT_STARTED` | **10** | S11, S24, S26, S27, S38, S42, S44, S45, S48, S49 |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-0 + 1 + 37 + 11 + 0 = **49 rows**.
+0 + 1 + 38 + 10 + 0 = **49 rows**.
 
 | Severity | Count |
 |---|---:|
@@ -2579,7 +2732,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 
 | Section | Title | Status | Severity | Key evidence | Primary gap |
 |---|---|---|---|---|---|
-| S1 | Active code graph: dead modules, competing owners, untracked repo-mutation scripts | IMPLEMENTED_UNVERIFIED | CRITICAL | `docs/production/active-code-graph.md` (the deliverable, written); `server/services/pipeline.service.ts:5-11`; `server/gateway/actionGateway.ts:173`; `server.ts:344`; `server/routes/outbox.routes.ts:13` | The required artifact exists and is accurate; **nothing verifies it** — no dependency-cruiser rule, no CI check, no lint boundary fails when it goes stale. (The 25 dead modules, the 6 ownerless capabilities and the 172 `.cjs` scripts are what the graph *documents*; they are graded in the sections that own them, not here.) |
+| S1 | Active code graph: dead modules, competing owners, untracked repo-mutation scripts | IMPLEMENTED_UNVERIFIED | CRITICAL | `docs/production/active-code-graph.md` (the deliverable, written); `server/services/pipeline.service.ts:5-11`; `server/gateway/actionGateway.ts:173`; `server.ts:344`; `server/routes/outbox.routes.ts:13` | The artifact exists and **is now STALE**: §1q, §1v and §1t deleted modules it lists (`executeMultiAgentReplyPipeline`, `inboxAgent.ts`, `generateMemoryAwareReply`, `generateMemoryAwareFollowUp`) and added several it does not. That staleness is itself the finding — **nothing verifies it** — no dependency-cruiser rule, no CI check, no lint boundary fails when it goes stale. (The 25 dead modules, the 6 ownerless capabilities and the 172 `.cjs` scripts are what the graph *documents*; they are graded in the sections that own them, not here.) |
 | S2 | Proof-based status: test inventory, runner, CI | PARTIAL | CRITICAL | `package.json:12-13`; `server/tests/adversarial.test.ts:29-41`; `server/tests/pipeline.test.ts:16-19`; no `.github` | Zero assertions repo-wide; no test runner; no CI; the one runnable test reports 4/4 unconditionally |
 | S3 | A message cannot become SENT without a real provider result | PARTIAL | CRITICAL | `server/workers/outbox.worker.ts:99-100`; `actionGateway.ts:204-207`; `server.ts:511,519` | `|| 'sim_' + Date.now()` fabricates provider ids; two paths return success with no network call; no reconciliation; no retry; unlocked claim |
 | S4 | Tenant integrity at database level | PARTIAL | CRITICAL | `server/tenancy/orgScope.ts`; `server/middleware/tenant.ts`; `server/db/schema.ts`; `firestore.rules:5` | **P1.1/P1.2 landed.** Request-scoped tenant from a signed claim; all 13 tables carry `organization_id NOT NULL`; all 5 composite uniques declared; by-id access 404s on a foreign id; 86 executable invariants. Still PARTIAL: `firestore.rules` remains `allow read, write: if true`, so the *datastore* enforces nothing and every control is bypassable by going direct; the PostgreSQL constraints have no writer |
@@ -2601,7 +2754,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S20 | Fact provenance, temporal validity, supersession | PARTIAL | CRITICAL | `db/schema.ts:127-145`; `inboundPipeline.ts:88-101`; `models.ts:401-412` | **Nothing on a live path writes provenance.** The only fact write hard-deletes all prior facts, sets no provenance column, and hits the throwing Drizzle proxy; the live memory object is a flat key→value map; no Firestore fact collection exists. The declared bitemporal schema is aspirational, which the rubric grades NOT_STARTED |
 | S21 | Deterministic context selection and context-ID recording | PARTIAL | HIGH | `multiAgentReplySystem.ts:296`, `:319`; `salesDecisionEngine.ts:584`, `:604-607`; `db/schema.ts:221-228` | Live path concatenates the entire thread with no bound; `knownRelevantFacts` is a 2-item literal; the one ledger read passes an email as a contactId and is wrapped in `catch(e){}`; no context ids recorded |
 | S22 | AI run reproducibility (`ai_run_logs`) | PARTIAL | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | **This row was stale and is corrected 2026-09-07 (§1u):** `writeRunLog` has written a row per inbound run since §1p, carrying every model actually called, per-call prompt hashes, the context hash and manifest, token usage with an explicit partial flag, and the fallback disposition. **Remainder: no prompt VERSION, schema version or policy version** (the same residue S21 carries); cost is recorded as `null` and enforced nowhere; and the PostgreSQL `ai_run_logs` table still has no writer — the rows go to Firestore |
-| S23 | Agent abstention | NOT_STARTED | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | No abstention member in any response schema; fallback data is fabricated content, not an abstention; `shouldBook` hardcoded `true`; the confidence gate is unreachable |
+| S23 | Agent abstention | PARTIAL | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | Landed 2026-09-07 (§1v). `ModelOutcome<T>` is a discriminated union a caller must branch on; `generateJsonOrAbstain` replaces the silent substitution on the live drafting and extraction paths; the 107-line canned reply template and the 82 lines of fact-inventing heuristics are deleted; an abstained extraction records ZERO facts; `ABSTAINED` is a disposition distinct from `SUPPRESSED`. Three dead agents whose fallbacks fabricated emails, a confidence of 0.88 and a `policyStatus: "ALLOW"` were removed. **Remainder: 11 legacy `safeGenerateJSON` call sites still substitute silently (held by a ratchet); no caller ever SETS a confidence, so `LOW_CONFIDENCE` and `CONFLICTING_EVIDENCE` are declared and unreachable, and the policy engine confidence gate still has nothing to read** |
 | S24 | Specialist disagreement detection and resolution | NOT_STARTED | CRITICAL | `salesDecisionEngine.ts:610-616`; `server.ts:46`; `independentAuditor.ts:206-213` | `specialistsRequired` is computed and read by nothing; no two opinions are ever produced; the auditor is never called in production and returns six hardcoded `true` safety flags |
 | S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts:180-183` | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`; the auditor penalises replies that omit the £499 list price |
 | S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | NOT_STARTED | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | No campaign execution engine exists; none of the 14 required guards is implemented; a reply does not stop the sequence because both stop mechanisms query an empty Postgres |
