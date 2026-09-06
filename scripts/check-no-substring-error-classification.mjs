@@ -55,15 +55,22 @@ const FORBIDDEN = [
   },
 ];
 
-const ALLOWED = new Map([
-  [
-    'server/services/gmailHistorySync.service.ts',
-    'Gmail returns no machine-readable marker for "historyId is out of date" — the 404 it pairs ' +
-      'with is ambiguous between that and a deleted mailbox. The read is bounded to recovering a ' +
-      'sync cursor, it gates no external side effect, and the failure mode of getting it wrong is ' +
-      'a full resync rather than a duplicate send. Revisit if Google ever ships a reason code.',
-  ],
-]);
+/**
+ * The exception list, now empty.
+ *
+ * It held one entry: gmailHistorySync.service.ts, on the argument that a 404 from Gmail is
+ * "ambiguous between an expired history cursor and a deleted mailbox", so the substring test on
+ * the message was the only way to tell them apart.
+ *
+ * That was true and beside the point. The RESPONSE to both is a full resynchronisation, and
+ * attempting one against a mailbox that no longer exists fails cleanly — so the ambiguity never
+ * needed resolving, and the code now branches on the classified kind. Retired 2026-09-07.
+ *
+ * Kept as an empty Map rather than deleted, because the scanner's coverage assertion below
+ * subtracts its size, and because the next person who wants an exception should find the shape
+ * of the argument they have to make.
+ */
+const ALLOWED = new Map([]);
 
 function stripCommentsAndStrings(source) {
   const out = source.split('');

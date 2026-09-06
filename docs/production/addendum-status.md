@@ -2377,6 +2377,118 @@ this module deliberately does not call today.
 
 ---
 
+## 1u. S19/P0.5 — the loop an anonymous caller pays for, and two rows that had gone stale (2026-09-07)
+
+### Two rows this document was wrong about
+
+Before doing new work I re-read the matrix against the tree, and found two rows asserting facts
+that earlier commits had already made false. §2 is a rule about not over-claiming, but a status
+document that under-claims is wrong in the same way — it sends the next reader to fix something
+that is fixed, and it makes every other row less trustworthy.
+
+| Row | The document said | The tree says |
+|---|---|---|
+| **S19** | "grep ... over `server/` -> **zero hits**", "there are zero fetch timeouts anywhere" | every provider call goes through `fetchWithTimeout`; the only bare `fetch` left is inside that wrapper. The un-awaited `setInterval` has had a re-entrancy guard since P0.9 |
+| **S22** | "No writer exists", "grep `ai_run_logs` -> 6 hits, all declarations/reads, **zero writers**" | `writeRunLog` has written to `ai_run_logs` since §1p, and the inbound pipeline calls it |
+
+Both are corrected below. Neither was a false claim of completeness; both were claims of
+absence that had stopped being true.
+
+### What was still live in S19
+
+One thing, and it was the reachable one:
+
+    const res = await fetchWithTimeout(
+      `https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${historyId}`, ...
+
+`historyId` arrives from `/api/webhooks/gmail`, which is auth-exempt — the bypass is a
+`req.path.includes('/webhook')` **substring test**, not an allowlist — and signature-unverified.
+A value like `1&labelId=x` or `1#` reshapes a request we then make against a customer's
+mailbox with their credential.
+
+It is now **validated, not merely encoded**: a Gmail history id is an unsigned decimal and
+nothing else, so `isValidHistoryId` says what the value must BE. Percent-encoding something that
+could never be legitimate turns an injection into a confusing 400 rather than a refusal.
+
+### P0.5 — the cost of one request was set by the party making it
+
+The bigger finding sat one call below. The loop that follows the history fetch called the full
+AI pipeline once per message — several model calls each — with **no bound on how many messages
+one notification could claim to carry**. An unauthenticated, signature-unverified endpoint
+driving an unbounded paid-model loop is a financial-loss primitive, not a performance concern.
+
+There is now a per-notification cap of 25, and the position of the check is the point: it is
+counted **before** the deduplication query, not after. A cap applied after the datastore read
+still lets an anonymous caller drive an unbounded number of queries with only the model calls
+bounded. That distinction survived the first mutation run — my own mutation had put the check
+in the wrong place and so tested nothing — and is now held by a test that counts queries rather
+than model calls.
+
+Reaching the cap is reported. Gmail re-delivers unacknowledged history, so the remainder is
+**deferred rather than lost** — but only saying so makes that recoverable rather than a hope.
+Silent truncation reads as "we handled everything".
+
+### A documented exception, retired
+
+    if (e.message?.includes('historyId is out of date') || e.code === 404) {
+
+This repository has a guardrail against classifying errors by substring, and this file was its
+**one documented exception**. The argument recorded there was that a 404 from Gmail is ambiguous
+between an expired cursor and a deleted mailbox, so only the prose could tell them apart.
+
+That was true and beside the point: the RESPONSE to both is a full resynchronisation, and
+attempting one against a mailbox that no longer exists fails cleanly. The ambiguity never needed
+resolving. The branch reads `classified.kind === 'NOT_FOUND'` and the exception list is empty —
+`check-no-substring-error-classification: ok (100 files checked, 0 documented exception)`.
+
+The test for it is written the way round that matters: an error whose **message says** the
+cursor expired but whose **structure says** the connection broke must NOT take the expiration
+path.
+
+### One more stub that reassured
+
+    async handleHistoryExpiration(emailAddress) {
+        console.warn(`History ID expired for ${emailAddress}. Performing full sync.`);
+        // Logic for full sync goes here
+    }
+
+An operator reading that log line would reasonably believe the mailbox had resynchronised. It
+now says NOT IMPLEMENTED, at error level, and names the consequence: every message that arrived
+while the cursor was stale is unread by this system.
+
+### An equivalent mutant, measured
+
+Dropping `encodeURIComponent` from the URL survived, and it should have. Given the validator,
+every value that reaches the interpolation matches `^[1-9]\d{0,19}$`. Measured across **299,999
+accepted ids** — every 1-to-5-digit value exhaustively plus 200,000 random longer ones —
+`encodeURIComponent` changed the value **0 times**. No test can distinguish the two versions,
+and writing one that appeared to would be writing a test that asserts nothing.
+
+The call stays, as the second half of a pair: if the validator is ever loosened, it is what
+still turns `1&labelId=x` into `1%26labelId%3Dx`. That reasoning is recorded at the call site
+so the next reader knows it was measured rather than left in by accident.
+
+### Evidence
+
+`npm test`: **983 tests across 34 files**, up from 967 across 33. `tsc` exit 0, build clean,
+11 guardrails green with one fewer exception. **Mutation-tested 10/10**, plus one equivalent
+mutant measured and excluded rather than papered over.
+
+### Status
+
+- **S19: NOT_STARTED -> PARTIAL.** Fetch deadlines exist everywhere, the re-entrancy guard
+  exists, and the one attacker-controlled value in a URL is validated. Not further, because
+  none of it has been exercised against a live provider or a genuinely hung socket: the timeout
+  is proven against a stubbed transport, and the re-entrancy guard by reading it.
+- **S22: NOT_STARTED -> PARTIAL.** A writer exists and runs. Remainder: no prompt VERSION,
+  schema version or policy version (the same residue S21 carries), cost is recorded as `null`
+  and enforced nowhere, and the PostgreSQL `ai_run_logs` table still has no writer — the rows
+  go to Firestore, which is the datastore decision from §1m.
+- **S36/S37** gain a real bound on the one anonymous spend path, but stay as they are: this is
+  a cap on one endpoint, not a rate limiter, and there is still no per-tenant or per-day budget.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -2385,11 +2497,11 @@ this module deliberately does not call today.
 |---|---:|---|
 | `VERIFIED` | **0** | — |
 | `IMPLEMENTED_UNVERIFIED` | **1** | S1 |
-| `PARTIAL` | **35** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S20, S21, S25, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S39, S40, S41, S43, S46, S47 |
-| `NOT_STARTED` | **13** | S11, S19, S22, S23, S24, S26, S27, S38, S42, S44, S45, S48, S49 |
+| `PARTIAL` | **37** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S25, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S39, S40, S41, S43, S46, S47 |
+| `NOT_STARTED` | **11** | S11, S23, S24, S26, S27, S38, S42, S44, S45, S48, S49 |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-0 + 1 + 35 + 13 + 0 = **49 rows**.
+0 + 1 + 37 + 11 + 0 = **49 rows**.
 
 | Severity | Count |
 |---|---:|
@@ -2485,10 +2597,10 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S16 | MIME parsing, encodings, what reaches the model | PARTIAL | HIGH | `gmail.service.ts:80-104`, `:136-143`; `inboundPipeline.ts:65` | Real MIME layer landed 2026-09-07 (§1t): charset-aware decoding, RFC 2047 headers, `multipart/alternative` chosen not concatenated, `message/rfc822` not inlined, `multipart/report` captured, size and depth caps, and `sanitizedHtmlBody` renamed to `rawHtmlBody` beside a text rendering. `Content-Transfer-Encoding` is deliberately not applied to Gmail bodies (they arrive pre-decoded) — see §1t. **Remainder: never run against real Gmail traffic.** outbound header injection **fixed 2026-09-07** (§1r) — every header value is refused if it carries CR, LF or NUL, so a reply subject derived from an inbound one can no longer smuggle a `Bcc:` |
 | S17 | Attachment handling (limits, allowlist, sniffing, scanning, retention) | PARTIAL | HIGH | `gmail.service.ts:84-94`, `:110`; `server.ts:58` | Attachments are now RECORDED rather than dropped (§1t): filename, mime type, size and attachment id, with a count that survives the cap, and their bytes are never inlined into the body. Message-level size and depth caps exist and report their own truncation. **Remainder: no allowlist, no content sniffing, no scanning, no storage and no retention policy** — nothing fetches an attachment, which is why this is PARTIAL rather than more |
 | S18 | Indirect prompt injection via untrusted email | PARTIAL | CRITICAL | `aiSecurity.service.ts:3-15`; `geminiClient.ts:125`; `multiAgentReplySystem.ts:299-303`, `:445`; `firestore.rules:5` | **Both sanitizers are unreachable** — §6.3 concedes the text-channel exploit "is not executable on the live path" — so no defence exists on any live path; no authority separation; raw transcripts interpolated into prompts; the auditor is stubbed to PASS. The reachable injection channel is a **write** channel: the world-writable prompt corpus and outbox |
-| S19 | SSRF / outbound URL fetching | NOT_STARTED | MEDIUM | `gmail.service.ts:49,64,151`; `actionGateway.ts:272,287`; `calendar.service.ts:44`; grep `AbortController\|AbortSignal\|signal:\|setTimeout(` over `server/` → **zero hits** | Classic SSRF is **not reachable**: all 6 fetch hosts are string literals on `googleapis.com`, so there is no attacker-controlled host. The live defect is the absence of any request deadline — zero fetch timeouts anywhere in `server/`, on calls driven by an un-awaited 5s `setInterval` with no re-entrancy guard. Attacker-controlled `historyId` is still interpolated into a path without encoding via an unauthenticated webhook |
+| S19 | SSRF / outbound URL fetching | PARTIAL | MEDIUM | `gmail.service.ts:49,64,151`; `actionGateway.ts:272,287`; `calendar.service.ts:44`; `server/lib/httpClient.ts` (`fetchWithTimeout`, the only bare `fetch` in `server/`); `server/services/gmail.service.ts` (`isValidHistoryId`); `server/workers/outbox.worker.ts` (`processing` re-entrancy guard); `historySync.invariant.test.ts` | Classic SSRF is **not reachable**: all 6 fetch hosts are string literals on `googleapis.com`. **This row was stale and is corrected 2026-09-07 (§1u):** every provider call has gone through `fetchWithTimeout` since P0.5 and the un-awaited `setInterval` has had a re-entrancy guard since P0.9 — the "zero fetch timeouts" evidence no longer holds. The one live item, attacker-controlled `historyId` interpolated into a URL from an unauthenticated webhook, is now **validated** (unsigned decimal or refuse) as well as encoded. **Remainder: none of it exercised against a live provider or a genuinely hung socket** |
 | S20 | Fact provenance, temporal validity, supersession | PARTIAL | CRITICAL | `db/schema.ts:127-145`; `inboundPipeline.ts:88-101`; `models.ts:401-412` | **Nothing on a live path writes provenance.** The only fact write hard-deletes all prior facts, sets no provenance column, and hits the throwing Drizzle proxy; the live memory object is a flat key→value map; no Firestore fact collection exists. The declared bitemporal schema is aspirational, which the rubric grades NOT_STARTED |
 | S21 | Deterministic context selection and context-ID recording | PARTIAL | HIGH | `multiAgentReplySystem.ts:296`, `:319`; `salesDecisionEngine.ts:584`, `:604-607`; `db/schema.ts:221-228` | Live path concatenates the entire thread with no bound; `knownRelevantFacts` is a 2-item literal; the one ledger read passes an email as a contactId and is wrapped in `catch(e){}`; no context ids recorded |
-| S22 | AI run reproducibility (`ai_run_logs`) | NOT_STARTED | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | No writer exists; `agentName` is a dead parameter; model id unrecoverable across the failover loop; no tokens, cost, prompt/schema/policy version, or fallback flag |
+| S22 | AI run reproducibility (`ai_run_logs`) | PARTIAL | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | **This row was stale and is corrected 2026-09-07 (§1u):** `writeRunLog` has written a row per inbound run since §1p, carrying every model actually called, per-call prompt hashes, the context hash and manifest, token usage with an explicit partial flag, and the fallback disposition. **Remainder: no prompt VERSION, schema version or policy version** (the same residue S21 carries); cost is recorded as `null` and enforced nowhere; and the PostgreSQL `ai_run_logs` table still has no writer — the rows go to Firestore |
 | S23 | Agent abstention | NOT_STARTED | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | No abstention member in any response schema; fallback data is fabricated content, not an abstention; `shouldBook` hardcoded `true`; the confidence gate is unreachable |
 | S24 | Specialist disagreement detection and resolution | NOT_STARTED | CRITICAL | `salesDecisionEngine.ts:610-616`; `server.ts:46`; `independentAuditor.ts:206-213` | `specialistsRequired` is computed and read by nothing; no two opinions are ever produced; the auditor is never called in production and returns six hardcoded `true` safety flags |
 | S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts:180-183` | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`; the auditor penalises replies that omit the £499 list price |

@@ -25,6 +25,14 @@ export interface SendEmailOptions {
   rfc822MessageId?: string;
 }
 
+/**
+ * S19 — a Gmail history id is an unsigned 64-bit decimal. Twenty digits covers the whole range,
+ * and a leading zero is not a form Google issues.
+ */
+export function isValidHistoryId(value: unknown): value is string {
+  return typeof value === 'string' && /^[1-9]\d{0,19}$/.test(value);
+}
+
 export interface GmailMessage {
   id: string;
   threadId: string;
@@ -155,9 +163,36 @@ export class GmailService implements EmailProvider, RefreshableCredential, SentM
   
   async getHistory(historyId: string, emailAddress: string): Promise<any[]> {
     if (!this.accessToken) throw new Error("Credentials not set");
-    
-    // We get the history
-    const res = await fetchWithTimeout(`https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${historyId}`, {
+
+    // S19 — `historyId` arrives from `/api/webhooks/gmail`, which is unauthenticated and
+    // signature-unverified, and it used to be interpolated straight into this URL. A value
+    // like `1&labelId=x` or `1#` reshapes the request we make on the customer's mailbox.
+    //
+    // Validated rather than merely encoded, because a Gmail history id is an unsigned decimal
+    // and nothing else: percent-encoding a value that could never be legitimate turns an
+    // injection into a confusing 400 instead of a refusal. `isValidHistoryId` says what the
+    // value must BE, which is the stronger statement.
+    if (!isValidHistoryId(historyId)) {
+      throw new ProviderError({
+        provider: 'gmail',
+        operation: 'getHistory',
+        kind: 'INVALID_REQUEST',
+        signal: 'startHistoryId is not an unsigned decimal id; refusing to build a request from it',
+      });
+    }
+
+    // The encode is MEASURABLY REDUNDANT given the validator above, and it stays anyway.
+    //
+    // Removing it survived mutation testing, correctly: across 299,999 ids matching
+    // `^[1-9]\d{0,19}$` — every 1-to-5-digit value exhaustively plus 200,000 random longer ones
+    // — `encodeURIComponent` changed the value 0 times. No test can distinguish the two
+    // versions, and writing one that appeared to would be writing a test that asserts nothing.
+    //
+    // It is kept as the second half of a pair: if the validator is ever loosened, this is what
+    // still turns `1&labelId=x` into `1%26labelId%3Dx` instead of a second query parameter on a
+    // request against a customer's mailbox. Recorded here so the next person to see an
+    // "unnecessary" call knows it was measured rather than left in by accident.
+    const res = await fetchWithTimeout(`https://gmail.googleapis.com/gmail/v1/users/me/history?startHistoryId=${encodeURIComponent(historyId)}`, {
       headers: { 'Authorization': `Bearer ${this.accessToken}` }
     });
     
