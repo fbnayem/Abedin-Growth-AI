@@ -27,6 +27,7 @@ const call = (over: Partial<ModelCallRecord> = {}): ModelCallRecord => ({
   totalTokens: 150,
   durationMs: 12,
   failures: [],
+  promptHash: null,
   ...over,
 });
 
@@ -156,6 +157,8 @@ describe('2. which model answered is recorded', () => {
     expect(seen[0].totalTokens).toBeNull();
     expect(seen[0].attempts).toBeGreaterThan(1);
     expect(seen[0].failures.length).toBeGreaterThan(0);
+    // The prompt hash travels with the record on this path too.
+    expect(seen[0].promptHash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('the fallback record names no model in the source either', () => {
@@ -163,6 +166,17 @@ describe('2. which model answered is recorded', () => {
     const fallbackBlock = client.slice(client.lastIndexOf('reportModelCall('));
     expect(fallbackBlock).toContain('model: null');
     expect(fallbackBlock).not.toMatch(/model: (primaryModel|model|candidateModels)/);
+  });
+
+  it('the ANSWERED record carries the computed prompt hash, not null', () => {
+    // The success path needs a real API key to exercise, so this asserts the VALUE passed
+    // rather than that an identifier appears. Mutating it to `promptHash: null` survived
+    // everything else in the suite.
+    const client = stripped('server/geminiClient.ts');
+    const answered = client.slice(client.indexOf("outcome: 'ANSWERED'"));
+    const block = answered.slice(0, answered.indexOf('});'));
+    expect(block).toMatch(/^\s*promptHash,\s*$/m);
+    expect(block).not.toContain('promptHash: null');
   });
 
   it('two concurrent requests do not spend each other\'s budget', async () => {
@@ -288,9 +302,28 @@ describe('5. the log endpoint can actually return a log', () => {
   });
 
   it('an empty result says WHY it is empty', () => {
-    // §14 applied to observability: an empty log must not read as "no problems".
-    expect(server).toContain('writerExists: false');
-    expect(server).toMatch(/An empty\s*\n?\s*'?\s*\+?\s*'?list here is an absent writer/);
+    // §14 applied to observability: an empty log must not read as "no problems". The two
+    // reasons for an empty list — no writer, or no runs — are different facts, and the field
+    // exists so a caller is told which. `writerExists` became true when the writer landed.
+    expect(server).toContain('writerExists: true');
+    expect(server).toMatch(/items\.length === 0\s*\n?\s*\?/);
+  });
+
+  it('the claim that a writer exists is TRUE — the pipeline writes one per run', () => {
+    // Guards against `writerExists: true` becoming the same kind of unearned assertion the
+    // hardcoded audit PASS was. The field is a claim about the system, so it needs evidence.
+    const pipeline = stripped('server/services/inboundPipeline.ts');
+    expect(pipeline).toContain('await writeRunLog({');
+    const runLog = stripped('server/lib/runLog.ts');
+    expect(runLog).toMatch(/setDoc\(\s*doc\(collection\(firestore, orgPath\(input\.organizationId, 'ai_run_logs'\)\)/);
+  });
+
+  it('the status badge does not render a FAILED run in success colours', () => {
+    // Invisible while nothing wrote run logs. The writer makes FAILED rows real, and a status
+    // display that shows every row green cannot report a problem.
+    const view = stripped('src/pages/SettingsView.tsx');
+    expect(view).toMatch(/log\.status === 'SUCCESS'/);
+    expect(view).toContain('bg-red-100');
   });
 });
 

@@ -250,9 +250,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <td className="py-2 px-3 font-semibold text-slate-900">{log.agentType}</td>
                   <td className="py-2 px-3 text-slate-600">{log.actionType}</td>
                   <td className="py-2 px-3">
-                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                    {/*
+                      The badge was hardcoded emerald, so every row rendered green whatever it
+                      said. That was invisible while nothing wrote run logs; the writer landed,
+                      FAILED rows became real, and a failure shown in success colours is a
+                      status display that cannot report a problem.
+                    */}
+                    <span
+                      className={
+                        'px-1.5 py-0.5 rounded text-[10px] font-bold ' +
+                        (log.status === 'SUCCESS'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-red-100 text-red-800')
+                      }
+                    >
                       {log.status}
                     </span>
+                    {log.disposition && log.disposition !== 'QUEUED' && (
+                      <span className="ml-1.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                        {log.disposition}
+                      </span>
+                    )}
                   </td>
                   <td className="py-2 px-3 text-slate-700 font-sans max-w-xs truncate">
                     {log.summary}

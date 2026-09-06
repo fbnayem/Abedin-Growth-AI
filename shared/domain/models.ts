@@ -663,17 +663,70 @@ export interface DailyGrowthBrief {
   topPerformingSegment: string;
 }
 
+/**
+ * One recorded run of the autonomous pipeline (addendum §21, §46, §18).
+ *
+ * Nothing wrote one of these until the writer landed: `/api/logs` read a collection with no
+ * producer, ordered by a field this shape does not have. The fields below the divider are what
+ * makes a run reproducible — without them "why did it say that?" has no answer, because the
+ * prompt was assembled from whatever was in scope and then discarded.
+ *
+ * WHAT IS DELIBERATELY ABSENT
+ * ---------------------------
+ * The customer's email text, the assembled prompt, and the drafted reply are NOT stored here.
+ * A run log is read by operators and could be re-fed to a model; putting untrusted customer
+ * text in it is how one injected sentence becomes a durable record the system quotes back to
+ * itself (§18). `promptHashes` proves which prompt ran without retaining it, and
+ * `conversationId`/`messageId` address the real content where it already lives.
+ */
 export interface AIRunLog {
   id: string;
   workspaceId: string;
   agentType: string;
   actionType: string;
-  modelCategory: 'FAST' | 'SMART' | 'DEEP';
+  /** null when no model was called, or when the category was never established. */
+  modelCategory: 'FAST' | 'SMART' | 'DEEP' | null;
+  /** Did the run COMPLETE? What it decided is `disposition`. */
   status: 'SUCCESS' | 'FAILED';
-  confidence: number;
+  /**
+   * `null` unless something actually computed one.
+   *
+   * This was a bare `number`, which invites a placeholder. A confidence nobody measured, shown
+   * to an operator as a number, is worse than no confidence at all (§2).
+   */
+  confidence: number | null;
   summary: string;
   durationMs: number;
   createdAt: string;
+
+  // --- §21 reproducibility. Optional so existing readers keep working.
+
+  /** What the run decided, as distinct from whether it finished. */
+  disposition?: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED' | 'FAILED';
+  /** Where a failed run stopped. */
+  stage?: string | null;
+  conversationId?: string | null;
+  messageId?: string | null;
+  /**
+   * Every model that answered, in call order. A `null` entry is a total failover where the
+   * caller received `fallbackData` — a failure that type-checks, and the one case where naming
+   * a model would attribute an answer to one that never produced it.
+   */
+  models?: (string | null)[];
+  /** sha256 of what was sent to each model. The prompt itself is never stored. */
+  promptHashes?: (string | null)[];
+  modelCalls?: number;
+  /** Sum of PROVIDER-REPORTED tokens. A lower bound whenever `tokensArePartial` is true. */
+  reportedTokens?: number;
+  tokensArePartial?: boolean;
+  unmeasuredCalls?: number;
+  /**
+   * Null, and it says why in `costEnforcement`. Converting tokens to pounds needs a per-model
+   * price table that does not exist in this repository; a zero here would read as "free".
+   */
+  costMinor?: number | null;
+  currency?: string | null;
+  costEnforcement?: string | null;
 }
 
 export interface AutopilotCycleLog {

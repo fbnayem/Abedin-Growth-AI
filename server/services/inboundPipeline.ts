@@ -1,6 +1,7 @@
 import { CanaryRolloutService } from './canary.service';
 import { BudgetTracker } from '../policies/workflowBudgets';
 import { withModelCallCollector, type ModelCallRecord } from '../lib/modelCallLog';
+import { runLogFieldsFor, writeRunLog } from '../lib/runLog';
 import { MetricsService } from './metrics.service';
 import { LedgerService } from './ledgers.service';
 import { BuyingStage, suppressesReply } from "../../shared/domain/models";
@@ -45,6 +46,8 @@ export type InboundOutcome =
       disposition: 'QUEUED' | 'SUPPRESSED' | 'BLOCKED';
       detail: string;
       modelCalls: ModelCallRecord[];
+      conversationId?: string | null;
+      messageId?: string | null;
     }
   | {
       ok: false;
@@ -52,6 +55,8 @@ export type InboundOutcome =
       stage: 'TENANT' | 'IDENTITY' | 'BUDGET' | 'UNHANDLED';
       detail: string;
       modelCalls?: ModelCallRecord[];
+      conversationId?: string | null;
+      messageId?: string | null;
     };
 
 /**
@@ -227,7 +232,9 @@ export class InboundPipeline {
     const budgetTracker = new BudgetTracker();
     const modelCalls: ModelCallRecord[] = [];
 
-    return withModelCallCollector(
+    const startedAt = Date.now();
+
+    const outcome = await withModelCallCollector(
       {
         record: (call) => {
           modelCalls.push(call);
@@ -242,6 +249,49 @@ export class InboundPipeline {
       },
       () => this.runPipeline(email, organizationId, budgetTracker, modelCalls)
     );
+
+    // §21 — ONE run log per run, written HERE rather than at each `return` inside the pipeline.
+    //
+    // There are five exit paths and a catch. Writing the log at each of them would mean six
+    // chances to forget one, and the path most worth recording — the failure — is the one a
+    // person adding a sixth exit is least likely to think about. Wrapping the call means every
+    // path is covered by construction, including ones added later.
+    //
+    // Nothing wrote one of these before: `/api/logs` read a collection with no producer, and
+    // the PostgreSQL table with the right columns had never had a row inserted.
+    if (isValidOrgId(organizationId)) {
+      // The status mapping lives in runLog.ts as a pure function, not inline here. As four
+      // lines in this method it was untestable, and mutating it to record a FAILED run as
+      // SUCCESS survived the entire suite.
+      const { status, disposition, summary, stage } = runLogFieldsFor(outcome);
+
+      await writeRunLog({
+        organizationId,
+        agentType: 'InboundPipeline',
+        actionType: 'AUTONOMOUS_REPLY',
+        status,
+        disposition,
+        // `detail` is system-generated prose in every branch — an action name, an audit reason,
+        // an error message. The customer's words never reach it (§18).
+        summary,
+        stage,
+        conversationId: outcome.conversationId ?? null,
+        messageId: outcome.messageId ?? email?.id ?? null,
+        durationMs: Date.now() - startedAt,
+        modelCalls,
+        budget: budgetTracker.snapshot(),
+        now: new Date().toISOString(),
+      });
+    } else {
+      // Refusing rather than writing under a default tenant: a run log is tenant-scoped data,
+      // and an unattributable one would be filed under somebody (§1).
+      console.error(
+        '[InboundPipeline] Run NOT logged: no valid organisation id, so there is no tenant to ' +
+          'file it under. The refusal to process is recorded in the returned outcome.'
+      );
+    }
+
+    return outcome;
   }
 
   private async runPipeline(
@@ -431,7 +481,7 @@ export class InboundPipeline {
       // not recognise, because sending is the permission (§14).
       if (suppressesReply(nbaResult.action)) {
          console.log(`[InboundPipeline] Suppressed: action=${nbaResult.action} — ${nbaResult.reason}`);
-         return { ok: true, disposition: 'SUPPRESSED', detail: `${nbaResult.action}: ${nbaResult.reason}`, modelCalls };
+         return { ok: true, disposition: 'SUPPRESSED', detail: `${nbaResult.action}: ${nbaResult.reason}`, modelCalls, conversationId, messageId };
       }
 
       // The line that stood here was:
@@ -514,7 +564,7 @@ export class InboundPipeline {
           `[InboundPipeline] Planner suppressed the reply: ${draft.replyPlan.nextBestAction} — ` +
             draft.replyPlan.reason
         );
-        return { ok: true, disposition: 'SUPPRESSED', detail: `${draft.replyPlan.nextBestAction}: ${draft.replyPlan.reason}`, modelCalls };
+        return { ok: true, disposition: 'SUPPRESSED', detail: `${draft.replyPlan.nextBestAction}: ${draft.replyPlan.reason}`, modelCalls, conversationId, messageId };
       }
 
       // 8. Independent Audit
@@ -540,7 +590,7 @@ export class InboundPipeline {
 
       if (auditDecision === 'BLOCK') {
          console.error("Draft blocked by auditor:", auditReason);
-         return { ok: true, disposition: 'BLOCKED', detail: auditReason, modelCalls };
+         return { ok: true, disposition: 'BLOCKED', detail: auditReason, modelCalls, conversationId, messageId };
       }
 
       // 9. Transactional Outbox Insert
@@ -604,7 +654,7 @@ export class InboundPipeline {
           `${spend.elapsedMs}ms. Models: ${modelCalls.map((c) => c.model ?? 'NONE(fallback)').join(', ') || 'none'}`
       );
 
-      return { ok: true, disposition: 'QUEUED', detail: `outbox=${outboxStatus}`, modelCalls };
+      return { ok: true, disposition: 'QUEUED', detail: `outbox=${outboxStatus}`, modelCalls, conversationId, messageId };
 
     } catch (e) {
       // This was `console.error(...)` and nothing else — no rethrow, no durable record, no

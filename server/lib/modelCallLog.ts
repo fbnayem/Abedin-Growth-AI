@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
@@ -55,6 +56,31 @@ export interface ModelCallRecord {
   durationMs: number;
   /** One line per failed candidate, so a silent failover is legible after the fact. */
   failures: string[];
+  /**
+   * sha256 of exactly what was sent, or null if it could not be computed.
+   *
+   * THE HASH AND NOT THE PROMPT. §21 needs to prove which prompt produced a reply; §18 forbids
+   * retaining the customer's words in a record operators read and models may be shown. A hash
+   * settles "was this the same prompt?" — which is the question a reproducibility record is
+   * actually asked — without keeping the text.
+   */
+  promptHash: string | null;
+}
+
+/** Hash what was sent. The instruction and the untrusted content are hashed as distinct fields
+ * so that moving text between them changes the hash — that move is the §18 violation. */
+export function hashPrompt(parts: { systemInstruction?: string; contents?: string; prompt?: string }): string | null {
+  try {
+    const material = JSON.stringify({
+      systemInstruction: parts.systemInstruction ?? null,
+      contents: parts.contents ?? null,
+      prompt: parts.prompt ?? null,
+    });
+    return createHash('sha256').update(material, 'utf8').digest('hex');
+  } catch {
+    // A prompt that cannot be hashed must not stop the call it describes.
+    return null;
+  }
 }
 
 export interface ModelCallCollector {

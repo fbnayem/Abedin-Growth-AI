@@ -480,19 +480,21 @@ app.get("/api/health", (req: Request, res: Response) => {
       // was added, silently, with HTTP 200. An empty observability surface reading as "no
       // problems" is the §14 failure applied to logs.
       //
-      // Nothing writes this collection yet (there is no run-log writer), so it returns []
-      // today for a second, honest reason. `writerExists` says which of the two it is instead
-      // of leaving the caller to guess from an empty array.
+      // `writerExists` is true since server/lib/runLog.ts landed: the inbound pipeline writes
+      // one row per run, on every exit path including the failures. An empty list now means
+      // no run has happened, which is a different fact from "nothing records them" — and
+      // saying which is the whole reason this field is here rather than a bare array.
       const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'ai_run_logs')), orderBy('createdAt', 'desc'), limit(50)));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json({
         items,
-        writerExists: false,
+        writerExists: true,
         note:
           items.length === 0
-            ? 'No run logs exist: nothing in this deployment writes ai_run_logs yet. An empty ' +
-              'list here is an absent writer, not a quiet system.'
+            ? 'No runs have been recorded for this organisation yet. The inbound pipeline writes ' +
+              'one row per run, so an empty list here means no message has been processed — not ' +
+              'that runs go unrecorded.'
             : null,
       });
     } catch(e: any) { sendCaught(req, res, e); }

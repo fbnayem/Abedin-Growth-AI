@@ -1,4 +1,4 @@
-import { readUsage, reportModelCall } from './lib/modelCallLog';
+import { hashPrompt, readUsage, reportModelCall } from './lib/modelCallLog';
 import { GoogleGenAI } from "@google/genai";
 
 let aiInstance: GoogleGenAI | null = null;
@@ -160,6 +160,14 @@ export async function safeGenerateJSON<T = any>(options: {
   const category = options.category || 'SMART';
   const startedAt = Date.now();
   let attempts = 0;
+  // Computed once, from exactly what will be sent. The instruction and the untrusted content
+  // are hashed as separate fields, so moving text from one to the other CHANGES the hash —
+  // and that move is the §18 violation this repository spends the most effort preventing.
+  const promptHash = hashPrompt({
+    systemInstruction: options.systemInstruction,
+    contents: options.contents,
+    prompt: options.prompt,
+  });
 
   for (const model of candidateModels) {
     attempts++;
@@ -189,6 +197,7 @@ export async function safeGenerateJSON<T = any>(options: {
           ...readUsage((response as any)?.usageMetadata),
           durationMs: Date.now() - startedAt,
           failures: [...failures],
+          promptHash,
         });
         return parsed;
       }
@@ -223,6 +232,7 @@ export async function safeGenerateJSON<T = any>(options: {
     totalTokens: null,
     durationMs: Date.now() - startedAt,
     failures: [...failures],
+    promptHash,
   });
 
   return options.fallbackData;
