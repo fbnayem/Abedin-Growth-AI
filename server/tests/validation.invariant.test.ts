@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { csvField } from '../../shared/lib/csvSafety';
 import {
   createContactSchema,
   createKnowledgeItemSchema,
@@ -203,5 +205,37 @@ describe('§34 — exported cells cannot execute', () => {
 
   it('builds a row with every cell neutralised', () => {
     expect(csvRow(['Dave', '=EVIL()', 'a,b'])).toBe('Dave,\'=EVIL(),"a,b"');
+  });
+});
+
+describe('§34 — the BROWSER exporter is the one that matters, and it is wired', () => {
+  // The neutraliser existing is not the same as the export using it. That distinction is
+  // exactly why S18 sat at NOT_STARTED with a sanitiser already in the repository: the
+  // function was there, nothing called it.
+  const source = readFileSync('src/utils/exportUtils.ts', 'utf8');
+
+  it('imports the shared rule', () => {
+    expect(source).toMatch(/import \{ csvField \} from ["'][^"']*shared\/lib\/csvSafety["']/);
+  });
+
+  it('builds every field through it', () => {
+    expect(source).toContain('csvField(val, { alwaysQuote: true })');
+    expect(source).toContain('csvField(h, { alwaysQuote: true })');
+  });
+
+  it('no longer hand-rolls the quoting it used instead', () => {
+    // The old line was `String(val).replace(/"/g, '""')` wrapped in quotes — correct CSV
+    // quoting, and no protection at all, because the spreadsheet strips the quotes first.
+    expect(source).not.toMatch(/String\(val\)\.replace\(\/"\/g/);
+  });
+
+  it('the always-quoted form still neutralises', () => {
+    // The exporter quotes every field. Quoting must not undo the neutralisation, and the
+    // apostrophe must end up INSIDE the quotes where the spreadsheet reads it.
+    expect(csvField('=HYPERLINK("http://evil","x")', { alwaysQuote: true })).toBe(
+      '"\'=HYPERLINK(""http://evil"",""x"")"'
+    );
+    expect(csvField('Dave', { alwaysQuote: true })).toBe('"Dave"');
+    expect(csvField(null, { alwaysQuote: true })).toBe('""');
   });
 });

@@ -2,7 +2,17 @@
  * Universal CSV & JSON Exporter Utility
  * Cleanly exports Lead, Investor, and Partner datasets for CRM sync
  * (HubSpot, Salesforce, Apollo, Instantly, Clay, Google Sheets).
+ *
+ * P1.10 (34) — This exporter doubled double-quotes and wrapped every field in quotes. That is
+ * correct CSV quoting and it is NOT protection: Excel and Sheets strip the quotes on import
+ * and then evaluate any cell starting with an equals, plus, minus, at, tab or carriage return.
+ *
+ * The rows here carry contact names, company names and reply bodies written by external
+ * parties, so a prospect could put a HYPERLINK formula in their display name and have it
+ * execute on the operator machine when the export is opened. Neutralisation now happens in
+ * shared/lib/csvSafety.ts, which the server uses too.
  */
+import { csvField } from "../../shared/lib/csvSafety";
 
 export function exportToCSV<T extends Record<string, any>>(
   data: T[],
@@ -19,7 +29,9 @@ export function exportToCSV<T extends Record<string, any>>(
   const headers = keys.map((key) => columnMapping?.[key] || key);
 
   const csvRows: string[] = [];
-  csvRows.push(headers.map((h) => `"${String(h).replace(/"/g, '""')}"`).join(","));
+  // Headers are ours rather than the data's, but they go through the same function so there is
+  // one path to audit instead of two.
+  csvRows.push(headers.map((h) => csvField(h, { alwaysQuote: true })).join(","));
 
   for (const row of data) {
     const values = keys.map((key) => {
@@ -36,8 +48,7 @@ export function exportToCSV<T extends Record<string, any>>(
           val = JSON.stringify(val);
         }
       }
-      const stringVal = String(val).replace(/"/g, '""');
-      return `"${stringVal}"`;
+      return csvField(val, { alwaysQuote: true });
     });
     csvRows.push(values.join(","));
   }

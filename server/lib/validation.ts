@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { sendError } from './errors';
+import { csvField, neutralizeCsvValue } from '../../shared/lib/csvSafety';
+
+export { neutralizeCsvValue };
 
 /**
  * P1.10 — INPUT VALIDATION AND MASS ASSIGNMENT (addendum §11, §16).
@@ -174,28 +177,11 @@ export function project<T extends Record<string, unknown>>(
 /**
  * P1.10 (§34) — CSV injection.
  *
- * A cell beginning `=`, `+`, `-`, `@`, tab or carriage return is executed as a formula when the
- * file is opened in Excel or Sheets. Since these exports carry names, subjects and email
- * bodies supplied by external parties, an attacker can put `=HYPERLINK(...)` or a DDE payload
- * in a contact name and have it run on the operator's machine when they open the export.
- *
- * Prefixing with an apostrophe is the standard neutralisation: the spreadsheet treats the cell
- * as literal text and does not display the apostrophe.
+ * The rule itself lives in shared/lib/csvSafety.ts, because the BROWSER exporter — the one an
+ * operator actually downloads from — needs the identical rule, and two copies is how one of
+ * them quietly stops matching the other. These are the server-side names for it.
  */
-export function neutralizeCsvCell(value: unknown): string {
-  const text = value === null || value === undefined ? '' : String(value);
-  if (text.length === 0) return text;
-
-  const first = text[0];
-  const dangerous = ['=', '+', '-', '@', '\t', '\r'];
-  const prefixed = dangerous.includes(first) ? `'${text}` : text;
-
-  // Standard CSV quoting, applied after neutralisation so the apostrophe is inside the quotes.
-  if (/[",\n\r]/.test(prefixed)) {
-    return `"${prefixed.replace(/"/g, '""')}"`;
-  }
-  return prefixed;
-}
+export const neutralizeCsvCell = (value: unknown): string => csvField(value);
 
 /** A CSV row with every cell neutralised. */
 export function csvRow(values: readonly unknown[]): string {
