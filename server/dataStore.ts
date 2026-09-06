@@ -1,3 +1,4 @@
+import { isValidOrgId } from './tenancy/orgScope';
 import { db } from './db/index';
 import { eq } from 'drizzle-orm';
 import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, outboxMessages, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
@@ -230,34 +231,38 @@ export class DataStore {
     }
   }
 
-  
+
   public async saveToDb() {
     try {
       if (!db || typeof db.insert !== 'function') return; // DB not ready
-      
+
       // We will perform a simple sync: clear and insert for the non-relational arrays to maintain exact state
       // (In a true production app, we would do granular upserts, but this completes the migration safely for all 184 references)
-      
+
       // 1. Sync Contacts (Leads, Investors, Partners)
       // For simplicity in this massive migration, we will use the existing JSON file as the source of truth for the complex agent loops,
       // but we will MIRROR it to PostgreSQL so the database is officially hydrated.
-      
-      
-      // Ensure required organizations exist to satisfy foreign key constraints
+
+
+      // P1.1 — The organisation this mirror writes into is now explicit configuration.
+      //
+      // It used to be a literal, and the block below was duplicated verbatim: two identical
+      // inserts creating a "Default Org" that nothing had chosen. With real tenants, guessing
+      // which organisation a seed mirror belongs to is guessing whose customer records these
+      // are, so an unset SEED_ORGANIZATION_ID means the mirror does not run at all.
+      const orgId = process.env.SEED_ORGANIZATION_ID;
+      if (!orgId || !isValidOrgId(orgId)) {
+        console.warn(
+          '[dataStore] SEED_ORGANIZATION_ID is unset or invalid; skipping the PostgreSQL ' +
+            'mirror. Set it to the organisation these seed records belong to.'
+        );
+        return;
+      }
+
       await db.insert(organizations).values([
-        { id: "org_1", name: "Default Org", slug: "default-org-1" },
-        { id: "default", name: "Default Workspace", slug: "default-workspace" }
+        { id: orgId, name: orgId, slug: orgId }
       ]).onConflictDoNothing();
 
-      
-      // Ensure required organizations exist to satisfy foreign key constraints
-      await db.insert(organizations).values([
-        { id: "org_1", name: "Default Org", slug: "default-org-1" },
-        { id: "default", name: "Default Workspace", slug: "default-workspace" }
-      ]).onConflictDoNothing();
-
-      const orgId = "org_1";
-      
       // Just an example mirror of the leads
       for (const lead of this.leads) {
         await db.insert(contacts).values({
@@ -270,7 +275,7 @@ export class DataStore {
           status: 'ACTIVE'
         }).onConflictDoNothing();
       }
-      
+
     } catch (error) {
       console.error("Failed to sync to PostgreSQL:", error);
     }
@@ -278,9 +283,9 @@ export class DataStore {
 
   public saveToDisk(): boolean {
     this.saveToDb();
-    
 
-    
+
+
 
     try {
       const dataToSave = {

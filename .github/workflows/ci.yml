@@ -112,3 +112,41 @@ jobs:
             exit 1
           fi
           echo "OK: no fabricated provider ids."
+
+      # P1.1 — Tenancy. Two properties, both greppable, both regressions this repository has
+      # actually had:
+      #   1. No hardcoded organisation id. There were 42 of them across seven files, and every
+      #      one made the system single-tenant while looking multi-tenant.
+      #   2. No hand-built tenant path. orgPath() is where the org id is validated before it
+      #      becomes a Firestore path segment; a path assembled inline skips that check, and an
+      #      org id now arrives from a token rather than a literal.
+      - name: No hardcoded organisation id
+        run: |
+          if grep -rn "org_1" --include="*.ts" --include="*.tsx" server/ server.ts src/ shared/ scripts/ 2>/dev/null; then
+            echo "::error::Hardcoded organisation id found. Resolve the tenant with orgScope(req) (addendum §4 / P1.1)."
+            exit 1
+          fi
+          echo "OK: no hardcoded organisation id."
+
+      - name: Tenant paths must be built with orgPath()
+        run: |
+          if grep -rnE "['\"\`]organizations/" --include="*.ts" server/ server.ts 2>/dev/null \
+             | grep -v "^server/tenancy/orgScope.ts:" \
+             | grep -v "^server/tests/"; then
+            echo "::error::A tenant path was built by hand. Use orgPath(orgId, ...) so the org id is validated before it becomes a path segment (P1.1)."
+            exit 1
+          fi
+          echo "OK: all tenant paths go through orgPath()."
+
+      # Three times now a raw NUL byte has been written into a source file: a digest
+      # delimiter, a path-injection fixture, and a null-byte sanitiser fixture. All three
+      # compiled and ran correctly, so nothing downstream complained -- but git renders such a
+      # file as "Binary files differ" (no reviewable diff), grep skips it, and every
+      # grep-based guardrail above therefore excludes it silently.
+      #
+      # This runs a script rather than a grep on purpose. The obvious check,
+      # a grep for a NUL pattern over server/, returns "no matches" against a file that definitely
+      # contains one, because grep treats it as binary and skips it. That was measured, not
+      # assumed. A guardrail that cannot fail is worse than none.
+      - name: No NUL bytes in source files
+        run: node scripts/check-no-nul-bytes.mjs

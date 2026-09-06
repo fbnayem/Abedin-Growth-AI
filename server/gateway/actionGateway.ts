@@ -7,6 +7,7 @@ import { collection, doc, getDoc, getDocs, setDoc, query, where } from 'firebase
 import { gmailService } from '../services/gmail.service';
 import { outreachPolicyService } from '../policies/outreachPolicy';
 import { fetchWithTimeout } from '../lib/httpClient';
+import { orgPath, isValidOrgId } from '../tenancy/orgScope';
 
 export enum ActionType {
   EMAIL_SEND = 'EMAIL_SEND',
@@ -75,6 +76,18 @@ export class ActionGateway {
    */
   async dispatchAction(request: ActionRequest): Promise<ActionResult> {
     console.log(`[ActionGateway] Received request for ${request.actionType} from ${request.proposedBy}`);
+
+    // P1.1 — The tenant is validated FIRST, before the audit log, because the audit log is
+    // itself written to organizations/<organizationId>/actionLogs. An unvalidated org id
+    // reaching that path would let a caller redirect the audit trail itself, which is the one
+    // record that is supposed to be trustworthy when everything else is in doubt.
+    if (!isValidOrgId(request.organizationId)) {
+      const reason =
+        'Action blocked: the request carries no valid organisation id, so it cannot be ' +
+        'attributed to a tenant, audited, or consent-checked.';
+      console.error(`[ActionGateway] ${reason}`);
+      return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+    }
 
     // 1. Audit Logging - Propose
     const actionId = `action_${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -167,7 +180,7 @@ export class ActionGateway {
   private async checkHumanOwnershipLock(orgId: string, conversationId: string): Promise<boolean> {
     if (!firestore) return false;
     try {
-      const docSnap = await getDoc(doc(firestore, `organizations/${orgId}/conversations`, conversationId));
+      const docSnap = await getDoc(doc(firestore, orgPath(orgId, 'conversations'), conversationId));
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data?.autonomyPausedByHuman) {
@@ -184,7 +197,7 @@ export class ActionGateway {
   private async logAction(actionId: string, status: string, request: ActionRequest, resultDetails?: any) {
     if (!firestore) return;
     try {
-      await setDoc(doc(firestore, `organizations/${request.organizationId}/actionLogs`, actionId), {
+      await setDoc(doc(firestore, orgPath(request.organizationId, 'actionLogs'), actionId), {
         actionId,
         status,
         actionType: request.actionType,
@@ -225,7 +238,13 @@ export class ActionGateway {
             return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
         }
 
-        const contactSnap = await getDoc(doc(firestore, 'organizations/org_1/contacts', request.payload.contactId));
+        // P1.1 — This line read a hardcoded organisation's contacts collection while request.organizationId
+        // sat in scope and was used correctly nine lines earlier. A consent and suppression
+        // check for one tenant was therefore answered from another tenant's contact records:
+        // an unknown recipient could look consented, and a suppressed one could look clear.
+        const contactSnap = await getDoc(
+          doc(firestore, orgPath(request.organizationId, 'contacts'), request.payload.contactId)
+        );
         if (!contactSnap.exists()) {
             const reason =
                 `Contact ${request.payload.contactId} not found. Refusing to send without a ` +

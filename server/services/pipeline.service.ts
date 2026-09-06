@@ -82,7 +82,11 @@ export class PipelineService {
 
     // 10. Transactional Outbox Queue
     const idempotencyKey = `outbound_${providerMessageId}_${Date.now()}`;
-    await outboxService.queueMessage(conversationId, {
+    // P1.1 — orgId was already destructured from the inbound message and, like everything
+    // else in this unreachable module, went unused. (This file is a second inbound pipeline
+    // nothing imports; it is slated for deletion under P3.9. It is corrected rather than
+    // patched around so it cannot be revived in a broken state.)
+    await outboxService.queueMessage(orgId, conversationId, {
       to: fromEmail,
       subject: draft.subject,
       htmlBody: draft.bodyHtml,

@@ -55,9 +55,16 @@ export interface RateLimitOptions {
 }
 
 function defaultKey(req: Request): string {
+  // P1.1 — The organisation now comes from req.tenant, set by resolveTenant. The previous
+  // `user.organizationId` branch could never fire: a Firebase decoded token has no such
+  // field, so the org tier of this limiter was dead code.
+  //
+  // Budgets are per (tenant, user) rather than per user, so one tenant cannot consume
+  // another tenant's allowance through a shared operator account.
+  const tenant = (req as any).tenant;
   const user = (req as any).user;
-  if (user?.uid) return `u:${user.uid}`;
-  if (user?.organizationId) return `o:${user.organizationId}`;
+  if (user?.uid) return tenant?.orgId ? `u:${tenant.orgId}:${user.uid}` : `u:${user.uid}`;
+  if (tenant?.orgId) return `o:${tenant.orgId}`;
   return `ip:${req.ip || req.socket?.remoteAddress || 'unknown'}`;
 }
 

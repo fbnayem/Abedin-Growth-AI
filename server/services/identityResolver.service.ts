@@ -1,10 +1,16 @@
 
 import { db } from '../db/index';
 import { contacts, accounts, conversations } from '../db/schema';
-import { eq, or, ilike } from 'drizzle-orm';
+import { and, eq, ilike } from 'drizzle-orm';
 import { ClientIdentityResolution } from '../../shared/domain/models';
 
 export class IdentityResolverService {
+  /**
+   * P1.1 — `organizationId` was a parameter this method accepted and never used. Every query
+   * below ran across the entire contacts and conversations tables, so an inbound email from
+   * a person who exists in ANOTHER tenant resolved to that tenant's contact, and the reply
+   * was composed against their history. All three queries now carry the tenant predicate.
+   */
   async resolve(emailAddress: string, organizationId: string): Promise<ClientIdentityResolution> {
     const emailStr = this.normalizeEmail(emailAddress);
     const domain = this.extractDomain(emailStr);
@@ -17,7 +23,7 @@ export class IdentityResolverService {
 
     // 1. Exact Email Match
     const existingContacts = await db.select().from(contacts).where(
-      eq(contacts.primaryEmail, emailStr)
+      and(eq(contacts.organizationId, organizationId), eq(contacts.primaryEmail, emailStr))
     ).limit(1);
 
     if (existingContacts.length > 0) {
@@ -25,13 +31,16 @@ export class IdentityResolverService {
       accountId = existingContacts[0].accountId || undefined;
       resolutionMethod = 'EXACT_EMAIL';
       confidence = 1.0;
-    } 
+    }
     // 2. Domain Match (excluding public domains)
     else if (!this.isPublicDomain(domain)) {
       const domainContacts = await db.select().from(contacts).where(
-         ilike(contacts.primaryEmail, `%@${domain}`)
+         and(
+           eq(contacts.organizationId, organizationId),
+           ilike(contacts.primaryEmail, `%@${domain}`)
+         )
       ).limit(1);
-      
+
       if (domainContacts.length > 0) {
         // Assume same account
         accountId = domainContacts[0].accountId || undefined;
@@ -43,7 +52,10 @@ export class IdentityResolverService {
     if (contactId) {
       // Find latest conversation
       const convs = await db.select().from(conversations).where(
-         eq(conversations.contactId, contactId)
+         and(
+           eq(conversations.organizationId, organizationId),
+           eq(conversations.contactId, contactId)
+         )
       ).limit(1);
       if (convs.length > 0) {
          conversationId = convs[0].id;
@@ -71,7 +83,7 @@ export class IdentityResolverService {
   private extractDomain(email: string) {
     return email.split('@')[1] || '';
   }
-  
+
   private isPublicDomain(domain: string) {
      const publicDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com'];
      return publicDomains.includes(domain);

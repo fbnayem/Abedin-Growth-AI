@@ -10,6 +10,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GmailMessage } from './gmail.service';
 import { outboxService } from './outbox.service';
 import { incrementInboundVersion, computeApprovalDigest } from './draftIntegrity.service';
+import { isValidOrgId } from '../tenancy/orgScope';
 // Import agents (we will build/refactor these)
 import { IdentityResolverService } from './identityResolver.service';
 import { evaluateEmailUnderstandingRuleBased, determineNextBestAction, composeAutonomousSalesReply } from '../agents/salesDecisionEngine';
@@ -42,21 +43,34 @@ function runIndependentAudit(): { decision: AuditDecision; reason: string } {
 export class InboundPipeline {
   async processNewEmail(email: GmailMessage, organizationId: string) {
     try {
+      // P1.1 — This argument was accepted and then dropped: nothing downstream used it, so
+      // every inbound message was processed, stored and replied to under one implied tenant.
+      // It is now threaded through the whole pipeline, and it is validated here because it
+      // arrives from an oauth_connections record — a collection that is world-writable until
+      // firestore.rules is closed (P0.0) — and ends up in datastore paths.
+      if (!isValidOrgId(organizationId)) {
+        console.error(
+          '[InboundPipeline] Refusing to process a message with no valid organisation id. ' +
+            'An unattributable message is not processed under a default tenant.'
+        );
+        return;
+      }
+
       const startTime = Date.now();
       const budgetTracker = new BudgetTracker();
       budgetTracker.recordStep();
       console.log(`--- Starting Inbound Pipeline for message: ${email.id} ---`);
-      
+
       // 1. Identity Resolution
       const identityService = new IdentityResolverService();
       const identity = await identityService.resolve(email.from, organizationId);
-      
+
       if (!identity.contactId) {
         console.log("Could not resolve contact. Dropping message or creating lead.");
         // In real system, create new lead or route to unknown queue
         return;
       }
-      
+
       // 2. Load Conversation
       let conversationId = identity.contactId; // hack
       if (!conversationId) {
@@ -92,18 +106,18 @@ export class InboundPipeline {
         status: 'RECEIVED',
         receivedAt: new Date(),
       });
-      
+
       // P0.12 — Record that the conversation has advanced, atomically, as part of ingesting
       // this message. Every draft generated from here on is stamped with this version, and
       // the worker refuses to send any draft whose stamp no longer matches. This must happen
       // AFTER the message is persisted and BEFORE any draft is composed, or a draft could be
       // stamped with a version that does not include the message it is replying to.
-      const inboundVersion = await incrementInboundVersion(conversationId);
+      const inboundVersion = await incrementInboundVersion(organizationId, conversationId);
       console.log(`[InboundPipeline] conversation ${conversationId} -> inbound version ${inboundVersion}`);
 
       // 4. Update Conversation Memory
       const convMsgs = await db.select().from(messages).where(eq(messages.conversationId, conversationId)).orderBy(messages.receivedAt);
-      
+
       const convData = {
          id: conversationId,
          contactName: (identity as any).matchedLeadId || email.from, // simplified
@@ -120,7 +134,7 @@ export class InboundPipeline {
       } as any;
 
       const memory = await extractAndSynthesizeMemory(convData);
-      
+
       // Update memory in DB - clear old facts and insert new
       await db.delete(conversationFacts).where(eq(conversationFacts.conversationId, conversationId));
       for (const fact of (memory as any).facts) {
@@ -201,6 +215,7 @@ export class InboundPipeline {
       };
 
       const approvalDigest = computeApprovalDigest({
+        organizationId,
         to: outboundPayload.to,
         subject: outboundPayload.subject,
         htmlBody: outboundPayload.htmlBody,
@@ -209,6 +224,7 @@ export class InboundPipeline {
       });
 
       const queued = await outboxService.queueMessage(
+        organizationId,
         conversationId,
         outboundPayload,
         `reply_${email.id}`,
@@ -218,12 +234,12 @@ export class InboundPipeline {
       // queueMessage defaults new rows to PENDING; anything not cleared by the auditor must
       // be held for a human instead.
       if (queued && outboxStatus !== 'PENDING') {
-        await outboxService.holdForHumanReview(queued.id, auditReason);
+        await outboxService.holdForHumanReview(organizationId, queued.id, auditReason);
       }
 
       console.log(`--- Pipeline Completed. Outbox job created: ${outboxStatus} ---`);
       MetricsService.getInstance().recordLatency("INBOUND_PROCESSING", Date.now() - startTime);
-      
+
     } catch (e) {
       console.error("Error in inbound pipeline:", e);
     }

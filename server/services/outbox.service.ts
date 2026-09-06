@@ -1,4 +1,5 @@
 import { firestore } from '../firebase';
+import { orgPath } from '../tenancy/orgScope';
 import { v4 as uuidv4 } from 'uuid';
 import {
   collection,
@@ -47,7 +48,16 @@ import {
  *   CANCELLED    cancelled by the kill switch or an operator
  */
 
-const ORG_ID = 'org_1'; // TODO(P1 — tenant resolution): hardcoded as elsewhere in this codebase.
+/**
+ * P1.1 — The queue is per tenant, and every method says so.
+ *
+ * This module used to address a single hardcoded organisation, which meant the queue had
+ * exactly one tenant no matter who enqueued into it: a message composed for one customer and
+ * a message composed for another landed in the same collection, were claimed by the same
+ * worker, and were consent-checked against the same contact records. Every method now takes
+ * the organisation explicitly, and every path is built through orgPath so the id is validated
+ * before it becomes a path segment.
+ */
 
 export const MAX_ATTEMPTS = 5;
 export const LEASE_MS = 60_000;
@@ -62,14 +72,14 @@ export interface OutboxPayload {
   threadId?: string;
 }
 
-function outboxCollection() {
+function outboxCollection(organizationId: string) {
   if (!firestore) return null;
-  return collection(firestore, `organizations/${ORG_ID}/outbox`);
+  return collection(firestore, orgPath(organizationId, 'outbox'));
 }
 
-function outboxDoc(id: string) {
+function outboxDoc(organizationId: string, id: string) {
   if (!firestore) return null;
-  return doc(firestore, `organizations/${ORG_ID}/outbox`, id);
+  return doc(firestore, orgPath(organizationId, 'outbox'), id);
 }
 
 /** Exponential backoff with a ceiling, so a failing provider is not hammered. */
@@ -79,6 +89,7 @@ function backoffMs(attempts: number): number {
 
 export class OutboxService {
   async queueMessage(
+    organizationId: string,
     conversationId: string,
     payload: OutboxPayload,
     idempotencyKey: string,
@@ -87,7 +98,7 @@ export class OutboxService {
     // draft was written.
     integrity?: { generatedForInboundVersion: number; approvalDigest?: string }
   ) {
-    const outboxRef = outboxCollection();
+    const outboxRef = outboxCollection(organizationId);
     if (!outboxRef || !firestore) return null;
     try {
       // Idempotency check. NOTE: this is a read-then-write and is therefore racy under
@@ -101,10 +112,14 @@ export class OutboxService {
       }
 
       const id = uuidv4();
-      const ref = outboxDoc(id);
+      const ref = outboxDoc(organizationId, id);
       if (!ref) return null;
       await setDoc(ref, {
         id,
+        // The tenant is recorded ON the job, not merely implied by where it happens to be
+        // stored. Everything downstream — the integrity check, the gateway, the audit log —
+        // reads it from here, so a job cannot be processed under a tenant it did not name.
+        organizationId,
         conversationId,
         idempotencyKey,
         payload,
@@ -128,8 +143,12 @@ export class OutboxService {
    * returned, so a caller may safely assume exclusive ownership of every job it receives for
    * the duration of the lease.
    */
-  async claimPendingJobs(limitCount = 5, workerId = 'outbox-worker'): Promise<any[]> {
-    const outboxRef = outboxCollection();
+  async claimPendingJobs(
+    organizationId: string,
+    limitCount = 5,
+    workerId = 'outbox-worker'
+  ): Promise<any[]> {
+    const outboxRef = outboxCollection(organizationId);
     if (!outboxRef || !firestore) return [];
 
     let candidates: any[] = [];
@@ -151,7 +170,7 @@ export class OutboxService {
       // Respect backoff for jobs that have failed before.
       if (candidate.nextAttemptAt && candidate.nextAttemptAt > now) continue;
 
-      const ref = outboxDoc(candidate.id);
+      const ref = outboxDoc(organizationId, candidate.id);
       if (!ref) continue;
 
       try {
@@ -174,7 +193,10 @@ export class OutboxService {
             attempts,
           };
           tx.update(ref, update);
-          return { ...data, ...update };
+          // organizationId last: a job document written before this field existed would
+          // otherwise be handed to the worker without one, and the worker would then have to
+          // guess. It cannot be anything other than the collection it was claimed from.
+          return { ...data, ...update, organizationId };
         });
 
         if (won) claimed.push(won);
@@ -192,20 +214,20 @@ export class OutboxService {
    * @deprecated P0.9 — Retained only so no caller silently breaks. Reading PENDING jobs
    * without claiming them is what allowed duplicate sends; use claimPendingJobs().
    */
-  async fetchPendingJobs(limitCount = 10) {
+  async fetchPendingJobs(organizationId: string, limitCount = 10) {
     console.warn(
       '[Outbox] fetchPendingJobs() is deprecated and unsafe for dispatch — it does not claim ' +
       'rows, so concurrent workers will process the same job. Use claimPendingJobs().'
     );
-    return this.claimPendingJobs(limitCount);
+    return this.claimPendingJobs(organizationId, limitCount);
   }
 
   /**
    * P0.9 — Return jobs whose lease expired back to PENDING, so a crashed worker does not
    * strand them. Jobs past MAX_ATTEMPTS are dead-lettered for an operator instead.
    */
-  async reapExpiredLeases(): Promise<number> {
-    const outboxRef = outboxCollection();
+  async reapExpiredLeases(organizationId: string): Promise<number> {
+    const outboxRef = outboxCollection(organizationId);
     if (!outboxRef || !firestore) return 0;
 
     let reaped = 0;
@@ -244,8 +266,8 @@ export class OutboxService {
     return reaped;
   }
 
-  async markProcessed(id: string, providerMessageId: string) {
-    const ref = outboxDoc(id);
+  async markProcessed(organizationId: string, id: string, providerMessageId: string) {
+    const ref = outboxDoc(organizationId, id);
     if (!ref) return;
     // P0.8 — providerMessageId is recorded so a PROCESSED row can be traced to a real
     // provider artefact. A row without one is not evidence that anything was sent.
@@ -262,8 +284,8 @@ export class OutboxService {
    * `terminal` forces immediate dead-lettering for errors that retrying cannot fix
    * (policy blocks, stale drafts, fabricated provider ids).
    */
-  async markFailed(id: string, error: string, terminal = false) {
-    const ref = outboxDoc(id);
+  async markFailed(organizationId: string, id: string, error: string, terminal = false) {
+    const ref = outboxDoc(organizationId, id);
     if (!ref || !firestore) return;
 
     try {
@@ -301,8 +323,8 @@ export class OutboxService {
    * not be run faithfully: the message stays durable and visible, but no worker will claim it
    * (claimPendingJobs only takes PENDING rows).
    */
-  async holdForHumanReview(id: string, reason: string) {
-    const ref = outboxDoc(id);
+  async holdForHumanReview(organizationId: string, id: string, reason: string) {
+    const ref = outboxDoc(organizationId, id);
     if (!ref) return;
     await updateDoc(ref, {
       status: 'HUMAN_REVIEW',
@@ -311,8 +333,8 @@ export class OutboxService {
     });
   }
   /** Operator/inspection helper: list jobs by status. */
-  async listByStatus(status: string, limitCount = 50): Promise<any[]> {
-    const outboxRef = outboxCollection();
+  async listByStatus(organizationId: string, status: string, limitCount = 50): Promise<any[]> {
+    const outboxRef = outboxCollection(organizationId);
     if (!outboxRef) return [];
     try {
       const q = query(outboxRef, where('status', '==', status), limit(limitCount));

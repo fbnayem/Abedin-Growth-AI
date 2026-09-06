@@ -1,4 +1,5 @@
 import { firestore } from '../firebase';
+import { orgPath } from '../tenancy/orgScope';
 import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 
 export interface WorkflowBudget {
@@ -24,7 +25,7 @@ export class AiSafetyService {
   // D. STALE DRAFT PROTECTION
   async checkStaleDraft(orgId: string, conversationId: string, draftVersionAtGeneration: number): Promise<boolean> {
     if (!firestore) return false;
-    const convRef = doc(firestore, `organizations/${orgId}/conversations`, conversationId);
+    const convRef = doc(firestore, orgPath(orgId, 'conversations'), conversationId);
     const snap = await getDoc(convRef);
     if (!snap.exists()) return false;
     const currentVersion = snap.data().inboundMessageVersion || 0;
@@ -36,7 +37,7 @@ export class AiSafetyService {
   // P. HUMAN OWNERSHIP LOCK
   async setHumanOwnershipLock(orgId: string, conversationId: string, isPaused: boolean) {
     if (!firestore) return;
-    const convRef = doc(firestore, `organizations/${orgId}/conversations`, conversationId);
+    const convRef = doc(firestore, orgPath(orgId, 'conversations'), conversationId);
     await updateDoc(convRef, {
       autonomyPausedByHuman: isPaused,
       pausedAt: isPaused ? Date.now() : null

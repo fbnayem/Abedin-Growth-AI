@@ -1,4 +1,6 @@
 import { firestore } from '../firebase';
+import { orgPath, isValidOrgId } from '../tenancy/orgScope';
+import { listServiceableOrgIds } from '../tenancy/organizations';
 import { collection, doc, getDoc, getDocs, setDoc, query, where, updateDoc } from 'firebase/firestore';
 import { circuitBreaker } from '../agents/salesDecisionEngine';
 
@@ -40,11 +42,17 @@ import { circuitBreaker } from '../agents/salesDecisionEngine';
  * addendum §A, production action flags must fail closed.
  */
 
-// TODO(P1 — tenant resolution): this org id is hardcoded like the other 43 occurrences in the
-// codebase. The kill switch is deliberately GLOBAL for now, which is the safe reading: one
-// operator stop halts everything. Per-tenant kill switches must wait until real tenant
-// resolution exists, so that a tenant-scoped pause cannot be mistaken for a global one.
-const ORG_ID = 'org_1';
+/**
+ * P1.1 — The kill switch is GLOBAL, and now it is stored somewhere global.
+ *
+ * It used to live at organizations/<a hardcoded id>/settings/circuitBreaker, which read as a
+ * per-tenant setting and behaved as a system-wide one. With real tenants that ambiguity stops
+ * being cosmetic: an operator pausing "the organisation" would in fact have halted every
+ * organisation, and an operator pausing a different one would have changed nothing.
+ *
+ * It is a system control, so it lives in a system collection, outside any tenant.
+ */
+const SYSTEM_SETTINGS_COLLECTION = 'system_settings';
 const SETTINGS_DOC = 'circuitBreaker';
 
 export interface CircuitBreakerView {
@@ -75,7 +83,44 @@ function environmentPermitsAutonomy(): boolean {
 
 function settingsRef() {
   if (!firestore) return null;
-  return doc(firestore, `organizations/${ORG_ID}/settings`, SETTINGS_DOC);
+  return doc(firestore, SYSTEM_SETTINGS_COLLECTION, SETTINGS_DOC);
+}
+
+/**
+ * Carry a pause forward from the pre-P1.1 location.
+ *
+ * Moving where a kill switch is stored has an obvious failure mode: an operator pause recorded
+ * at the old location stops being read, and the system resumes sending without anyone deciding
+ * that it should. That is precisely the silent-unpause this control exists to prevent, so the
+ * old location is still consulted — and, consistent with the asymmetric-authority rule used
+ * everywhere else here, it may only PAUSE. A legacy document saying "not paused" is ignored;
+ * only a legacy pause is honoured.
+ *
+ * The old organisation id comes from LEGACY_KILL_SWITCH_ORG_ID rather than a literal. Unset
+ * means there is nothing to migrate, which is the correct answer for a fresh deployment.
+ */
+async function legacyPauseStands(): Promise<{ paused: boolean; reason?: string }> {
+  const legacyOrgId = process.env.LEGACY_KILL_SWITCH_ORG_ID;
+  if (!firestore || !legacyOrgId || !isValidOrgId(legacyOrgId)) return { paused: false };
+  try {
+    const snap = await getDoc(doc(firestore, orgPath(legacyOrgId, 'settings'), SETTINGS_DOC));
+    if (!snap.exists()) return { paused: false };
+    const data: any = snap.data() || {};
+    if (data.paused === true) {
+      return {
+        paused: true,
+        reason:
+          `Paused at the pre-P1.1 kill switch location (${legacyOrgId}): ` +
+          `${data.reason || 'no reason given'}. Re-record the pause at the system location ` +
+          `and clear LEGACY_KILL_SWITCH_ORG_ID to complete the migration.`,
+      };
+    }
+    return { paused: false };
+  } catch (e: any) {
+    console.error('[CircuitBreaker] Could not read the legacy kill switch:', e?.message);
+    // Unreadable legacy state is not evidence of a resume.
+    return { paused: true, reason: 'Legacy kill switch state unreadable; failing closed.' };
+  }
 }
 
 /**
@@ -123,7 +168,13 @@ async function readDurableState(): Promise<{ state: DurableState; degraded: bool
  */
 export async function getCircuitBreakerState(): Promise<CircuitBreakerView> {
   const envPermits = environmentPermitsAutonomy();
-  const { state, degraded } = await readDurableState();
+  const { state: durable, degraded } = await readDurableState();
+
+  // A pause recorded at the pre-P1.1 location still counts. It can only add a pause.
+  const legacy = await legacyPauseStands();
+  const state: DurableState = legacy.paused && !durable.paused
+    ? { ...durable, paused: true, reason: legacy.reason }
+    : durable;
 
   const enabled = envPermits && !state.paused && !degraded;
 
@@ -249,29 +300,44 @@ export async function setCircuitBreaker(
  */
 async function cancelPendingOutbox(actor: string, reason: string): Promise<number> {
   if (!firestore) return 0;
-  try {
-    const outboxRef = collection(firestore, `organizations/${ORG_ID}/outbox`);
-    const pending = await getDocs(query(outboxRef, where('status', '==', 'PENDING')));
-    let cancelled = 0;
-    for (const d of pending.docs) {
-      try {
-        await updateDoc(d.ref, {
-          status: 'CANCELLED',
-          cancelledBy: actor,
-          cancelledReason: reason,
-          cancelledAt: new Date().toISOString(),
-        });
-        cancelled++;
-      } catch (inner: any) {
-        console.error(`[CircuitBreaker] Could not cancel outbox job ${d.id}:`, inner?.message);
-      }
-    }
-    if (cancelled > 0) {
-      console.warn(`[KILL SWITCH] Cancelled ${cancelled} pending outbox job(s).`);
-    }
-    return cancelled;
-  } catch (e: any) {
-    console.error('[CircuitBreaker] Could not cancel pending outbox jobs:', e?.message);
+
+  // P1.1 — A global stop must stop every tenant. Cancelling only one organisation's queue
+  // would have left the switch looking engaged while other tenants' mail continued.
+  const orgIds = await listServiceableOrgIds();
+  if (orgIds.length === 0) {
+    console.warn(
+      '[KILL SWITCH] No serviceable organisations resolved, so no queued jobs were cancelled. ' +
+        'The pause itself still stands: the worker resolves the same empty list and dispatches nothing.'
+    );
     return 0;
   }
+
+  let cancelled = 0;
+  for (const orgId of orgIds) {
+    try {
+      const outboxRef = collection(firestore, orgPath(orgId, 'outbox'));
+      const pending = await getDocs(query(outboxRef, where('status', '==', 'PENDING')));
+      for (const d of pending.docs) {
+        try {
+          await updateDoc(d.ref, {
+            status: 'CANCELLED',
+            cancelledBy: actor,
+            cancelledReason: reason,
+            cancelledAt: new Date().toISOString(),
+          });
+          cancelled++;
+        } catch (inner: any) {
+          console.error(`[CircuitBreaker] Could not cancel outbox job ${d.id}:`, inner?.message);
+        }
+      }
+    } catch (e: any) {
+      // One tenant failing must not stop the others being cancelled.
+      console.error(`[CircuitBreaker] Could not cancel pending jobs for ${orgId}:`, e?.message);
+    }
+  }
+
+  if (cancelled > 0) {
+    console.warn(`[KILL SWITCH] Cancelled ${cancelled} pending outbox job(s) across ${orgIds.length} organisation(s).`);
+  }
+  return cancelled;
 }

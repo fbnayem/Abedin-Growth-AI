@@ -10,11 +10,11 @@ import { eq, desc, and } from 'drizzle-orm';
 import { firestore } from '../firebase';
 import { getCircuitBreakerState } from '../services/circuitBreaker.service';
 import { verifyDraftIntegrity } from '../services/draftIntegrity.service';
+import { orgPath } from '../tenancy/orgScope';
+import { listServiceableOrgIds } from '../tenancy/organizations';
 import { collection, addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import { circuitBreaker } from '../agents/salesDecisionEngine';
-
-const ORG_ID = "org_1"; // TODO(P1 — tenant resolution): hardcoded as elsewhere.
 
 export class OutboxWorker {
   public isRunning = false;
@@ -64,17 +64,45 @@ export class OutboxWorker {
 
       if (!firestore) return;
 
-      // P0.9 — Periodically return jobs stranded by a crashed worker. Every 12th tick ≈ 60s,
-      // which matches the lease length.
-      if (++this.reapCounter % 12 === 0) {
-        await outboxService.reapExpiredLeases();
-      }
+      // P1.1 — The queue is per tenant, so the worker asks which tenants it serves rather
+      // than assuming there is one. An empty list means this process does not know whose
+      // work it would be sending; it holds everything and says so (see listServiceableOrgIds).
+      const orgIds = await listServiceableOrgIds();
 
+      // P0.9 — Periodically return jobs stranded by a crashed worker. Every 12th tick ≈ 60s,
+      // which matches the lease length. Reaping is per tenant for the same reason claiming is.
+      const shouldReap = ++this.reapCounter % 12 === 0;
+
+      for (const orgId of orgIds) {
+        try {
+          if (shouldReap) {
+            await outboxService.reapExpiredLeases(orgId);
+          }
+          await this.processOrganization(orgId);
+        } catch (orgError) {
+          // One tenant's failure must not stop the others being served.
+          console.error(`Outbox worker failed for organisation ${orgId}:`, orgError);
+        }
+      }
+    } catch (err) {
+      console.error("Outbox worker loop error:", err);
+    } finally {
+      // Must always clear, or a single throw permanently wedges the worker.
+      this.processing = false;
+    }
+  }
+
+  /**
+   * Process one tenant's queue. Every datastore path below is built from THIS org id, and the
+   * gateway request carries it, so a job can only ever be dispatched under the tenant whose
+   * queue it was claimed from.
+   */
+  private async processOrganization(orgId: string) {
       // P0.9 — Atomically CLAIM jobs rather than reading PENDING rows. Every job returned
       // here is exclusively owned by this worker for the duration of its lease, so two
       // workers (or two overlapping ticks) can no longer send the same message.
-      const jobs = await outboxService.claimPendingJobs(5, this.workerId);
-      
+      const jobs = await outboxService.claimPendingJobs(orgId, 5, this.workerId);
+
       for (const job of jobs) {
         try {
           console.log(`Processing outbox job ${job.id} for conversation ${job.conversationId}`);
@@ -98,12 +126,12 @@ export class OutboxWorker {
           // Note the ActionGateway performs this check too (checkHumanOwnershipLock); it is
           // repeated here so a lock set after queueing stops the job before dispatch.
           const convSnap = await getDoc(
-            doc(firestore, `organizations/${ORG_ID}/conversations`, job.conversationId)
+            doc(firestore!, orgPath(orgId, 'conversations'), job.conversationId)
           );
           const convData: any = convSnap.exists() ? convSnap.data() : null;
           if (convData?.autonomyPausedByHuman || convData?.status === 'AUTONOMY_PAUSED_BY_HUMAN') {
               console.warn(`Human ownership lock active for conversation ${job.conversationId}. Skipping autonomous send.`);
-              await outboxService.markFailed(job.id, 'AUTONOMY_PAUSED_BY_HUMAN', true);
+              await outboxService.markFailed(orgId, job.id, 'AUTONOMY_PAUSED_BY_HUMAN', true);
               continue;
           }
 
@@ -128,11 +156,9 @@ export class OutboxWorker {
               console.warn(`[OutboxWorker] ${code} for job ${job.id}: ${reason}`);
               // Terminal: a stale or altered draft is never made valid by retrying it. It must
               // be regenerated from the current conversation, or re-approved.
-              await outboxService.markFailed(job.id, `${code}: ${reason}`, true);
+              await outboxService.markFailed(orgId, job.id, `${code}: ${reason}`, true);
               continue; // Skip sending
           }
-
-          const orgId = "org_1"; // Defaulting for now based on migration
 
           const actionRequest = {
             actionType: ActionType.EMAIL_SEND,
@@ -166,6 +192,7 @@ export class OutboxWorker {
 
              if (!providerMsgId || isFabricatedProviderId(providerMsgId)) {
                 await outboxService.markFailed(
+                  orgId,
                   job.id,
                   `FABRICATED_PROVIDER_ID: gateway reported success but returned ` +
                   `${providerMsgId ? `a locally-minted id (${providerMsgId})` : 'no provider message id'}. ` +
@@ -178,7 +205,9 @@ export class OutboxWorker {
              }
 
              // Create message record
-             await addDoc(collection(firestore, `organizations/${orgId}/conversations/${job.conversationId}/messages`), {
+             await addDoc(
+               collection(firestore!, orgPath(orgId, 'conversations', job.conversationId, 'messages')),
+               {
                 id: uuidv4(),
                 conversationId: job.conversationId,
                 provider: 'GMAIL',
@@ -193,9 +222,10 @@ export class OutboxWorker {
                 status: 'SENT',
                 isAutomated: true,
                 sentAt: new Date(),
-             });
+               }
+             );
 
-             await outboxService.markProcessed(job.id, providerMsgId);
+             await outboxService.markProcessed(orgId, job.id, providerMsgId);
           } else {
              if (result.isAmbiguousResult) {
                 // Addendum §32 — An ambiguous provider result is NOT a failure. The provider
@@ -208,13 +238,13 @@ export class OutboxWorker {
                   `Ambiguous provider result for job ${job.id}. Dead-lettering to prevent an ` +
                   `un-reconciled retry; the message may or may not have been delivered.`
                 );
-                await outboxService.markFailed(job.id, "AMBIGUOUS_PROVIDER_RESULT: requires reconciliation before any retry", true);
+                await outboxService.markFailed(orgId, job.id, "AMBIGUOUS_PROVIDER_RESULT: requires reconciliation before any retry", true);
              } else if (result.blockedReason) {
                 // Policy/flag block. Terminal: retrying cannot change a policy decision.
-                await outboxService.markFailed(job.id, `POLICY_BLOCKED: ${result.blockedReason}`, true);
+                await outboxService.markFailed(orgId, job.id, `POLICY_BLOCKED: ${result.blockedReason}`, true);
              } else if (result.errorCode === 'PROVIDER_NOT_CONFIGURED') {
                 // Terminal: no amount of retrying creates a credential.
-                await outboxService.markFailed(job.id, `PROVIDER_NOT_CONFIGURED: ${result.error}`, true);
+                await outboxService.markFailed(orgId, job.id, `PROVIDER_NOT_CONFIGURED: ${result.error}`, true);
              } else {
                 throw new Error(result.error || "Gateway execution failed");
              }
@@ -224,15 +254,9 @@ export class OutboxWorker {
           // Retryable by default: transient provider/network errors get backoff and retry,
           // and exhaust into DEAD_LETTER rather than looping forever.
           console.error(`Error processing outbox job ${job.id}:`, jobError);
-          await outboxService.markFailed(job.id, jobError.message || "Unknown error");
+          await outboxService.markFailed(orgId, job.id, jobError.message || "Unknown error");
         }
       }
-    } catch (err) {
-      console.error("Outbox worker loop error:", err);
-    } finally {
-      // Must always clear, or a single throw permanently wedges the worker.
-      this.processing = false;
-    }
   }
 }
 
