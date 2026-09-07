@@ -38,6 +38,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import * as schema from '../server/db/schema';
 import { tablesCreatedByMigrations, tablesNoMigrationCreates } from './lib/migration-tables';
+import { verifiedPgOptions, describePlan, resolveTlsPlan } from '../server/db/tls';
 import 'dotenv/config';
 
 const CONFIRM = process.argv.includes('--confirm');
@@ -117,9 +118,12 @@ const ownerUrl = process.env.MIGRATION_DATABASE_URL;
 const appUrl = process.env.DATABASE_URL;
 if (!ownerUrl) fail('MIGRATION_DATABASE_URL is not set.');
 if (!appUrl) fail('DATABASE_URL is not set.');
-const ssl = { rejectUnauthorized: false };
+// Every connection below is verified before a byte of Postgres protocol reaches it. This
+// used to be `{ rejectUnauthorized: false }` — a script that drops tables, restores a
+// backup and grants privileges, talking to whatever answered on the address.
+say(`    ${describePlan(resolveTlsPlan())}`);
 
-const owner = new pg.Client({ connectionString: ownerUrl, ssl, connectionTimeoutMillis: 20000 });
+const owner = new pg.Client({ ...verifiedPgOptions(ownerUrl), connectionTimeoutMillis: 20000 });
 
 async function main() {
   await owner.connect();
@@ -316,7 +320,7 @@ async function main() {
 
   // 6c. The only test that matters: connect AS the app role and actually write, then undo it.
   // A GRANT that ran without error is not evidence that the application can insert a row.
-  const app = new pg.Client({ connectionString: appUrl, ssl, connectionTimeoutMillis: 20000 });
+  const app = new pg.Client({ ...verifiedPgOptions(appUrl), connectionTimeoutMillis: 20000 });
   await app.connect();
   try {
     await app.query('BEGIN');

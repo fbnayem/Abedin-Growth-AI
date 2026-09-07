@@ -2,6 +2,7 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import pg from 'pg';
 import * as schema from './schema';
 import { config, isProduction } from '../config/environment';
+import { verifiedPgOptions, describePlan, resolveTlsPlan } from './tls';
 
 const { Pool } = pg;
 
@@ -20,14 +21,22 @@ export const createPool = () => {
       return null;
     }
 
-    const poolConfig = config.dbUrl 
-      ? { connectionString: config.dbUrl, ssl: { rejectUnauthorized: false } } 
-      : {
-          host: process.env.SQL_HOST,
-          user: process.env.SQL_USER,
-          password: process.env.SQL_PASSWORD,
-          database: process.env.SQL_DB_NAME, ssl: { rejectUnauthorized: false },
-        };
+    // Both branches went out over `ssl: { rejectUnauthorized: false }` — any certificate from
+    // anyone answering on the address, on every connection. This connection carries the
+    // database password and, through `oauth_connections`, customers' plaintext Gmail access and
+    // refresh tokens. `server/db/tls.ts` establishes and verifies the socket before pg writes a
+    // byte to it, and THROWS if nothing is configured to verify against: an unverifiable server
+    // is not a server this connects to.
+    const url =
+      config.dbUrl ??
+      `postgresql://${encodeURIComponent(process.env.SQL_USER ?? '')}:` +
+        `${encodeURIComponent(process.env.SQL_PASSWORD ?? '')}@` +
+        `${process.env.SQL_HOST}:5432/${process.env.SQL_DB_NAME}`;
+    const poolConfig = verifiedPgOptions(url);
+
+    // Said once, at startup, because "pinned" and "verified against a CA" are different claims
+    // and an operator reading a log should be able to tell which one this deployment is making.
+    console.log('[db] ' + describePlan(resolveTlsPlan()));
 
     global._postgresPool = new Pool({
       ...poolConfig,

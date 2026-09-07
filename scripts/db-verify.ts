@@ -30,6 +30,7 @@
 import pg from 'pg';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import * as schema from '../server/db/schema';
+import { verifiedPgOptions, describePlan, resolveTlsPlan } from '../server/db/tls';
 import 'dotenv/config';
 
 const APP_ROLE = process.env.APP_DB_ROLE ?? 'growth-ai-dat-user-747';
@@ -38,7 +39,7 @@ const EXPECTED_MIGRATIONS = 6;
 /** Cloud SQL creates these itself; they are not part of this application's schema. */
 const NOT_OURS = "c.relname NOT LIKE 'google_db_advisor%' AND c.relname NOT LIKE 'hypopg%'";
 
-const ssl = { rejectUnauthorized: false };
+
 const say = (s = '') => console.log(s);
 const problems: string[] = [];
 const flag = (s: string) => problems.push(s);
@@ -64,9 +65,10 @@ const norm = (t: string) =>
     process.exit(2);
   }
 
+  say('tls               : ' + describePlan(resolveTlsPlan()));
+
   const owner = new pg.Client({
-    connectionString: process.env.MIGRATION_DATABASE_URL,
-    ssl,
+    ...verifiedPgOptions(process.env.MIGRATION_DATABASE_URL),
     connectionTimeoutMillis: 20000,
   });
   await owner.connect();
@@ -237,7 +239,7 @@ const norm = (t: string) =>
   //
   // Privileges that read correctly and a connection that cannot write are different failures,
   // and only one of them is visible in the catalogue.
-  const app = new pg.Client({ connectionString: process.env.DATABASE_URL, ssl });
+  const app = new pg.Client(verifiedPgOptions(process.env.DATABASE_URL as string));
   await app.connect();
   try {
     await app.query('BEGIN');

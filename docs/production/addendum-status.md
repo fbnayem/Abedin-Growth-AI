@@ -2973,7 +2973,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S2 | Proof-based status: test inventory, runner, CI | PARTIAL | CRITICAL | `package.json:12-13`; `server/tests/adversarial.test.ts:29-41`; `server/tests/pipeline.test.ts:16-19`; no `.github` | Zero assertions repo-wide; no test runner; no CI; the one runnable test reports 4/4 unconditionally |
 | S3 | A message cannot become SENT without a real provider result | PARTIAL | CRITICAL | `server/workers/outbox.worker.ts:99-100`; `actionGateway.ts:204-207`; `server.ts:511,519` | `|| 'sim_' + Date.now()` fabricates provider ids; two paths return success with no network call; no reconciliation; no retry; unlocked claim |
 | S4 | Tenant integrity at database level | PARTIAL | CRITICAL | `server/tenancy/orgScope.ts`; `server/middleware/tenant.ts`; `server/db/schema.ts`; `firestore.rules:5` | **P1.1/P1.2 landed.** Request-scoped tenant from a signed claim; all 13 tables carry `organization_id NOT NULL`; all 5 composite uniques declared; by-id access 404s on a foreign id; 86 executable invariants. Still PARTIAL: `firestore.rules` remains `allow read, write: if true`, so the *datastore* enforces nothing and every control is bypassable by going direct; the PostgreSQL constraints have no writer |
-| S5 | Migration safety: expand/contract, rollback, backfill, tests | PARTIAL | HIGH | `drizzle/0005_catch_up_to_schema.sql`; `scripts/db-apply.ts`; `scripts/db-verify.ts`; `scripts/lib/migration-tables.ts`; `server/tests/migrations.invariant.test.ts` | **Advanced, not closed.** Migrations now describe `schema.ts` (0005: 2 renames, 76 timestamptz conversions with `AT TIME ZONE`, 11 added columns) and 29 invariants hold them there; drizzle's migrator is wired behind `scripts/db-apply.ts` with a mandatory backup, a pre-drop precondition and catalogue verification; `scripts/db-verify.ts` re-asks from cold. Still PARTIAL: zero down migrations and no up→down→up test; zero `CREATE INDEX`; the 0002 bitemporal columns are still NULL on every historical row; `ssl: { rejectUnauthorized: false }` remains at `server/db/index.ts:24`, `:29`; the live apply is unfinished — the database currently holds six orphan tables and no schema (see the S5 detail) |
+| S5 | Migration safety: expand/contract, rollback, backfill, tests | PARTIAL | HIGH | `drizzle/0005_catch_up_to_schema.sql`; `scripts/db-apply.ts`; `scripts/db-verify.ts`; `scripts/lib/migration-tables.ts`; `server/db/tls.ts`; `scripts/check-tls-verification.mjs`; `server/tests/migrations.invariant.test.ts`; `server/tests/databaseTls.invariant.test.ts` | **Advanced, not closed.** Migrations now describe `schema.ts` (0005: 2 renames, 76 timestamptz conversions with `AT TIME ZONE`, 11 added columns) and 29 invariants hold them there; drizzle's migrator is wired behind `scripts/db-apply.ts` with a mandatory backup, a pre-drop precondition and catalogue verification; `scripts/db-verify.ts` re-asks from cold. Still PARTIAL: zero down migrations and no up→down→up test; zero `CREATE INDEX`; the 0002 bitemporal columns are still NULL on every historical row; TLS verification is on and enforced by a 14th guardrail, though PINNED rather than CA-verified until the Cloud SQL server CA is supplied |
 | S6 | State machines: campaign, outbox, meeting, payment, opportunity, autopilot, knowledge | PARTIAL | CRITICAL | `server.ts:303`, `:318`, `:782`, `:744`; `salesDecisionEngine.ts:275-291` | No transition map anywhere; `COMPLETED → ACTIVE` is the default branch; opportunity stage accepts any string; `AUTONOMY_PAUSED_BY_HUMAN` has no writer |
 | S7 | Optimistic concurrency (version / ETag / conditional write) | PARTIAL | HIGH | `server/db/schema.ts:287`; `server.ts:176-181`, `:193-198`, `:297-307` | No `version` column on any table; zero `runTransaction`/`writeBatch`/`increment`; no 409 anywhere; blind whole-document `setDoc` overwrites |
 | S8 | Inbound version stamping and draft staleness | PARTIAL | CRITICAL | `outbox.worker.ts:69`; `aiSafety.service.ts:25-34`; `inboundPipeline.ts:131-144` | **No staleness guard is on a live path.** The wall-clock comparison queries Postgres, which the Firestore write path never populates, so it evaluates zero rows and always passes; the version implementation has no callers and reads a field with no writer. Neither mechanism can ever return "stale" |
@@ -3138,21 +3138,83 @@ mutants killed against the real gate (`tsc` + 13 guardrails + 1,104 tests), the 
 recorded: disabling the `if` that acts on the precondition leaves the source assertion intact,
 and observing the refusal itself needs a live database.
 
-**Live state, verified against the catalogue (`scripts/db-verify.ts`), not against the absence
-of an error.** As of this entry the database holds 6 orphan tables, 0 rows, an empty migration
-journal and no `organizations`. The repaired `db-apply.ts` dry-runs clean and would fix it; the
-run is outstanding. Two problems will remain after it:
+**The transport was unauthenticated.** `ssl: { rejectUnauthorized: false }` sat on seven
+Postgres call sites, including the pool that carries customers' plaintext Gmail access and
+refresh tokens, and on a codemod in `archive_scripts/` whose entire purpose was to write it
+back into `server/db/index.ts` if anyone ran it. It accepts any certificate from anyone
+answering on the address. It cost nothing while `DATABASE_URL` was unset; there is now a live
+instance on a public IP.
 
-- **The application role is a member of `cloudsqlsuperuser`,** and through it of `pg_monitor`,
-  `pg_signal_backend`, `pg_checkpoint`, `pg_read_all_settings`, `pg_read_all_stats` and
-  `pg_stat_scan_tables`. Every direct grant is correct — the schema ACL reads
-  `growth-ai-dat-user-747=U/pg_database_owner`, USAGE and no CREATE — and
-  `has_schema_privilege(role, 'public', 'CREATE')` still answers true, because the privilege
-  arrives through membership, which a REVOKE naming the role does nothing about. Cloud SQL
-  grants `cloudsqlsuperuser` to every user created through the console or the API. The fix is
-  to create the application role with SQL instead.
-- **`ssl: { rejectUnauthorized: false }`** on every Postgres path, now that there is a real
-  server on the other end of it.
+It is not fixed by `rejectUnauthorized: true`, and that was measured rather than assumed. Cloud
+SQL signs the server certificate with a per-instance CA that chains to no public root and is
+not sent in the handshake — the presented chain is one certificate deep, and the system trust
+store answers `UNABLE_TO_VERIFY_LEAF_SIGNATURE`. Putting the leaf itself in `ca` does not work
+either: four configurations were tried against the live server and all four were refused with
+`unable to verify the first certificate`, because OpenSSL requires a chain ending at a
+self-signed root and node does not expose the partial-chain flag.
+
+`server/db/tls.ts` is now the only place a Postgres connection is built. It offers two verified
+modes and no third: **CA_VERIFIED** when a CA is configured, and **PINNED** — the server public
+key checked against a configured SHA-256 — when one is not. With neither, it **throws**; there
+is deliberately no path that connects unverified, because an unknown trust state resolving to
+permission (§14) is precisely the defect being removed. The socket is established, upgraded and
+checked by this module before `pg` is given it, because a pin checked after `connect()` is
+checked after the password has been sent — node buffers the startup write through the handshake
+and flushes it, and `checkServerIdentity` is skipped whenever OpenSSL verification has already
+failed, which in PINNED mode it always has.
+
+Two things found by doing it rather than by reading it. Destroying both the TLSSocket and the
+raw socket it wraps **segfaults node 24.18** — the first proof that a wrong pin is refused took
+the process down with SIGSEGV instead of throwing, on exactly the path this module exists to
+make safe. And mutating the pin comparison to accept every key left the whole gate green: the
+checks were reachable only through `connectVerified`, which needs a server, so the most
+important decision in the module was the one nothing exercised. `verifyCertificate` is exported
+and directly tested now.
+
+25 invariants in `server/tests/databaseTls.invariant.test.ts`; a 14th guardrail
+(`scripts/check-tls-verification.mjs`) that fails on `rejectUnauthorized: false` anywhere, on
+`NODE_TLS_REJECT_UNAUTHORIZED`, and on any `new Pool`/`new Client` built without the verifier —
+permitting exactly one disable, in the verifier, and only while the checks that justify it are
+still present. 13 of 14 mutants killed against the real gate; the survivor is measured as
+behaviourally equivalent and recorded at the call site. `run_migrations.cjs`, `seed_orgs.cjs`
+and `archive_scripts/fix_db_index.cjs` are deleted — all three dead, all three connecting
+unverified, and the last one able to reintroduce the defect by being run.
+
+Proved against the live server, since a check that always passes and one that works are
+indistinguishable from the passing side: a wrong pin, a wrong CN, an empty pin list and an
+unrelated CA are each **refused**, the real configuration **connects**, and no configuration at
+all **throws**.
+
+**Live state, verified from cold against the catalogue (`scripts/db-verify.ts`), not against
+the absence of an error.**
+
+```
+tls               : TLS pinned to 1 key hash(es), CN must be linen-office-320801:growth-ai-abedin-747
+migration journal : present            applied migrations: 6 of 6
+application tables: 20  (schema.ts declares 20)   schema mismatches: 0
+organizations     : 2 rows
+app role attrs    : superuser=false createdb=false createrole=false bypassrls=false
+app role inherits : (nothing)
+app role CREATE   : false
+app role privs    : SELECT 20, INSERT 20, cannot SELECT 0, can TRUNCATE 0
+app INSERT+SELECT : ok
+ALL CHECKS PASSED.
+```
+
+The `cloudsqlsuperuser` membership is **gone**. It had carried `pg_monitor`,
+`pg_signal_backend`, `pg_checkpoint`, `pg_read_all_settings`, `pg_read_all_stats` and
+`pg_stat_scan_tables`, and it was the reason `has_schema_privilege(role, 'public', 'CREATE')`
+answered true while every direct grant was correct — the privilege arrived through membership,
+which a REVOKE naming the role does nothing about. Cloud SQL grants it to every user created
+through the console or the API, so it is the default state of any user made that way.
+
+**What is still open on this row.** Zero down migrations and no up→down→up schema-equality
+test; zero `CREATE INDEX` in any migration; the five bitemporal columns 0002 added are still
+NULL on every historical row; and TLS is PINNED rather than CA_VERIFIED. Pinning detects an
+interception beginning after the pin was taken and cannot detect one already in place at that
+moment — supplying `DATABASE_CA_CERT_FILE` from the Cloud SQL console closes that gap and the
+code path already exists and is tested. `npx tsx scripts/db-tls-pin.ts` prints the fingerprint
+to compare against the console before trusting it.
 
 **Remediation.** Replace `run_migrations.cjs` with drizzle's `migrate({ migrationsFolder: './drizzle' })` behind `npm run db:migrate`. Set `rejectUnauthorized: true` with the provider CA in all three places. Add a 0003 expand migration declaring status/stage enums or CHECKs and a `version integer NOT NULL DEFAULT 0`. Add the missing indexes (org ids, partial index on `outbox_messages(status) WHERE status='PENDING'`, `messages(conversation_id, received_at DESC)`). Backfill the bitemporal columns before anything reads them as a validity predicate. Write down-migrations and an up→down→up schema-equality test.
 
