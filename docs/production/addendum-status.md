@@ -3472,6 +3472,42 @@ to compare against the console before trusting it.
 
 ### S26 — Campaign contact safety · NOT_STARTED · CRITICAL
 
+**New finding, 2026-09-08 — the suppression check runs, and cannot see a real unsubscribe.**
+
+Found while retracting `docs/audit-report.md`, whose third claim was "SuppressionService
+instantly intercepts inbound intents classified as UNSUBSCRIBE". Two separate things are wrong,
+and the second is quieter than anything recorded here before.
+
+`server/services/suppression.service.ts` has exactly one importer,
+`server/services/pipeline.service.ts`, which has **zero** importers. Neither is reachable. That
+much matches the existing write-up.
+
+The suppression check that IS reachable is `isSuppressed` in
+`server/agents/salesDecisionEngine.ts:129`, called by the independent auditor at
+`independentAuditor.ts:161` — and since the auditor was wired to the live path on 2026-09-07
+(P0.11/S24) it now runs on every autonomous draft. It reads `globalStore`, the **in-memory seed
+store** in `server/dataStore.ts`. The live inbound path, `inboundPipeline.processNewEmail`,
+never touches `globalStore`: grepping that file for it returns nothing.
+
+So for a real customer the sequence is: the unsubscribe arrives, is classified, and is written
+to the datastore; the suppression check then queries an in-memory fixture the unsubscribe never
+reached, finds nothing, and the draft proceeds with `suppression: CLEAN` recorded against it.
+
+This is worse than the unreachable service, because it produces a **positive safety signal**.
+An unreachable check is absent and eventually noticed. This one runs, returns the permissive
+answer for every recipient, and writes CLEAN into the safety record — which is exactly the
+shape §14 forbids: an unknown permission state resolving to permission. The correct outcome
+for a check that cannot see the data it needs is `NOT_RUN`, and a NOT_RUN suppression must not
+permit an autonomous send.
+
+Note this was made *reachable* by a fix. Before P0.11 the auditor returned a hardcoded
+`{ decision: 'PASS' }`, so the check never ran at all and the store it read was irrelevant.
+Wiring the auditor turned a dead check into a live one that answers wrongly — which is a real
+improvement and a new defect at the same time, and is why the sequencing matters here.
+
+**Not fixed in that commit.** The retraction records it; the repair is the next item.
+
+
 **What exists.** Campaign documents with a `steps` array carrying `delayDays`, and nothing that executes them. Grep for `delayDays` across `server/` and `src/` returns two hits, both render-time labels in the UI. There is no enrolment record, no per-contact sequence state, and no scheduler — so all fourteen required guards are moot for want of a send loop.
 
 **Decisive evidence.** "Bulk Enroll in Campaign" is a lie: `src/App.tsx:710-716` marks the selected leads `CONTACTED` in local React state with no server call and no send. `ActionGateway.dispatchAction` — the one real chokepoint — implements a feature flag, a Firestore ownership-lock read and a jurisdiction call, and **none** of: suppression, hard bounce, complaint, wrong person, existing customer, active conversation, pending human reply, frequency cap, cooldown, duplicate or conflicting campaign membership, daily recipient limit, per-domain limit, sender quota, quiet hours. The jurisdiction check is itself dead because it is gated on `request.payload.contactId`, which the sole caller never sets. The reply-stops-sequence invariant fails: both stop mechanisms query Postgres while every message is written to Firestore, so `convRows.length` and `latestInbound.length` are 0 and both rules pass vacuously. `AUTONOMY_PAUSED_BY_HUMAN` has no writer anywhere, so a human can never take ownership. The Firestore-native versions of both guards exist in `aiSafety.service.ts:25-44` and are never called. No `List-Unsubscribe` header is emitted.
