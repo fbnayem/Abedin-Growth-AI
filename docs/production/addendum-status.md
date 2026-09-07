@@ -3011,7 +3011,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S39 | Monolith: ~75 route registrations against empty decomposition folders | PARTIAL | CRITICAL | `server.ts:309-344`, `:760-826`, `:62`, `:193-195` | ~70 of ~75 endpoints inline; controller and repository layers are 100% dead; ~30 hardcoded success stubs; zero request validation; webhooks registered only in the production branch |
 | S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | PARTIAL | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | Four React modules value-import a server agent (only esbuild elision keeps `@google/genai` and the API-key read out of the bundle); two real cycles; no lint rule, no dependency-cruiser, no ESLint |
 | S41 | Adapter contracts | PARTIAL | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). `CalendarProvider` implemented 2026-09-07 (§1s) by `GoogleCalendarService`, and the compiler holds it — renaming `checkAvailability` fails `tsc`, measured by mutation. **Remainder: Stripe, DocuSign and LinkedIn have no adapter and no interface**, and `PAYMENT_CREATE` / `SIGNATURE_SEND` / `EXTERNAL_MESSAGE_SEND` / `CALENDAR_UPDATE` / `CALENDAR_CANCEL` all still fall through the dispatch switch to `Unsupported action type` |
-| S42 | Chaos / fault-injection across the autonomous send path | NOT_STARTED | CRITICAL | `db/index.ts:48-51`; `outbox.worker.ts:49,134-137`; `gmail.service.ts:151-167`; `geminiClient.ts:139-145` | Zero fault-injection tests; every one of the 15 required failure modes is unhandled — DB down, mid-sequence commit failure, post-send crash, timeout, 401, 429, 500, malformed AI JSON, duplicate/out-of-order webhook, concurrent claim, concurrent human edit |
+| S42 | Chaos / fault-injection across the autonomous send path | PARTIAL | CRITICAL | `db/index.ts:48-51`; `outbox.worker.ts:49,134-137`; `gmail.service.ts:151-167`; `geminiClient.ts:139-145` | Zero fault-injection tests; every one of the 15 required failure modes is unhandled — DB down, mid-sequence commit failure, post-send crash, timeout, 401, 429, 500, malformed AI JSON, duplicate/out-of-order webhook, concurrent claim, concurrent human edit |
 | S43 | Outbox transaction boundaries: atomic claim, crash recovery, duplicates | PARTIAL | CRITICAL | `outbox.service.ts:47-62`; `outbox.worker.ts:23,95,120`; `schema.ts:147-156` | The "claim" is a read; no lease, no CAS, no transaction, no attempt counter, no re-entrancy guard; producer writes Postgres while consumer reads Firestore |
 | S44 | Alerting: thresholds and destinations | NOT_STARTED | HIGH | `metrics.service.ts:12-20`; `inboundPipeline.ts:147`; `salesDecisionEngine.ts:30-31`; case-insensitive grep `pagerduty\|slack\|sentry\|datadog\|prometheus\|opentelemetry\|cloudmonitoring\|webhookUrl\|alertTransport` over `server/ src/ package.json` → **one hit**, the comment `// In production, send to Datadog / Prometheus` at `metrics.service.ts:12` | One threshold (`>2000ms` → `console.warn`) on a line that never executes; `incrementCounter` has an empty body; zero of eleven required signals have a threshold or a destination; no alert client is a dependency |
 | S45 | Service level objectives: defined and measured | NOT_STARTED | HIGH | `metrics.service.ts:13-14`; `outbox.routes.ts:23`; `server.ts:96-98`; case-insensitive word-boundary grep `\b(slo\|sla\|p95\|p99\|percentile\|error budget\|availability)\b` over `docs/*.md` (all four files: `DisasterRecovery.md`, `audit-report.md`, `external-setup-required.md`, `production-readiness-checklist.md`) → **zero hits** | No SLO document, targets, percentiles, windows or error budgets; five of six flows have no measurement code; no `approvedAt`/`failedAt` so latency is not even derivable |
@@ -3799,7 +3799,7 @@ still reads a collection nothing writes.
 
 ---
 
-### S42 — Chaos / fault-injection testing · NOT_STARTED · CRITICAL
+### S42 — Chaos / fault-injection testing · PARTIAL · CRITICAL
 
 **What exists.** No chaos, fault-injection or failure-path test of any kind, and the two files that exist are not tests. Every one of the fifteen required failure modes is unhandled.
 
@@ -3808,6 +3808,56 @@ still reads a collection nothing writes.
 Two default-state findings make this worse than a test-coverage gap: with no Gmail OAuth row the gateway returns a fabricated success and the worker records `status: 'SENT'` — a fail-open silent drop that is the current default, not a fault mode; and `demoMode` provides a second such path, with no marker on the persisted record distinguishing a simulated send from a real one.
 
 **Worst case.** Two replicas both dispatch the same five jobs and every prospect receives every autonomous email twice; a crash between the provider 200 and the status write reproduces the duplicate on the next tick indefinitely; a single 429 or expired token black-holes a hot lead's reply with no alert; and unsubscribed contacts keep receiving mail because the dispatch path executes zero suppression checks.
+
+**What changed, 2026-09-08.**
+
+The remediation below is ordered: make the queue atomically claimable, add retry
+classification and backoff, add timeouts and typed provider errors, remove the fabricated
+success paths, wire the auditor and the gateway suppression check — **then** write the chaos
+tests. Everything before "then" landed across P0.5, P0.8, P0.9, P0.10 and P0.11 and had never
+been exercised under an actual fault. Code written to survive a fault and code that survives
+one are different claims, and only the second is checkable.
+
+`server/tests/chaos.invariant.test.ts` is 24 invariants against a Firestore double that
+**aborts a transaction whose reads changed before commit** — the guarantee the real store
+gives, and the one every concurrency claim here rests on. Everything above the datastore is
+the real service: `claimPendingJobs`, `markFailed` and `reapExpiredLeases` are called, not
+reimplemented, because a test that reimplements the logic it checks tests the
+reimplementation.
+
+What it holds: two workers cannot both claim a job; a worker that dies after the provider
+returned leaves the job CLAIMED and **unclaimable while its lease is live**, so the message is
+not sent twice; the lease reaper returns it afterwards **under backoff**, not immediately; a
+retryable failure returns it to PENDING with the attempt counted while a terminal one goes
+straight to DEAD_LETTER; backoff grows; the ceiling is reached by crashing as well as by
+failing; and HUMAN_REVIEW, CANCELLED, PROCESSED, backed-off and other-tenant jobs are never
+claimed.
+
+**The harness checks itself first.** Three tests assert that the double aborts on a changed
+read, commits when uncontended, and filters and limits a query. A double that quietly applied
+the writes would let every concurrency test pass while proving nothing — two workers would
+both "win" and the assertion would still read one row.
+
+**And the mutation run found that two of the three most important guards were untested.** The
+first pass killed 9 of 12 mutants. The three survivors were the in-transaction status re-read
+and both backoff checks — because each was covered by another guard rather than by a test:
+removing the status re-read left the concurrency tests passing, since the transaction ABORT
+caught the interleave instead; and the candidate-level and in-transaction backoff checks each
+hid the removal of the other.
+
+The harness gained a hook that fires BEFORE a transaction reads, so the transaction sees the
+changed value and commits without conflict — the window the abort cannot close, and the one
+the re-read exists for, since the candidate list is fetched outside the transaction. And a
+transaction counter, because the difference the two backoff checks do not hide is cost: a
+queue of backed-off jobs would otherwise open a transaction per job per tick against a
+provider that is already failing. **12 of 12 now.**
+
+**Still PARTIAL, and the gap is specific.** These are queue-level faults. The provider-level
+modes this section also lists are NOT covered: a 429 or an expired refresh token from Gmail, a
+webhook delivered twice or out of order, an AI timeout or malformed JSON, a human editing
+while the AI runs, a campaign paused mid-dispatch. Those need the gateway and a provider
+double, and the file says so in its own header rather than letting its existence imply
+coverage it does not have.
 
 **Remediation.** Make the outbox atomically claimable (transactional read-and-claim with `claimedBy`/`leaseUntil`/`attempts`, plus a lease reaper) before anything else. Add retryable-vs-terminal classification with exponential backoff and a dead-letter status. Resolve the split-brain queue. Add fetch timeouts, typed provider errors and the missing refresh-token flow. Remove the fabricated-success paths and mark any simulated send as such. Delete the hardcoded auditor and add a gateway-level suppression check. Make `safeGenerateJSON` return a discriminated result with a deadline and a metric per fallback. Then write the chaos tests, each asserting an invariant: two concurrent `processQueue` runs → exactly one provider call; a 429 leaves the job PENDING with `attempts=1`; a crash injected between the 200 and the status write produces no second send; a suppressed recipient → zero provider calls; the same webhook twice → one message row.
 
