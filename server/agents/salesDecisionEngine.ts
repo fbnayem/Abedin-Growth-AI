@@ -715,6 +715,24 @@ export async function composeAutonomousSalesReply(input: {
    * pricing reply above rather than falling through to here.
    */
   activeQuote?: Quote | null;
+  /**
+   * How this customer quote history is read. Injected for the same reason the clock is.
+   *
+   * S50 — the two tests covering the refusal below used to rely on `DATABASE_URL` being
+   * unset, so that `getQuotes` threw for real. Their docstring said so:
+   *
+   *     "DATABASE_URL is unset in this environment, so getQuotes throws for real —
+   *      this exercises the actual failure, not a simulated one."
+   *
+   * True when written, and it made the tests depend on a global environment condition
+   * rather than on anything they controlled. The moment a database became reachable the
+   * lookup started succeeding, the refusal branch stopped being reached, and two invariants
+   * silently stopped being tested — which is how the failure was found: they broke.
+   *
+   * A test that only exercises a control while the infrastructure is missing is a test that
+   * stops working exactly when the system starts.
+   */
+  readQuotes?: (organizationId: string, contactId: string) => Promise<unknown[]>;
   /** Injected so a proposed meeting slot is testable on a DST boundary (§30). */
   clock?: Clock;
   threadHistory?: EmailMessage[];
@@ -777,7 +795,10 @@ export async function composeAutonomousSalesReply(input: {
       "No contact id resolved for this sender, so their quote history could not be read.";
   } else {
     try {
-      const quotes = await ledgerService.getQuotes(input.organizationId, contactId);
+      const readQuotes =
+        input.readQuotes ??
+        ((organizationId: string, id: string) => ledgerService.getQuotes(organizationId, id));
+      const quotes = await readQuotes(input.organizationId, contactId);
       if (quotes.length > 0) {
         dynamicFacts += "Active Quote: " + JSON.stringify(quotes) + "\n";
       }

@@ -219,8 +219,19 @@ describe('3. a quote lookup that fails blocks a pricing reply', () => {
    * The guarding test was `expect(source).toContain('quoteLookupFailed')`, which a write-only
    * variable satisfies.
    *
-   * DATABASE_URL is unset in this environment, so `getQuotes` throws for real — this exercises
-   * the actual failure, not a simulated one.
+   * S50 — this used to say:
+   *
+   *     "DATABASE_URL is unset in this environment, so getQuotes throws for real —
+   *      this exercises the actual failure, not a simulated one."
+   *
+   * True when it was written, and it made these tests depend on a global environment
+   * condition rather than on anything they set. When a database became reachable the lookup
+   * started succeeding, the refusal branch stopped being entered, and two of these tests
+   * failed — which is the good outcome. Had they been written to pass either way, the
+   * control would simply have stopped being covered and nothing would have said so.
+   *
+   * The failure is now injected through `readQuotes`, so what is exercised is the same
+   * branch whether or not a database exists.
    */
 
   const inputFor = (text: string) => {
@@ -238,8 +249,19 @@ describe('3. a quote lookup that fails blocks a pricing reply', () => {
       buyingStage: BuyingStage.DISCOVERY,
       rawInboundText: text,
       knownRelevantFacts: [] as string[],
+      // The lookup fails. Injected rather than arranged by unsetting an environment
+      // variable, so this is the same branch on a machine with a database and one without.
+      readQuotes: async () => {
+        throw new Error('connection refused');
+      },
     };
   };
+
+  /** The same input with a lookup that SUCCEEDS and finds nothing — a different thing. */
+  const inputWithWorkingLookup = (text: string) => ({
+    ...inputFor(text),
+    readQuotes: async () => [] as unknown[],
+  });
 
   it('a pricing reply is refused when the quote history cannot be read', async () => {
     const input = inputFor('What does it cost? Please send me your pricing.');
@@ -276,6 +298,23 @@ describe('3. a quote lookup that fails blocks a pricing reply', () => {
     const draft = await composeAutonomousSalesReply(input);
     expect(draft.abstention?.reason).toBe('GENERATION_DISABLED');
     expect(draft.replyPlan.reason).not.toContain('Refused to state pricing');
+  });
+
+  /**
+   * The case the old environment could not produce at all. With DATABASE_URL unset every
+   * lookup threw, so "the query ran and this customer has no quote" was unreachable — and it
+   * is the ordinary case for almost every customer.
+   *
+   * It must NOT be refused: a successful lookup returning nothing is an answer.
+   */
+  it('a lookup that succeeds and finds no quote is not a refusal', async () => {
+    const draft = await composeAutonomousSalesReply(
+      inputWithWorkingLookup('What does it cost? Please send me your pricing.')
+    );
+    expect(draft.replyPlan.reason).not.toContain('Refused to state pricing');
+    // It still produces no reply here, because generation is disabled in this deployment —
+    // a different stop, with a different name, which is the whole point of S23.
+    expect(draft.abstention?.reason).toBe('GENERATION_DISABLED');
   });
 
   it('the PRICING refusal and the abstention are distinguishable', async () => {
