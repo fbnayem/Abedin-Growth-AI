@@ -2979,7 +2979,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S8 | Inbound version stamping and draft staleness | PARTIAL | CRITICAL | `outbox.worker.ts:69`; `aiSafety.service.ts:25-34`; `inboundPipeline.ts:131-144` | **No staleness guard is on a live path.** The wall-clock comparison queries Postgres, which the Firestore write path never populates, so it evaluates zero rows and always passes; the version implementation has no callers and reads a field with no writer. Neither mechanism can ever return "stale" |
 | S9 | Immutable approval digest and re-verification at send time | PARTIAL | CRITICAL | `outbox.routes.ts:20-28`; `OutboxView.tsx:32`; `db/schema.ts:147-156` | No hashing code exists repo-wide; approval is a status string; no re-check at send; `payload` is mutable while approval persists |
 | S10 | Audit logging fail-closed on the Action Gateway | PARTIAL | CRITICAL | `actionGateway.ts:145-161`, `:54`, `:91`; `firestore.rules:5` | `logAction` swallows every error and returns void, so dispatch proceeds; `setDoc(..., {merge:true})` overwrites lifecycle states; no payload fingerprint; log is write-only and client-writable |
-| S11 | API contract registry (OpenAPI / runtime validation / contract tests) | NOT_STARTED | HIGH | `server.ts:115`, `:133`, `:462`, `:486`; `emailUnderstanding.agent.ts:2` | No OpenAPI; zod's only import is in a dead file; six handlers spread `req.body` into Firestore; the nine imported domain types are never applied to any handler |
+| S11 | API contract registry (OpenAPI / runtime validation / contract tests) | PARTIAL | HIGH | `server.ts:115`, `:133`, `:462`, `:486`; `emailUnderstanding.agent.ts:2` | No OpenAPI; zod's only import is in a dead file; six handlers spread `req.body` into Firestore; the nine imported domain types are never applied to any handler |
 | S12 | Error envelope (stable codes, requestId, no raw leakage) | PARTIAL | CRITICAL | `server.ts:109` (×32); `actionGateway.ts:97`; `server/middleware/auth.ts:47` | 32 handlers return raw `e.message` at 500; 11 of 15 required codes absent; no requestId; no error middleware; send-safety decided by substring-matching error text |
 | S13 | Provider capability model | PARTIAL | CRITICAL | `server/lib/capabilities.ts`; `actionGateway.ts` (`checkProviderCapability` pre-flight); `server.ts` (oauth record) | Scopes are recorded at consent and checked BEFORE dispatch; an unrecorded grant is refused, as is a datastore read that failed (§14). The Gmail/Calendar conflation is resolved by scopes rather than by provider name. Gmail refresh flow implemented. **Remainder: every existing connection has no scopes recorded and will be refused until reconnected** — deliberate, and an operator action |
 | S14 | UNKNOWN != PERMITTED (consent / jurisdiction defaults) | PARTIAL | CRITICAL | `actionGateway.ts:170-171`, `:177`, `:185`; `outreachPolicy.ts:20` | Unknown country → `'US'`, unknown consent → `true`; both block rules neutered by hardcoded `isB2B: true`; the only fail-closed policy file is dead |
@@ -3282,13 +3282,59 @@ to compare against the console before trusting it.
 
 ---
 
-### S11 — API contract registry · NOT_STARTED · HIGH
+### S11 — API contract registry · PARTIAL · HIGH
 
 **What exists.** Hand-written shared TypeScript types re-exported by `src/types.ts:1` — and nothing else.
 
 **Decisive evidence.** No OpenAPI/JSON-Schema document anywhere. `zod` is a dependency but its only import in the repository is `emailUnderstanding.agent.ts:2`, a file proven unreachable, validating LLM output rather than an HTTP body; `server.ts` contains zero `z.` occurrences. Six handlers spread the unvalidated body straight into Firestore (`server.ts:115`, `:133`, `:462`, `:486`, `:656`, `:671`). The type-sharing credit is thinner than it appears: `server.ts:50` imports nine domain types and grep shows **zero** type applications anywhere else in the file — `const items: any[] = []` appears 10 times and every collection handler `res.json(items)` from raw Firestore data. Reads are equally unprojected (`server.ts:104-108`), so injected keys are echoed back to every reader. `tsconfig.json` sets no `strict` and excludes `scripts/`.
 
 **Worst case.** A client POSTs `{"name":"x","suppressed":false,"consentStatus":"GRANTED","orgId":"org_victim"}` to `/api/leads`; the spread persists it, the forged consent flows into the outreach path, and the platform emails someone who opted out. Separately, a rename in `shared/domain/models.ts` ships silently — not merely because there is no CI, but because the server never binds those types to any request or response.
+
+**What changed, 2026-09-08.**
+
+**The line numbers in the evidence above are stale**, and four of the six mass assignments it
+cites are already gone — closed by P1.4, P1.13 and P0.13 as their handlers were rewritten. Two
+were still live, and one of them is the worst of the six for a reason the original write-up
+does not state.
+
+`POST /api/company-brain` took a whole body, and the company brain is **stringified into every
+outbound prompt**. A key written there is a key the model reads as part of its instructions —
+the reachable prompt-injection channel §18 describes, arriving through the front door as an
+ordinary authenticated API call rather than through a retrieved document, which is where the
+control was looking for it. `POST /api/settings` took a whole body too, and settings are read
+by operator surfaces that trust them.
+
+`server/domain/apiContracts.ts` is the registry: one place that answers "what does this route
+accept", enumerable by a test or a document generator rather than discoverable only by reading
+every handler. The schemas are `.strict()` — a schema that lets unknown keys through validates
+nothing that matters here, because the fields it knows about were never the problem — and they
+**reject** rather than silently drop, so a caller that sent a field it believed would be saved
+is told it was not.
+
+The company brain fields carry length and array limits, because that text becomes a prompt: an
+unbounded string there is an unbounded prompt. The settings schema deliberately has no
+autonomy field, so the gate that P0.3 put in the environment — where a datastore write can
+pause the system and can never start it — cannot be reached through an API call.
+
+`validateBody` returns the PARSED value, and the handlers write that. A handler that validates
+and then persists `req.body` has validated nothing: the check passes and the unvalidated bytes
+are still what get stored, which is the shape of most validation bugs.
+
+`scripts/check-no-mass-assignment.mjs` is the 17th guardrail — a spread of `req.body`, or
+`req.body` passed to a datastore write. Verified against the previous `server.ts` rather than
+assumed: it flags both sites that were live. It does NOT flag reading one field off the body,
+because that is a projection and a projection is the fix.
+
+16 invariants; 13 of 14 mutants killed against the real gate, the survivor measured as
+behaviourally equivalent under a strict schema and recorded.
+
+**Still PARTIAL, and most of the section is untouched.** There is no OpenAPI document and no
+generated frontend client. Only two routes are in the registry; params and query are not
+validated anywhere. Responses are still unprojected — `const items: any[] = []` and
+`res.json(items)` from raw datastore data, so an injected key written before this change is
+still echoed back to every reader. `tsconfig.json` still sets no `strict` and still excludes
+`scripts/`. There are no supertest contract tests; what exists asserts the schemas directly
+and reads the handlers, because driving them needs Firestore and an authenticated request.
 
 **Remediation.** Define zod schemas per route (body, params, query) and a `validate(schema)` middleware returning a `VALIDATION_ERROR` envelope. Eliminate the six mass assignments by picking allowed fields from a parsed DTO, and project responses through an allow-list. Derive an OpenAPI 3.1 document from the schemas and serve it. Generate the frontend client from that document. Enable `strict` in tsconfig. Add supertest contract tests asserting status and body shape for a valid and an invalid request on every route.
 

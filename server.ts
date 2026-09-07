@@ -85,6 +85,7 @@ import { runCompleteSalesEngineTestMatrix } from "./server/agents/salesEngineTes
 import { evaluatePolicy } from "./server/policies/policyEngine";
 import { autopilotRunner } from "./server/autopilotRunner";
 import { resolveProvenance, describeProvenance } from "./server/build/provenance";
+import { BODY_SCHEMAS, validateBody, type ContractRoute } from "./server/domain/apiContracts";
 import { Lead, Investor, Partner, Campaign, Meeting, Opportunity, KnowledgeItem, EmailMessage, CompanyBrain } from "./src/types";
 
 dotenv.config();
@@ -542,6 +543,32 @@ app.get("/api/health", (req: Request, res: Response) => {
     return res.json({ ...data, version });
   }
 
+  /**
+   * S11 — validate a body against the route's contract, or answer VALIDATION_ERROR.
+   *
+   * Returns the PARSED value. A handler that validates and then persists `req.body` has
+   * validated nothing: the check passes and the unvalidated bytes are what get written.
+   *
+   * Returns null when it has already answered, so the caller returns without a second response.
+   */
+  function parsedBodyOr400(
+    req: Request,
+    res: Response,
+    route: ContractRoute
+  ): Record<string, unknown> | null {
+    const outcome = validateBody(BODY_SCHEMAS[route], req.body ?? {});
+    if (outcome.ok === false) {
+      sendError(
+        req,
+        res,
+        'VALIDATION_ERROR',
+        `${route} rejected ${outcome.problems.length} field(s): ${outcome.problems.join('; ')}`
+      );
+      return null;
+    }
+    return outcome.value;
+  }
+
   async function writeSingleton(
     req: Request,
     res: Response,
@@ -574,7 +601,15 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/company-brain", async (req: Request, res: Response) => {
     try {
-      return await writeSingleton(req, res, 'company_brain', req.body || {});
+      // S11 — this took `req.body` whole. The company brain is stringified into EVERY outbound
+      // prompt, so a key written here is a key the model reads as part of its instructions —
+      // the injection channel §18 describes, arriving as an ordinary API call rather than
+      // through a retrieved document. The schema is strict, so an unexpected field is refused
+      // rather than dropped: a caller that sent something it believed would be saved is told it
+      // was not.
+      const body = parsedBodyOr400(req, res, 'POST /api/company-brain');
+      if (body === null) return;
+      return await writeSingleton(req, res, 'company_brain', body);
     } catch(e: any) { sendCaught(req, res, e); }
   });
 
@@ -587,7 +622,12 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.post("/api/settings", async (req: Request, res: Response) => {
     try {
-      return await writeSingleton(req, res, 'settings', req.body || {});
+      // The autonomy gate is deliberately absent from this schema and cannot be set here: it
+      // lives in the environment so that a datastore write can pause the system and can never
+      // start it (P0.3).
+      const body = parsedBodyOr400(req, res, 'POST /api/settings');
+      if (body === null) return;
+      return await writeSingleton(req, res, 'settings', body);
     } catch(e: any) { sendCaught(req, res, e); }
   });
 
