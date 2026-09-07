@@ -1478,8 +1478,17 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       const { name, engineType, targetAudience, targetIndustries, targetLocations, enrolledCount, isABTestingEnabled } = req.body;
 
       const projectedReach = enrolledCount || 0;
-      const projectedEngagement = Math.floor(projectedReach * 0.68);
-      const projectedConversion = Math.floor(projectedReach * 0.12);
+
+      // S27 — the 68% and 12% are gone.
+      //
+      // They were `Math.floor(projectedReach * 0.68)` and `* 0.12`, persisted onto the campaign
+      // as `projectedMetrics` and rendered as a projection. Nothing measured them: this system
+      // has never sent an autonomous email, there is no open pixel, no click redirect and no
+      // bounce webhook, so there is no engagement history for any rate to have come from.
+      //
+      // The worst case in S27 is a founder scaling spend on `enrolledCount * 0.68` and
+      // reporting it to an investor. A number with no source is worse than a blank, because a
+      // blank prompts the question and a number answers it.
 
       const newCampaign = {
         id: "camp_" + Date.now(),
@@ -1494,7 +1503,9 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         openedCount: 0,
         repliedCount: 0,
         convertedCount: 0,
-        projectedMetrics: { reach: projectedReach, engagement: projectedEngagement, conversion: projectedConversion },
+        // Reach is the enrolment count, which is a fact. Engagement and conversion are not
+        // reported at all until something measures them.
+        projectedMetrics: { reach: projectedReach, engagement: null, conversion: null, why: 'not measured: no open, click or bounce ingestion exists' },
         aiStrategySummary: `Generated custom sequence for ${targetAudience}. Leveraging local market context for ${(targetLocations || []).join(', ')}. ${isABTestingEnabled ? "A/B Testing automatically configured across 2 variants." : ""}`,
         steps: [
           {

@@ -2,7 +2,7 @@ import React from "react";
 import { X, TrendingUp, Users, Target } from "lucide-react";
 import { Campaign } from "../types";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { generateMockChartData } from "./CampaignsView";
+import { NoEngagementData } from "./CampaignsView";
 
 interface CampaignCompareModalProps {
   isOpen: boolean;
@@ -20,7 +20,6 @@ export const CampaignCompareModal: React.FC<CampaignCompareModalProps> = ({
   if (!isOpen || !campaign1 || !campaign2) return null;
 
   const renderCampaignColumn = (camp: Campaign, colorHex: string, secColorHex: string) => {
-    const data = generateMockChartData(camp.enrolledCount, camp.id);
     const winRate = camp.enrolledCount > 0 ? Math.round((camp.convertedCount / camp.enrolledCount) * 100) : 0;
     const engagementRate = camp.sentCount > 0 ? Math.round((camp.openedCount / camp.sentCount) * 100) : 0;
     
@@ -55,46 +54,7 @@ export const CampaignCompareModal: React.FC<CampaignCompareModalProps> = ({
             30-Day Performance Comparison
           </div>
           <div className="flex-1 w-full min-h-[200px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={data}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis 
-                  dataKey="date" 
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fontSize: 10, fill: '#94a3b8' }}
-                  dy={10}
-                  minTickGap={20}
-                />
-                <YAxis 
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fontSize: 10, fill: '#94a3b8' }}
-                  dx={-10}
-                />
-                <Tooltip 
-                  contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
-                />
-                <Line 
-                  type="monotone" 
-                  name="Engagement"
-                  dataKey="engagement" 
-                  stroke={secColorHex} 
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-                <Line 
-                  type="monotone" 
-                  name="Conversion"
-                  dataKey="conversion" 
-                  stroke={colorHex} 
-                  strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <NoEngagementData label="Engagement" />
           </div>
         </div>
       </div>

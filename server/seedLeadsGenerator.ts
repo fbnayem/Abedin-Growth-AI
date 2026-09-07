@@ -678,29 +678,20 @@ export function generateFourHundredHistoricalLeads(): {
       lastOutreachSubject: subject,
       lastOutreachBody: body,
       lastOutreachChannel: channel,
-      emailStatus:
-        status === "ENGAGED" || status === "DEMO_SCHEDULED" || status === "WON"
-          ? "REPLIED"
-          : i % 5 === 0
-          ? "CLICKED"
-          : i % 3 === 0
-          ? "OPENED"
-          : "DELIVERED",
-      openCount:
-        status === "ENGAGED" || status === "DEMO_SCHEDULED" || status === "WON"
-          ? 3 + (i % 3)
-          : i % 3 === 0
-          ? 1 + (i % 2)
-          : 0,
-      lastOpenedAt:
-        status === "ENGAGED" || status === "DEMO_SCHEDULED" || status === "WON" || i % 3 === 0
-          ? new Date(new Date(contactedTimestamp).getTime() + (45 + (i % 60)) * 60 * 1000).toISOString()
-          : undefined,
-      clickedAt:
-        status === "DEMO_SCHEDULED" || status === "WON" || i % 5 === 0
-          ? new Date(new Date(contactedTimestamp).getTime() + (90 + (i % 60)) * 60 * 1000).toISOString()
-          : undefined,
-      spamScore: 0.0,
+      // S27 — the engagement fields are gone.
+      //
+      // They were computed from the LOOP INDEX: `i % 5 === 0 ? "CLICKED" : i % 3 === 0 ?
+      // "OPENED" : "DELIVERED"`, an open count of `1 + (i % 2)`, an opened-at 45 minutes after
+      // the send, and `spamScore: 0.0`. These records are persisted to `data_storage.json` and
+      // reloaded, so they read as recorded history rather than as fixtures.
+      //
+      // There is no open pixel, no click redirect and no bounce or complaint webhook anywhere
+      // in this system. Nothing could ever have observed any of it. A seeded lead has no
+      // engagement history, and the honest representation of that is an ABSENT field — not a
+      // zero, which renders as a measured zero.
+      //
+      // `emailStatus` is omitted for the same reason: "DELIVERED" is a claim about what a
+      // recipient's server did, and nothing here has ever heard from one.
       recommendedActionLabel:
         status === "ENGAGED"
           ? "⚡ Lock in Demo Walkthrough"
@@ -741,13 +732,12 @@ export function generateFourHundredHistoricalLeads(): {
 
     leads.push(lead);
 
-    // Create Outbox Log for initial sent touch
-    const outboxStatus: OutboxLogItem["status"] =
-      status === "ENGAGED" || status === "DEMO_SCHEDULED" || status === "WON"
-        ? "REPLIED"
-        : i % 3 === 0
-        ? "OPENED"
-        : "DELIVERED";
+    // Create Outbox Log for initial sent touch.
+    //
+    // S27 — the status was `i % 3 === 0 ? "OPENED" : "DELIVERED"`. A seeded touch was never
+    // sent, so it was never delivered and nobody opened it. SIMULATED is what actually
+    // happened, and it is deliberately not a value any real send can produce.
+    const outboxStatus: OutboxLogItem["status"] = "SIMULATED";
 
     outboxLogs.push({
       id: `outbox_log_${i + 1}`,
@@ -762,12 +752,10 @@ export function generateFourHundredHistoricalLeads(): {
       bodyText: body,
       sentAt: contactedTimestamp,
       status: outboxStatus,
-      qcScore: 97 + (i % 3),
-      openCount: lead.openCount,
-      lastOpenedAt: lead.lastOpenedAt,
-      clickedAt: lead.clickedAt,
-      spamScore: 0.0,
-      deliverabilityStatus: "VERIFIED_CLEAN",
+      // qcScore was `97 + (i % 3)` — a quality score nothing computed, in the high nineties by
+      // construction. openCount, lastOpenedAt, clickedAt, spamScore and
+      // deliverabilityStatus: "VERIFIED_CLEAN" were all fabricated the same way. Omitted rather
+      // than zeroed: a zero renders as a measurement.
       campaignName: "UK Dental & Healthcare Inbound Voice Receptionist",
       category: "CUSTOMER",
       leadId: lead.id,

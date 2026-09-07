@@ -2996,7 +2996,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts` (`quoteAvailability`) | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`. The auditor no longer penalises a reply for OMITTING the list price (P1.7), and since §1w it refuses to clear a stated amount when quotes were not looked up: `quote: null` used to mean both "this customer has no quote" and "nobody looked", and the live pipeline — whose context bundle records `QUOTE` as unavailable — was the caller that had not looked, so list pricing was being authorised for customers who may hold a negotiated one |
 | S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | NOT_STARTED | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | No campaign execution engine exists; none of the 14 required guards is implemented; a reply does not stop the sequence because both stop mechanisms query an empty Postgres |
 
-| S27 | Deliverability: sender identity health and fabricated metrics | NOT_STARTED | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
+| S27 | Deliverability: sender identity health and fabricated metrics | PARTIAL | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
 | S28 | Bounce, DSN and automated-mail classification before replying | PARTIAL | CRITICAL | `inboundPipeline.ts:112`; `models.ts:814-834`; `salesDecisionEngine.ts:133-134`; `schema.ts:122` | Landed 2026-09-07 (§1t). `classifyAutomation` reads DSN fields, `multipart/report`, `X-Failed-Recipients`, null `Return-Path`, `List-*`, RFC 3834 `Auto-Submitted`, `Precedence` and whole role local-parts — never subject prose. Only `NO_AUTOMATION_MARKERS` permits a reply, and the gate runs BEFORE the first model call. A permanent (5.x.x) bounce writes `hardBounced`, the suppression flag the gateway already read and nothing ever wrote. **Remainder: no complaint/feedback-loop handling, and an out-of-office carrying no headers is still replied to** — deliberately, because a subject regex is prose-classification |
 | S29 | Contact/account dedup, normalization and merge | PARTIAL | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all**. *Superseded by §1f: derived ids, account creation and a transactional merge landed 2026-09-06; held at PARTIAL by the open Firestore rules and the absence of a backfill.* |
 | S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | PARTIAL | HIGH | `shared/domain/time.ts`; `schema.ts` (76 `timestamptz` cols); `server.ts` (`POST /api/meetings`); `multiAgentReplySystem.ts`; `ScheduleMeetingModal.tsx`; `calendar.service.ts` | Zone-aware hours, IANA validation (rejecting `BST`, which Intl resolves to Asia/Dhaka), `{startAtUtc, timeZone}` meetings, all 76 columns zoned, and the `datetime-local` round trip fixed — all verified at runtime. **Remainder: 99 direct wall-clock reads in `server/` are not yet routed through the injectable `Clock`,** which is injected only into the reply composer and the context bundle |
@@ -3597,13 +3597,64 @@ Both must be closed before "move the guards into `dispatchAction`" means anythin
 
 ---
 
-### S27 — Deliverability and fabricated metrics · NOT_STARTED · CRITICAL
+### S27 — Deliverability and fabricated metrics · PARTIAL · CRITICAL
 
 **What exists.** No sender identity health model of any kind — `gmail.service.ts` contains zero references to SPF, DKIM, DMARC, sendAs, quota, bounce or revocation — and four separate sources of fabricated engagement data.
 
 **Decisive evidence.** There is no open pixel, no click redirect and no bounce or complaint webhook anywhere; the only writers of `openCount`/`clickedAt`/`emailStatus` are in `seedLeadsGenerator.ts:681-703`, which manufactures engagement from the loop index (`i % 5 === 0 ? "CLICKED" : i % 3 === 0 ? "OPENED" : "DELIVERED"`), plus `spamScore: 0.0` and `deliverabilityStatus: "VERIFIED_CLEAN"` — and those records are persisted to `server/data_storage.json` and reloaded, so they read as recorded history. `server.ts:598-599` invents 68% engagement and 12% conversion at campaign creation and persists it. `CampaignsView.tsx:34-58` synthesises a 30-day series from `Math.sin` and `Math.random` with the comment "Add realistic-looking sinusoidal noise". The UI asserts delivery as fact: `Spam Score: 0.0 • 100% Clean Deliverability`, `Bounce Rate Spike Status: NORMAL (< 0.2%)`, `CLEAN (0 Detected)`, `SPF, DKIM, DMARC Verified`, `Tracking pixel active`, and `Delivered with 0 spam triggers. Recipient opened email and clicked link…` — all hardcoded JSX or gated only on `lead.contactedAt` existing. `bounceRateSpikeDetected` is initialised false, reset false, and never set true. `metrics.service.ts` `incrementCounter` has an empty body and zero call sites. Nothing anywhere distinguishes "accepted by Gmail" from "delivered", and today every send is simulated.
 
 **Worst case.** The founder opens the dashboard after a launch and sees 68% projected engagement, a smooth performance curve, clean spam and bounce indicators, verified SPF/DKIM/DMARC, and per-lead "Delivered & Opened" entries. Every one of those is a loop index, a sine wave or a string literal. In reality the domain has no DKIM record and the gateway has been returning simulated success. He scales spend on a number computed as `enrolledCount * 0.68`, reports it to an investor, and because nothing ingests bounces the breaker never trips and the domain is blacklisted before any indicator changes colour.
+
+**What changed, 2026-09-08 — the first remediation step, in full.** "Delete or hard-gate every
+fabricated surface first" is done. The sender identity model is not, and that is the larger
+half of this section.
+
+All four sources are gone:
+
+- **The seed generator** computed engagement from the loop index —
+  `i % 5 === 0 ? "CLICKED" : i % 3 === 0 ? "OPENED" : "DELIVERED"` — with `spamScore: 0.0`,
+  `qcScore: 97 + (i % 3)` and `deliverabilityStatus: "VERIFIED_CLEAN"`. Those records are
+  persisted to `data_storage.json` and reloaded, so they read as recorded history rather than
+  as fixtures. The fields are **absent** now, not zeroed: a zero renders as a measured zero,
+  and "0 opens" is a claim that somebody looked.
+- **The campaign projection** invented `enrolledCount * 0.68` engagement and `* 0.12`
+  conversion and persisted them. Reach is still reported — it is the enrolment count, which is
+  a fact — and the other two are `null` with a stated reason, because a missing key reads as an
+  oversight while a null with a reason reads as a decision.
+- **`generateMockChartData`** built a 30-day series from `Math.sin`, `Math.cos` and
+  `Math.random` under a comment reading "Add realistic-looking sinusoidal noise", rendered on
+  every active campaign card and in the comparison modal. Deleted, all three render sites. A
+  chart is the worst form of this: a figure states a value, a chart asserts a shape over time,
+  and a shape is what a person extrapolates from. What replaces it says nothing is collected —
+  not "no data yet", which invites waiting.
+- **The hardcoded UI claims**: `Spam Score: 0.0 • 100% Clean Deliverability`,
+  `100% Clean SPF/DKIM`, `SPF, DKIM, DMARC Verified`, `0.0 / 10`, and two `100% Clean` panels.
+  All replaced with what is true, which is that none of it is measured.
+
+`OutboxLogItem.status` gains **`SIMULATED`**, which S27 asks for by name. Without it the only
+available answers were SENT and DELIVERED, so a send that never left the process was recorded
+as one that had. The type also now records why DELIVERED is not a claim this system can make:
+it is an assertion about what a recipient mail server did, and with no bounce or complaint
+webhook, "accepted by the provider" and "delivered" are not distinguishable here. `qcScore` is
+optional, because a required score forces every writer to invent one.
+
+`scripts/check-no-fabricated-engagement.mjs` is the 18th guardrail: randomness in a file that
+names an engagement field, a delivery state derived from a loop index, and a literal asserting
+verified deliverability. It found two sources the section listed and I had missed — five
+hardcoded panels in `InboxView.tsx` and two in `LeadDetailModal.tsx` — which is the check
+doing its job before it was even registered. A union member in a TYPE declaration is exempt,
+because `VERIFIED_CLEAN` has to be nameable for anything ever to report it; what is forbidden
+is asserting it.
+
+14 invariants; 12 of 12 mutants killed against the real gate.
+
+**Still PARTIAL and still CRITICAL, because the larger half is untouched.** There is no sender
+identity model: no per-mailbox or per-domain SPF/DKIM/DMARC status, no rolling sent, bounce or
+complaint counts, no quota headroom, no revoked-token state, and nothing blocks a send for
+failing any of it. There is still no open pixel, no click redirect and no bounce or complaint
+ingestion, so engagement is not merely unreported — it is unobservable.
+`bounceRateSpikeDetected` is still initialised false, reset false and never set true. What has
+changed is that the absence is now visible instead of being papered over with a sine wave.
 
 **Remediation.** Delete or hard-gate every fabricated surface first: the projection arithmetic, `generateMockChartData` and its two render sites, and the hardcoded strings. Rename every "Delivered" label to "Accepted by Gmail" and reserve "Delivered" for evidence not currently collected. Gate open/click UI on a real event record, not `contactedAt`. Build the sender identity model (per-mailbox and per-domain SPF/DKIM/DMARC status, rolling sent/bounce/complaint counts, quota headroom, revoked-token state) and block sends failing any of it. Implement open, click, bounce and complaint ingestion before displaying any engagement number. Wire `bounceRateSpikeDetected` to real data and bind the UI to it. Persist simulated sends with `status: 'SIMULATED'`, never `'SENT'`. Give `metrics.service` a real implementation or delete it. Test: no recorded open → renders "not tracked"; a simulated send never produces SENT; a bounce webhook trips the breaker; a mailbox failing DKIM is refused as a sender.
 

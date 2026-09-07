@@ -611,8 +611,22 @@ export interface OutboxLogItem {
   subject: string;
   bodyText: string;
   sentAt: string;
-  status: 'SENT' | 'DELIVERED' | 'OPENED' | 'REPLIED' | 'FAILED';
-  qcScore: number;
+  /**
+   * S27 — SIMULATED is a first-class outcome, and it is what a seeded or flag-disabled send
+   * actually is.
+   *
+   * Without it the only available answers were SENT and DELIVERED, so a send that never left
+   * the process was recorded as one that had. DELIVERED in particular is a claim about what a
+   * recipient mail server did, and nothing in this system has ever heard from one — there is
+   * no bounce or complaint webhook, so 'accepted by Gmail' and 'delivered' are not
+   * distinguishable here either.
+   */
+  status: 'SIMULATED' | 'SENT' | 'DELIVERED' | 'OPENED' | 'REPLIED' | 'FAILED';
+  /**
+   * Optional, because it was fabricated wherever it was set — `97 + (i % 3)`, in the high
+   * nineties by construction. A required score forces every writer to invent one.
+   */
+  qcScore?: number;
   openCount?: number;
   lastOpenedAt?: string;
   clickedAt?: string;

@@ -31,31 +31,33 @@ import {
 } from "recharts";
 
 
-export const generateMockChartData = (enrolledCount: number, seed: string) => {
-  const data = [];
-  let baseEng = Math.max(5, Math.floor(enrolledCount * 0.1));
-  let baseConv = Math.max(1, Math.floor(enrolledCount * 0.02));
-  
-  // Use a simple seed based on campaign id length or char codes
-  const seedNum = seed.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-
-  for (let i = 29; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    
-    // Add realistic-looking sinusoidal noise
-    const engVal = Math.max(0, Math.floor(baseEng + Math.sin(i + seedNum) * (baseEng * 0.3) + Math.random() * (baseEng * 0.2)));
-    const convVal = Math.max(0, Math.floor(baseConv + Math.cos(i + seedNum) * (baseConv * 0.3) + Math.random() * (baseConv * 0.2)));
-    
-    // cumulative growth for conversion maybe, or just daily. Let's do daily active
-    data.push({
-      date: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      engagement: engVal,
-      conversion: convVal
-    });
-  }
-  return data;
-};
+/**
+ * S27 — `generateMockChartData` is deleted.
+ *
+ * It built a 30-day series from the campaign id and `Math.sin`, `Math.cos` and `Math.random`,
+ * under a comment reading "Add realistic-looking sinusoidal noise". It was rendered as a
+ * "30-Day Performance Trend" on every active campaign card and in the comparison modal.
+ *
+ * There is no open pixel, no click redirect and no bounce or complaint webhook anywhere in
+ * this system, and it has never sent an autonomous email. So there was no engagement history
+ * for a curve to be drawn from, and every point on it was a sine wave seeded by a string.
+ *
+ * S27's worst case is a founder reading that curve, scaling spend, and reporting the number to
+ * an investor. A chart is a stronger claim than a figure: it asserts a shape over time, which
+ * is the thing a person extrapolates from.
+ *
+ * What replaces it says there is nothing to show. That is not a placeholder awaiting data — it
+ * is the accurate report of what this system currently knows about engagement.
+ */
+export const NoEngagementData = ({ label }: { label: string }) => (
+  <div className="flex-1 min-h-[160px] w-full bg-slate-50 border border-dashed border-slate-200 rounded-xl p-4 flex flex-col items-center justify-center text-center">
+    <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">{label}</div>
+    <div className="text-xs text-slate-500 mt-2 max-w-[260px]">
+      Not tracked. There is no open, click or bounce ingestion in this system, so no engagement
+      history exists to chart.
+    </div>
+  </div>
+);
 
 interface CampaignsViewProps {
   campaigns: Campaign[];
@@ -335,48 +337,7 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                   <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
                     30-Day Performance Trend
                   </div>
-                  <div className="flex-1 min-h-[160px] w-full bg-white border border-slate-100 rounded-xl p-3 shadow-xs">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={generateMockChartData(camp.enrolledCount, camp.id)}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis 
-                          dataKey="date" 
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: 10, fill: '#94a3b8' }}
-                          dy={10}
-                          minTickGap={20}
-                        />
-                        <YAxis 
-                          axisLine={false}
-                          tickLine={false}
-                          tick={{ fontSize: 10, fill: '#94a3b8' }}
-                          dx={-10}
-                        />
-                        <Tooltip 
-                          contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
-                        />
-                        <Line 
-                          type="monotone" 
-                          name="Engagement"
-                          dataKey="engagement" 
-                          stroke="#3b82f6" 
-                          strokeWidth={2}
-                          dot={false}
-                          activeDot={{ r: 4 }}
-                        />
-                        <Line 
-                          type="monotone" 
-                          name="Conversion"
-                          dataKey="conversion" 
-                          stroke="#10b981" 
-                          strokeWidth={2}
-                          dot={false}
-                          activeDot={{ r: 4 }}
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+                  <NoEngagementData label="Engagement" />
                 </div>
               )}
             </div>
@@ -396,48 +357,7 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({
                 <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3">
                   30-Day Performance Trend
                 </div>
-                <div className="h-48 w-full bg-white border border-slate-100 rounded-xl p-3 shadow-xs">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={generateMockChartData(camp.enrolledCount, camp.id)}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis 
-                        dataKey="date" 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 10, fill: '#94a3b8' }}
-                        dy={10}
-                        minTickGap={20}
-                      />
-                      <YAxis 
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fontSize: 10, fill: '#94a3b8' }}
-                        dx={-10}
-                      />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)', fontSize: '12px' }}
-                      />
-                      <Line 
-                        type="monotone" 
-                        name="Engagement"
-                        dataKey="engagement" 
-                        stroke="#3b82f6" 
-                        strokeWidth={2}
-                        dot={false}
-                        activeDot={{ r: 4 }}
-                      />
-                      <Line 
-                        type="monotone" 
-                        name="Conversion"
-                        dataKey="conversion" 
-                        stroke="#10b981" 
-                        strokeWidth={2}
-                        dot={false}
-                        activeDot={{ r: 4 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
+                <NoEngagementData label="Engagement" />
               </div>
             )}
 

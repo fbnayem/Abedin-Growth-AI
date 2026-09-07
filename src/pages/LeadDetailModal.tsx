@@ -993,10 +993,10 @@ ${companyBrain.companyName}`;
                     <span>Deliverability & Spam</span>
                   </div>
                   <div className="text-base font-black text-emerald-950">
-                    {lead.spamScore !== undefined ? `${lead.spamScore}/100 Safe` : "0.0 Spam (100% Clean)"}
+                    {lead.spamScore !== undefined ? `${lead.spamScore}/100` : "Not measured"}
                   </div>
                   <div className="text-[10px] text-emerald-700">
-                    SPF, DKIM, DMARC Verified
+                    SPF, DKIM and DMARC are not checked
                   </div>
                 </div>
 
