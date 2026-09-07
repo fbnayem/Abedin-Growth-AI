@@ -55,6 +55,38 @@ BEGIN;
 -- conversation from this file.
 ALTER ROLE "growth-ai-dat-user-747" NOCREATEDB NOCREATEROLE;
 
+-- The membership that made all of the above nearly beside the point.
+--
+-- Measured after the first run of this file: every direct grant was correct — the schema ACL
+-- read `growth-ai-dat-user-747=U/pg_database_owner`, USAGE and no CREATE — and
+-- `has_schema_privilege(role, 'public', 'CREATE')` still returned true.
+--
+-- The privilege arrives through role MEMBERSHIP, which a REVOKE naming the role does nothing
+-- about:
+--
+--     schema public ACL : cloudsqlsuperuser=UC/pg_database_owner
+--     inherits from     : cloudsqlsuperuser -> pg_monitor, pg_signal_backend, pg_checkpoint,
+--                                              pg_read_all_settings, pg_read_all_stats
+--
+-- So the application role could create tables, read every setting and statistic on the
+-- instance, and terminate other backends. Cloud SQL grants cloudsqlsuperuser to every user
+-- created through the console or the API, so this is the default state of any user made that
+-- way rather than something that went wrong here.
+--
+-- Wrapped so a failure WARNS instead of aborting. `postgres` is itself only a member of
+-- cloudsqlsuperuser with admin_option=false, so it may not be permitted to revoke this — and
+-- an unguarded statement that cannot succeed would roll back every GRANT below it, which is
+-- the exact failure this file already had once.
+DO $revoke$
+BEGIN
+  EXECUTE 'REVOKE "cloudsqlsuperuser" FROM "growth-ai-dat-user-747"';
+  RAISE NOTICE 'cloudsqlsuperuser membership revoked.';
+EXCEPTION WHEN OTHERS THEN
+  RAISE WARNING 'could not revoke cloudsqlsuperuser: %', SQLERRM;
+  RAISE WARNING 'the app role keeps CREATE on schema public, pg_monitor and pg_signal_backend through that membership; it needs a role created with SQL rather than through the Cloud SQL console';
+END
+$revoke$;
+
 -- 2. Reach the data. ----------------------------------------------------------------------
 GRANT CONNECT ON DATABASE "postgres" TO "growth-ai-dat-user-747";
 GRANT USAGE ON SCHEMA public TO "growth-ai-dat-user-747";
