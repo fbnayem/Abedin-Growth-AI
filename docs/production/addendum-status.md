@@ -3013,8 +3013,8 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S41 | Adapter contracts | PARTIAL | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). `CalendarProvider` implemented 2026-09-07 (§1s) by `GoogleCalendarService`, and the compiler holds it — renaming `checkAvailability` fails `tsc`, measured by mutation. **Remainder: Stripe, DocuSign and LinkedIn have no adapter and no interface**, and `PAYMENT_CREATE` / `SIGNATURE_SEND` / `EXTERNAL_MESSAGE_SEND` / `CALENDAR_UPDATE` / `CALENDAR_CANCEL` all still fall through the dispatch switch to `Unsupported action type` |
 | S42 | Chaos / fault-injection across the autonomous send path | PARTIAL | CRITICAL | `db/index.ts:48-51`; `outbox.worker.ts:49,134-137`; `gmail.service.ts:151-167`; `geminiClient.ts:139-145` | Zero fault-injection tests; every one of the 15 required failure modes is unhandled — DB down, mid-sequence commit failure, post-send crash, timeout, 401, 429, 500, malformed AI JSON, duplicate/out-of-order webhook, concurrent claim, concurrent human edit |
 | S43 | Outbox transaction boundaries: atomic claim, crash recovery, duplicates | PARTIAL | CRITICAL | `outbox.service.ts:47-62`; `outbox.worker.ts:23,95,120`; `schema.ts:147-156` | The "claim" is a read; no lease, no CAS, no transaction, no attempt counter, no re-entrancy guard; producer writes Postgres while consumer reads Firestore |
-| S44 | Alerting: thresholds and destinations | NOT_STARTED | HIGH | `metrics.service.ts:12-20`; `inboundPipeline.ts:147`; `salesDecisionEngine.ts:30-31`; case-insensitive grep `pagerduty\|slack\|sentry\|datadog\|prometheus\|opentelemetry\|cloudmonitoring\|webhookUrl\|alertTransport` over `server/ src/ package.json` → **one hit**, the comment `// In production, send to Datadog / Prometheus` at `metrics.service.ts:12` | One threshold (`>2000ms` → `console.warn`) on a line that never executes; `incrementCounter` has an empty body; zero of eleven required signals have a threshold or a destination; no alert client is a dependency |
-| S45 | Service level objectives: defined and measured | NOT_STARTED | HIGH | `metrics.service.ts:13-14`; `outbox.routes.ts:23`; `server.ts:96-98`; case-insensitive word-boundary grep `\b(slo\|sla\|p95\|p99\|percentile\|error budget\|availability)\b` over `docs/*.md` (all four files: `DisasterRecovery.md`, `audit-report.md`, `external-setup-required.md`, `production-readiness-checklist.md`) → **zero hits** | No SLO document, targets, percentiles, windows or error budgets; five of six flows have no measurement code; no `approvedAt`/`failedAt` so latency is not even derivable |
+| S44 | Alerting: thresholds and destinations | PARTIAL | HIGH | `metrics.service.ts:12-20`; `inboundPipeline.ts:147`; `salesDecisionEngine.ts:30-31`; case-insensitive grep `pagerduty\|slack\|sentry\|datadog\|prometheus\|opentelemetry\|cloudmonitoring\|webhookUrl\|alertTransport` over `server/ src/ package.json` → **one hit**, the comment `// In production, send to Datadog / Prometheus` at `metrics.service.ts:12` | One threshold (`>2000ms` → `console.warn`) on a line that never executes; `incrementCounter` has an empty body; zero of eleven required signals have a threshold or a destination; no alert client is a dependency |
+| S45 | Service level objectives: defined and measured | PARTIAL | HIGH | `metrics.service.ts:13-14`; `outbox.routes.ts:23`; `server.ts:96-98`; case-insensitive word-boundary grep `\b(slo\|sla\|p95\|p99\|percentile\|error budget\|availability)\b` over `docs/*.md` (all four files: `DisasterRecovery.md`, `audit-report.md`, `external-setup-required.md`, `production-readiness-checklist.md`) → **zero hits** | No SLO document, targets, percentiles, windows or error budgets; five of six flows have no measurement code; no `approvedAt`/`failedAt` so latency is not even derivable |
 | S46 | Feature flags | PARTIAL | CRITICAL | `actionGateway.ts:38-44`, `:109-126`, `:124`, `:326`; `salesDecisionEngine.ts:27`; `server.ts:6`, `:52`, `:81-82`, `:337` | **Half fails closed, half fails open.** The five `SAFE_MODE` booleans use `=== 'true'` and so default false — but the dispatch gate's `default: return true` (`:124`) **allows** any action type without an explicit case, and the master autonomy flag `globalAutonomousSendEnabled` is **initialised `true`** with no reachable runtime writer. Separately the SAFE_MODE snapshot is taken at module construction, before `dotenv.config()`, so `.env` never reaches the enforcement point. Flags are also process-global, boot-frozen, untenanted, unaudited; two of five gate nothing and Stripe bypasses the system entirely |
 | S47 | Readiness must verify capability, not object existence | PARTIAL | CRITICAL | `server.ts:75-94`, `:78`, `:79`, `:86`; live probe READY while `/api/outbox` → 500 | No query executed; `actionGatewayLoaded` is a hardcoded literal; none of the six required capability checks (query, migration version, worker heartbeat, provider config, auth config, secret resolvability) exists |
 | S48 | Rolling-deploy compatibility: payload versioning, migration ordering | PARTIAL | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. Still PARTIAL: producer and consumer still target different stores (Postgres vs Firestore), which S26/P0.0 must resolve; nothing yet refuses to serve when the schema is behind the build |
@@ -3875,7 +3875,7 @@ coverage it does not have.
 
 ---
 
-### S44 — Alerting: thresholds and destinations · NOT_STARTED · HIGH
+### S44 — Alerting: thresholds and destinations · PARTIAL · HIGH
 
 **What exists.** A 21-line metrics service containing one threshold whose destination is stdout.
 
@@ -3883,17 +3883,78 @@ coverage it does not have.
 
 **Worst case.** The outbox worker's interval dies at 02:00 (unhandled rejection, container OOM). Nothing records a heartbeat, nothing counts queue age, no alert has a destination. Every AI reply silently stops going out while the dashboard still shows the engine as Active and readiness still returns READY. The outage is discovered days later by a customer asking why nobody replied — and because `markFailed` is terminal with no retry, the backlog cannot be flushed even after the worker restarts.
 
+**What changed, 2026-09-08.** `incrementCounter` had an **empty function body**, so
+`DUPLICATE_BLOCKED` and `POLICY_BLOCK` were declared metric names counted nowhere — and it had
+zero call sites, so nothing revealed it by being wrong. It has a body now, over a vocabulary
+that includes the failure signals (`SEND_FAILURE`, `DEAD_LETTERED`, `PROVIDER_401`,
+`PROVIDER_429`, `AI_FAILURE`, `WEBHOOK_REJECTED`, `AMBIGUOUS_OUTCOME`) rather than only
+`SEND_SUCCESS`.
+
+`scripts/check-no-empty-observability.mjs` is the 16th guardrail and is the one this section
+asks for by name — *fail the build on an empty metric method*. Comments do not count as a
+body, because `incrementCounter` was never an empty pair of braces: it held
+`// Send to metric collector`, and a check counting that as a body could not have fired on the
+one case it exists for. Verified against the previous file rather than assumed.
+
+**The part that matters more than the transport.** No destination is configured in this
+deployment and there is no credential here to configure one with, so the question this had to
+answer honestly is what happens when an alert cannot be delivered. `raise()` returns
+`UNDELIVERED` with a reason — a distinct result from `DELIVERED`, not a boolean and not
+silence — undelivered alerts are counted and kept, and
+`metricsService.snapshot().alerting.configured` reports `false`. A transport that throws is
+also `UNDELIVERED`, not a swallowed exception. This section's worst case is a system that
+believes it is monitored; an alerting module that returned quietly would be that defect one
+level up.
+
+31 invariants; 17 of 17 mutants killed against the real gate. Four survived a first pass and
+all four were genuine gaps: the sample floor could be lowered to 1 without any test noticing
+(every assertion derived its sample count FROM the constant); the doc/code check was not
+scoped to a row; the negative-duration guard was tested with too few bad samples to move the
+percentile either way; and the guardrail's own self-check tested a COPY of its comment
+stripping rather than calling it, so mutating the real condition survived.
+
+**Still PARTIAL.** `ALERT_WEBHOOK_URL` is unset, so a breach reaches nobody — by design and
+reported, not silently. Six of the eleven signals still have no threshold: dead-letter count,
+queue age, calendar failures, webhook verification failures, bounce rate and worker heartbeat.
+Counters exist for several and are not yet incremented from every path that should. There is
+no worker heartbeat at all, which is the specific signal this section's worst case turns on.
+
 **Remediation.** Replace the metrics service with a real client and give `incrementCounter` a body; fail the build on an empty metric method. Instrument the failure paths, not just the success path: move `recordLatency` into a `finally` and emit a counter from every catch in the pipeline, worker, gateway and Gmail service. Branch on `res.status` to emit distinct `GMAIL_401` (re-auth required) and `GMAIL_429` (back off) counters and flip the connection to DEGRADED on 401. Have the worker write a heartbeat each tick and alert when it is older than two intervals. Define numeric thresholds for all eleven signals and wire each to a paging destination. Implement webhook signature verification and alert on failures, or refuse the webhook. Test by injecting a breach and asserting the alert transport was called with the expected payload.
 
 ---
 
-### S45 — Service level objectives · NOT_STARTED · HIGH
+### S45 — Service level objectives · PARTIAL · HIGH
 
 **What exists.** The string "SLO" occurs once in the repository — inside a `console.warn` message.
 
 **Decisive evidence.** The only numeric target is a bare `2000` applied uniformly to three unrelated operations with no per-operation target, no percentile, no window and no error budget. Only one of the three is measured at all, and that call site sits after a throwing database call, so it does not execute. Draft generation latency, approved-send latency, queue delay, reconciliation delay and API availability have no measurement code whatsoever. Queue delay is not derivable from what is stored — `markFailed` records no timestamp, and the approve route writes only a status with no `approvedAt`; the underlying table has no `approvedAt`, `failedAt` or `attempts` columns, so this is structural, not route-level. Reconciliation delay is undefined because no reconciler exists. `/api/health` returns a static literal that cannot fail while the process is up, so an availability SLI cannot be computed from it. All four files in `docs/` return zero matches for slo/sla/latency/p95/availability/error budget, and the checklist has no latency or availability row — while marking as PASS capabilities whose implementations are dead code. `docs/DisasterRecovery.md` states RTO 4h / RPO 15min and "Database PITR" for a database that is not provisioned, and delegates its data-integrity verification to a command that cannot run.
 
 **Worst case.** Draft generation quietly degrades from 3s to 90s after a model change. No percentile is recorded, no target exists to breach, and the single 2000ms warning never fires because it is downstream of a throw. Replies arrive a day late for weeks; the first signal is a customer saying the AI ghosted them, and there is no historical latency data to bound the blast radius or establish when the regression started.
+
+**What changed, 2026-09-08.** `docs/production/slo.md` states five objectives with a
+percentile, a window and a rationale each; `server/domain/slo.ts` is the executable copy, and
+`server/tests/slo.invariant.test.ts` fails the build when the two disagree — scoped to the
+operation's own table row, because searching the whole document let two objectives satisfy
+each other's assertion.
+
+The evaluation is a **percentile over a window**, not a comparison per sample. The old form
+was wrong in both directions: one slow request pages someone, and a system that is slow half
+the time never breaches because each sample is judged alone. Below 20 samples the answer is
+`NO_DATA`, which is explicitly **not** `MET` — an empty window reporting health is the same
+inversion as a suppression check reporting clean from an empty store. `percentile()` of an
+empty set throws rather than returning 0, which would read as "fast".
+
+The `INBOUND_PROCESSING` emit moved into a **`finally`**, and `startTime` moved outside the
+`try`. It sat just before the successful return, so the percentile described only the requests
+that worked: a pipeline failing half its inbound mail would have shown a healthy objective,
+most reassuring exactly when it mattered least.
+
+**Still PARTIAL.** Only `INBOUND_PROCESSING` is instrumented. `DRAFT_GENERATION`,
+`APPROVED_SEND` and `QUEUE_DELAY` have budgets and no emit; `RECONCILIATION` has no reconciler
+to measure. Availability is not an SLI here — `/api/health` cannot fail while the process is
+up, so it needs an external prober and there is none. The numbers live in memory in one
+process: lost on restart, not aggregated across replicas. What is fixed is metrics being
+discarded and objectives being unwritten, not the absence of a metrics platform.
 
 **Remediation.** Write down explicit SLOs with percentile and window — inbound ingestion p95 < 60s, draft generation p95 < 30s, approved-send p95 < 120s, queue delay p99 < 5m, reconciliation < 15m, API availability 99.5%/30d — and commit the document. Add `approvedAt`, `failedAt`, `dispatchedAt` and `firstAttemptAt` so latency is derivable. Emit a timing histogram per stage with the emit in a `finally` so failures are measured. Replace the shared 2000ms constant with per-operation budgets sourced from the SLO document and record percentiles rather than firing on single samples. Make `/api/health` capable of failing and add an external prober. Test that each stage emits its timing metric on both the success and the failure path.
 

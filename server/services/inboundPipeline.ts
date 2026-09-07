@@ -4,7 +4,7 @@ import { withModelCallCollector, type ModelCallRecord } from '../lib/modelCallLo
 import { runLogFieldsFor, writeRunLog } from '../lib/runLog';
 import { buildContextBundle, type ContextKind } from '../domain/contextBundle';
 import { adaptLedgers } from '../domain/ledgerAdapters';
-import { MetricsService } from './metrics.service';
+import { metricsService } from './metrics.service';
 import { LedgerService } from './ledgers.service';
 import { BuyingStage, suppressesReply } from "../../shared/domain/models";
 import { db } from '../db/index';
@@ -350,6 +350,11 @@ export class InboundPipeline {
     budgetTracker: BudgetTracker,
     modelCalls: ModelCallRecord[]
   ): Promise<InboundOutcome> {
+    // Outside the try, so the finally can read it. It also starts the clock earlier, which is
+    // correct: time spent failing tenant resolution or classification is still time the
+    // customer waited, and a measurement that begins after the risky part is a measurement of
+    // the safe part.
+    const startTime = Date.now();
     try {
       // P1.1 — This argument was accepted and then dropped: nothing downstream used it, so
       // every inbound message was processed, stored and replied to under one implied tenant.
@@ -377,7 +382,6 @@ export class InboundPipeline {
       // a bounce is evidence and must be kept, it just must not be replied to.
       const automation = classifyAutomation({ headers: email.headers, body: email.parsed });
 
-      const startTime = Date.now();
       const budgetTracker = new BudgetTracker();
       budgetTracker.recordStep();
       console.log(`--- Starting Inbound Pipeline for message: ${email.id} ---`);
@@ -920,7 +924,6 @@ export class InboundPipeline {
       }
 
       console.log(`--- Pipeline Completed. Outbox job created: ${outboxStatus} ---`);
-      MetricsService.getInstance().recordLatency("INBOUND_PROCESSING", Date.now() - startTime);
 
       // What the budget actually saw, rather than the fabricated constant it used to be fed.
       // `tokensArePartial` is reported because a total assembled from calls the provider said
@@ -951,12 +954,21 @@ export class InboundPipeline {
           `${organizationId}: ${message}`,
         e
       );
+      metricsService.incrementCounter('AI_FAILURE');
       return {
         ok: false,
         stage: budgetHit ? 'BUDGET' : 'UNHANDLED',
         detail: message,
         modelCalls,
       };
+    } finally {
+      // S45 — in a `finally`, not on the success path.
+      //
+      // The emit used to sit just before the successful return, so a p95 computed from these
+      // samples described only the requests that worked. A pipeline failing half its inbound
+      // mail would have shown a healthy latency objective, because the slow and broken half was
+      // never measured — the metric would have been most reassuring exactly when it mattered.
+      metricsService.recordLatency('INBOUND_PROCESSING', Date.now() - startTime);
     }
   }
 }
