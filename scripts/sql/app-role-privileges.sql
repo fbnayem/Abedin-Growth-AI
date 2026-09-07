@@ -42,8 +42,18 @@
 BEGIN;
 
 -- 1. Take away what it should never have held. -------------------------------------------
-ALTER ROLE "growth-ai-dat-user-747"
-  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION NOBYPASSRLS;
+-- NOCREATEDB and NOCREATEROLE only.
+--
+-- SUPERUSER, REPLICATION and BYPASSRLS are deliberately NOT altered here. PostgreSQL lets a
+-- role with CREATEROLE change every attribute EXCEPT those three, which require an actual
+-- superuser -- and on Cloud SQL the `postgres` role is not one (rolsuper=false; it is a member
+-- of cloudsqlsuperuser, which is not the same thing). Including them made this statement fail,
+-- and because the file runs in one transaction that failure aborted every GRANT below it.
+--
+-- They are checked instead of set: scripts/db-apply.ts reads all four back out of pg_roles and
+-- fails if any is true. If one ever is, it needs a superuser, and that is a different
+-- conversation from this file.
+ALTER ROLE "growth-ai-dat-user-747" NOCREATEDB NOCREATEROLE;
 
 -- 2. Reach the data. ----------------------------------------------------------------------
 GRANT CONNECT ON DATABASE "postgres" TO "growth-ai-dat-user-747";
