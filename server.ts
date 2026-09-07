@@ -84,6 +84,7 @@ import { auditReplyAgainstPlan } from "./server/agents/independentAuditor";
 import { runCompleteSalesEngineTestMatrix } from "./server/agents/salesEngineTestMatrix";
 import { evaluatePolicy } from "./server/policies/policyEngine";
 import { autopilotRunner } from "./server/autopilotRunner";
+import { resolveProvenance, describeProvenance } from "./server/build/provenance";
 import { Lead, Investor, Partner, Campaign, Meeting, Opportunity, KnowledgeItem, EmailMessage, CompanyBrain } from "./src/types";
 
 dotenv.config();
@@ -212,7 +213,18 @@ for (const aiPath of [
     }
   });
 app.get("/api/health", (req: Request, res: Response) => {
-    res.json({ status: "ok", service: "Abedin Growth AI Core Engine" });
+    // S49 — this used to answer `{ status: "ok", service: "..." }`, which is the same string in
+    // every build that has ever run. S49's worst case turns on that: an operator reaching for
+    // the kill switch cannot say which build is live or what to roll back to, and the service
+    // name does not help them. `source` is reported beside the SHA because an injected SHA
+    // identifies a released artifact and one read from a working tree does not — treating them
+    // the same is how a wrong answer becomes worse than no answer.
+    const provenance = resolveProvenance();
+    res.json({
+      status: "ok",
+      service: "Abedin Growth AI Core Engine",
+      build: provenance,
+    });
   });
 
   // 1. Dashboard summary

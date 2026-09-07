@@ -44,8 +44,29 @@ jobs:
       - name: Test
         run: npm test
 
+      # S49 — the build carries its identity or it does not have one.
+      #
+      # `/api/health` reports `source: INJECTED` only when BUILD_SHA is set here. Without it the
+      # server falls back to reading `.git`, which it labels GIT_WORKING_TREE and does NOT
+      # present as identifying a released artifact — a working tree can be dirty, so the SHA
+      # names a commit that is not necessarily what is running. An operator reaching for the
+      # kill switch has to be able to say which build is live and what to roll back to; the
+      # service name, which is what this endpoint used to return, is the same string in every
+      # build that has ever run.
       - name: Build
         run: npm run build
+        env:
+          BUILD_SHA: ${{ github.sha }}
+          BUILD_VERSION: ${{ github.ref_name }}
+          BUILD_TIME: ${{ github.event.repository.updated_at }}
+
+      # A build whose identity is unreadable is not a releasable artifact. Asserted rather than
+      # assumed, because the injection is three lines of YAML away from silently not happening
+      # and nothing else would notice.
+      - name: The built artifact must know which commit it is
+        run: node scripts/check-build-provenance.mjs
+        env:
+          BUILD_SHA: ${{ github.sha }}
 
   audit:
     name: Dependency audit
@@ -63,12 +84,33 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Advisory for now: the repository currently has known moderate advisories, so failing
-      # here immediately would block every PR without fixing anything. Tighten to
-      # `--audit-level=moderate` once the existing findings are triaged, and delete this note
-      # when you do — an audit step that never fails is decoration.
-      - name: npm audit (high and above)
+      # S49 — two steps, because "high and above" alone is a gate that has never had anything
+      # to hold. There are no high or critical advisories, so it passes for a reason unrelated
+      # to anything the repository does; the note that used to sit here called it "advisory for
+      # now", which read as if the step were doing less than it does rather than more.
+      - name: npm audit (high and above must be zero)
         run: npm audit --audit-level=high
+
+      # The moderate count may FALL and may not RISE. Thirteen remain, all reached through three
+      # roots, and each has a reason it is still here rather than an intention to look later:
+      #
+      #   qs         express 4 -> body-parser -> qs. In the production request path. npm reports
+      #              a fix as available and `npm audit fix` does not move it: 6.15.3 is the
+      #              newest express@4 permits, so the real fix is express 5, which is a
+      #              framework upgrade and not a dependency bump.
+      #   esbuild    a DEV-SERVER request vulnerability, reached through drizzle-kit. Not in any
+      #              deployed path — the production build is a bundle, not a dev server. The
+      #              offered fix downgrades drizzle-kit to 0.18.1, a major step backwards that
+      #              would take the migration tooling with it.
+      #   uuid       v3/v5/v6 buffer bounds, reached through firebase-admin. The application
+      #              uses v4 from its own direct dependency. The offered fix downgrades
+      #              firebase-admin by seven majors.
+      #
+      # A ratchet rather than a threshold, so a NEW moderate advisory fails the build while the
+      # three above do not silently license a fourth. Lower the number when one is resolved; if
+      # this step fails because the count dropped, that is the ratchet working.
+      - name: npm audit (moderate count must not rise)
+        run: node scripts/check-dependency-advisories.mjs
 
   guardrails:
     name: Safety guardrails

@@ -3018,7 +3018,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S46 | Feature flags | PARTIAL | CRITICAL | `actionGateway.ts:38-44`, `:109-126`, `:124`, `:326`; `salesDecisionEngine.ts:27`; `server.ts:6`, `:52`, `:81-82`, `:337` | **Half fails closed, half fails open.** The five `SAFE_MODE` booleans use `=== 'true'` and so default false — but the dispatch gate's `default: return true` (`:124`) **allows** any action type without an explicit case, and the master autonomy flag `globalAutonomousSendEnabled` is **initialised `true`** with no reachable runtime writer. Separately the SAFE_MODE snapshot is taken at module construction, before `dotenv.config()`, so `.env` never reaches the enforcement point. Flags are also process-global, boot-frozen, untenanted, unaudited; two of five gate nothing and Stripe bypasses the system entirely |
 | S47 | Readiness must verify capability, not object existence | PARTIAL | CRITICAL | `server.ts:75-94`, `:78`, `:79`, `:86`; live probe READY while `/api/outbox` → 500 | No query executed; `actionGatewayLoaded` is a hardcoded literal; none of the six required capability checks (query, migration version, worker heartbeat, provider config, auth config, secret resolvability) exists |
 | S48 | Rolling-deploy compatibility: payload versioning, migration ordering | PARTIAL | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. Still PARTIAL: producer and consumer still target different stores (Postgres vs Firestore), which S26/P0.0 must resolve; nothing yet refuses to serve when the schema is behind the build |
-| S49 | Release artifact evidence: CI, provenance, migration version, scans, doc claims | NOT_STARTED | CRITICAL | no `.github`; `package.json:2-4` (`version: 0.0.0`, no tags); `scripts/readiness.sh:24,35-39`; `docs/audit-report.md:17,21` | No CI, provenance, SBOM, image digest, scan artifact, eval report or rollback reference; the readiness script fabricates the evidence it checks for; signed docs certify controls the code refutes |
+| S49 | Release artifact evidence: CI, provenance, migration version, scans, doc claims | PARTIAL | CRITICAL | `server/build/provenance.ts`; `scripts/check-gates-can-fail.mjs`; `scripts/check-dependency-advisories.mjs`; `scripts/check-build-provenance.mjs`; `.github/workflows/ci.yml`; `server/tests/provenance.invariant.test.ts` | **CI, provenance and the self-defeating checks are done.** `/api/health` reports the commit and, separately, whether that commit identifies a released artifact; CI injects it and fails the build if it is unreadable. `readiness.sh` — which created the document it was checking for — is deleted, and a 15th guardrail fails on any check written so it cannot fail. Advisories are ratcheted, one lockfile. Still PARTIAL and CRITICAL: **the false PASS claims in `docs/audit-report.md` are not retracted**, and there is no SBOM, image digest, signed attestation, AI eval report, known-limitations document or rollback runbook naming a real artifact |
 
 ---
 
@@ -3816,7 +3816,7 @@ S26 work, not this row.
 
 ---
 
-### S49 — Release artifact evidence · NOT_STARTED · CRITICAL
+### S49 — Release artifact evidence · PARTIAL · CRITICAL
 
 **What exists.** No release evidence of any kind, and three documents that assert the opposite.
 
@@ -3825,6 +3825,79 @@ S26 work, not this row.
 The doc claims, individually refuted: exactly-once outbox delivery via "atomic database constraints on idempotencyKey unique indexes" — the index is on a Postgres table the live worker never reads, and the worker dequeues Firestore with a lease-less status query. A kill switch "fully exposed, enabling operators to instantly halt all outbound autonomous dispatches with an explicit audit reason" — the endpoint mutates nothing and accepts no reason, the real mutator is dead, and the automatic tripper is never called. "Suppression / Unsubscribe ✅ PASS" — the service is unreachable. "calendar.service.ts is the single source of truth" — nothing imports it. "Zod Runtime Validation ✅ PASS" — that agent is dead and the live path is rule-based. "Database Provisioned ✅ PASS" — `DATABASE_URL` is empty. Several rows certify PASS while their own notes admit the work is pending. Adding to this, roughly thirty stub endpoints return fabricated success, including `/api/inbox/deep-audit` → `"Clean"`, which manufactures a false safety signal for any smoke test or demo driven through the HTTP surface.
 
 **Worst case.** An operator watches the agent send something defamatory or non-compliant and reaches for the kill switch the audit report documents. They receive `{"success": true}` and the breaker is still enabled. There is no other lever: the flags were frozen at process start, so changing an env var requires a redeploy — and there is no CI, no tagged artifact and no embedded commit SHA, so nobody can even state which build is running or what to roll back to. Meanwhile the incident review pulls two signed documents certifying exactly-once delivery and a working kill switch, both false, and both plausibly relied on by a customer or investor during diligence. Separately and independently sufficient: the open rules plus committed credentials mean anyone with repository read access can read or delete the entire production datastore at any time.
+
+**What changed, 2026-09-08. Four of the fourteen remediation items; the most important one is
+NOT among them.**
+
+*The readiness script fabricated its own evidence, and still did.* `scripts/readiness.sh`
+contained this:
+
+```sh
+if [ ! -f "docs/BACKUP_RESTORE.md" ]; then
+  mkdir -p docs
+  echo "# Backup & Restore Process..." > docs/BACKUP_RESTORE.md
+fi
+echo "✅ Backup procedure documented."
+```
+
+It CREATED the document whose presence it was testing, then reported it as present, and
+finished with "All checks passed! Ready for production deployment." Its audit step ended in
+`|| echo "⚠️ Ignoring vulnerabilities for now"`, so it could not fail. Its schema check tested
+that a file exists. It is deleted. `scripts/readiness.ts` — which imported `node-fetch`, not
+declared in `package.json`, so the exact command DisasterRecovery.md mandates threw on any
+clean install — is rewritten on global fetch, performs one real round trip, and surfaces the
+endpoint's own `verifiesCapability: false` as a caveat rather than printing the same tick over
+it.
+
+`scripts/check-gates-can-fail.mjs` is the 15th guardrail: `|| true`, `|| echo`,
+`continue-on-error: true`, `set +e`, and `process.exit(0)` inside a catch. Verified against the
+deleted script rather than assumed — it flags the swallowed `npm audit`. It does **not** detect
+the fabricate-then-assert block, and its header says so: relating "wrote a file" to "claimed it
+existed" needs to know that one statement is the subject of the other, and every cheap
+approximation either misses the real case or fires on legitimate setup code. A recorded gap,
+not an assumed absence.
+
+*Provenance.* `/api/health` answered `{ status: "ok", service: "Abedin Growth AI Core Engine" }`
+— the same string in every build that has ever run, which answers "is something listening" and
+nothing else. It now reports the commit, the version, the build time, the migration the build
+expects, and `source`: `INJECTED` when CI set `BUILD_SHA`, `GIT_WORKING_TREE` when it was read
+from `.git`, `UNKNOWN` when neither. Only the first sets `identifiesAReleasedArtifact`, because
+a working tree can be dirty and the SHA then names a commit that is not what is running. There
+is deliberately no fallback that produces a plausible-looking value: a SHA that is wrong is
+worse than one that is missing, because the missing one sends someone to look and the wrong one
+ends the search. `scripts/check-build-provenance.mjs` fails the build when the identity is
+unreadable, and checks the shipped bundle rather than the source tree — provenance that exists
+only in source says nothing about the artifact that was deployed.
+
+*Advisories and lockfiles.* `npm audit --audit-level=high` has never had anything to hold —
+there are no high or critical advisories, so it passes for a reason unrelated to this
+repository. Thirteen moderate ones sit under it. The count is now a ratchet that fails when it
+rises AND when it falls, with each of the three roots recorded and its reason stated: `qs` is in
+the production request path and its "available" fix does not move it (6.15.3 is the newest
+express@4 permits, so the real fix is express 5); `esbuild` is a dev-server issue reached
+through drizzle-kit and is in no deployed path; `uuid` is reached through firebase-admin while
+the application uses v4 from its own direct dependency. It runs in CI and not in
+`npm run verify`, because `npm audit` needs the network and a guardrail that PASSES when it
+cannot reach the registry would report a clean audit that never ran. `bun.lock` is deleted; the
+two lockfiles disagreed about the graph and only the npm one was ever scanned.
+
+16 invariants for provenance; 9 of 11 mutants killed against the real gate, both survivors
+measured and recorded.
+
+**Two claims in the evidence above are stale.** There IS a `.github/workflows/ci.yml`, added
+under P2, running type-check, tests, build, audit and eight guardrail steps. And the test suite
+is 1,169 assertions across 40 files rather than a file with none.
+
+**What is untouched, and why this stays CRITICAL.** The remediation opens with "stop shipping
+until the false PASS claims are retracted", and `docs/audit-report.md` still certifies
+exactly-once outbox delivery, a working kill switch, active suppression, Zod runtime validation
+and a provisioned database — five claims the code refutes. A signed document asserting controls
+that do not exist is a liability independent of the engineering gaps, and none of the work above
+touches it. Also outstanding: no SBOM, no image digest (there is no Dockerfile), no signed
+attestation, no AI eval report, no feature-flag state capture, no known-limitations document,
+no rollback runbook naming an actual artifact, and roughly thirty stub endpoints still return
+fabricated success — including `/api/inbox/deep-audit` → `"Clean"`, which manufactures a safety
+signal for any smoke test driven through the HTTP surface (P1.13).
 
 **Remediation.** Stop shipping until the false PASS claims are retracted — a signed audit report asserting controls that do not exist is a liability independent of the engineering gaps. Fix the kill switch first: mount the real controller so the toggle actually sets the flag with the operator's reason, and test that `processQueue` then makes zero provider calls. Rotate the Firebase credentials, remove them from git history, and replace the open rules with per-organization rules — or move server access to the Admin SDK. Add a CI workflow running `tsc --noEmit`, the build, the tests and `npm audit --audit-level=moderate` as a hard gate, and delete both self-defeating blocks from `readiness.sh`. Declare `node-fetch` or use global fetch, and make `/api/readiness` perform a real round-trip. Embed provenance: inject the git SHA and a real semver at build time, expose both from `/api/health`, tag releases, and record the applied migration version. Resolve one lockfile. Wire or delete every dead competing owner — their presence is what makes the docs' claims superficially checkable and materially false. Publish a genuine known-limitations document and a rollback runbook naming an actual artifact.
 
