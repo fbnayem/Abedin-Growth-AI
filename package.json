@@ -20,6 +20,7 @@
     "migrate": "tsx scripts/migrate.ts",
     "db:verify": "tsx scripts/db-verify.ts",
     "store:verify": "tsx scripts/store-verify.ts",
+    "db:grants": "tsx scripts/db-grants.ts",
     "db:tls-pin": "tsx scripts/db-tls-pin.ts"
   },
   "dependencies": {

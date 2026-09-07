@@ -20,6 +20,10 @@ import {
   refusalReason,
 } from '../domain/campaignSafety';
 import { lockStateOf, mayProceed, refusalFor } from '../domain/autonomyLock';
+import {
+  schemaCompatibility,
+  schemaPermitsIrreversibleActions,
+} from '../build/schemaCompatibility';
 import type { Availability } from '../providers/types';
 import {
   reconcileEmailSend,
@@ -215,6 +219,29 @@ export class ActionGateway {
     await this.logAction(actionId, 'PROPOSED', request);
 
     // 2. Pre-execution checks
+
+    // S48 — THE SCHEMA MUST BE THE ONE THIS BUILD WAS WRITTEN AGAINST.
+    //
+    // Checked here, before anything irreversible, and only for irreversible actions. A rolling
+    // deploy that puts this code on a node before the migration finishes leaves every query
+    // for a new column failing at runtime; a rollback leaves this build unable to see columns
+    // it does not know about, so a write silently drops fields. Reading under either is
+    // recoverable. SENDING under either is not.
+    //
+    // UNKNOWN refuses: "we could not ask the database which migrations it has" is not "it has
+    // the right ones" (§14).
+    if (isIrreversible(request.actionType)) {
+      const schema = await schemaCompatibility();
+      if (!schemaPermitsIrreversibleActions(schema)) {
+        const reason =
+          `Action blocked: the database schema does not match this build (${schema.state}). ` +
+          schema.detail;
+        console.error(`[ActionGateway] ${reason}`);
+        await this.logAction(actionId, 'BLOCKED', request, { reason, schema });
+        return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+      }
+    }
+
     if (!this.checkFeatureFlag(request.actionType)) {
       const reason = `Action blocked: ${request.actionType} is disabled in Safe Rebuild Mode.`;
       console.warn(`[ActionGateway] ${reason}`);

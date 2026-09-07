@@ -108,6 +108,23 @@ GRANT USAGE, SELECT
   ON ALL SEQUENCES IN SCHEMA public
   TO "growth-ai-dat-user-747";
 
+-- 3b. Read-only sight of which migrations have been applied. -------------------------------
+--
+-- S48: the application refuses irreversible actions when the database schema is not the one
+-- the build was written against. It answers that by comparing the checked-in journal with
+-- `drizzle.__drizzle_migrations`.
+--
+-- Without these two grants the query fails with `42501 permission denied for schema drizzle`,
+-- the state is UNKNOWN, and UNKNOWN refuses — so the control would block every send forever
+-- rather than only when the schema is wrong. Measured, not predicted: that is exactly what the
+-- live instance did on the first run.
+--
+-- SELECT on ONE table, and USAGE on the schema that holds it. No INSERT, UPDATE or DELETE: the
+-- application must never be able to tell the database it has been migrated. Writing that table
+-- is the migration role's job, and a role that can forge it can defeat the check it feeds.
+GRANT USAGE ON SCHEMA drizzle TO "growth-ai-dat-user-747";
+GRANT SELECT ON drizzle.__drizzle_migrations TO "growth-ai-dat-user-747";
+
 -- 4. And to the tables the NEXT migration creates. ----------------------------------------
 --
 -- Without this, every future migration silently produces tables the application cannot read,

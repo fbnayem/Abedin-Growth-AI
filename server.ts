@@ -14,6 +14,8 @@ import { globalStore } from "./server/dataStore";
 import { store } from "./server/store";
 import { requireAuth } from "./server/middleware/auth";
 import { securityHeaders } from "./server/middleware/securityHeaders";
+import { schemaCompatibility } from "./server/build/schemaCompatibility";
+import { healthResponse } from "./server/build/health";
 import { resolveTenant } from "./server/middleware/tenant";
 import { orgScope, orgPath, isValidOrgId } from "./server/tenancy/orgScope";
 import { assertTransition, CAMPAIGN, MEETING, OPPORTUNITY } from "./server/domain/stateMachines";
@@ -227,19 +229,20 @@ for (const aiPath of [
       res.status(500).json({ status: "DEGRADED", error: e.message });
     }
   });
-app.get("/api/health", (req: Request, res: Response) => {
+app.get("/api/health", async (req: Request, res: Response) => {
     // S49 — this used to answer `{ status: "ok", service: "..." }`, which is the same string in
     // every build that has ever run. S49's worst case turns on that: an operator reaching for
     // the kill switch cannot say which build is live or what to roll back to, and the service
     // name does not help them. `source` is reported beside the SHA because an injected SHA
     // identifies a released artifact and one read from a working tree does not — treating them
     // the same is how a wrong answer becomes worse than no answer.
-    const provenance = resolveProvenance();
-    res.json({
-      status: "ok",
-      service: "Abedin Growth AI Core Engine",
-      build: provenance,
-    });
+    // S48 — the verdict now depends on the fact reported beside it.
+    //
+    // This reported `expectsMigration` and then answered "ok" whether or not that migration had
+    // been applied. A health endpoint that prints the evidence and ignores it is worse than one
+    // that prints neither: it looks like the check was made.
+    const answer = healthResponse(resolveProvenance(), await schemaCompatibility());
+    res.status(answer.status).json(answer.body);
   });
 
   // 1. Dashboard summary

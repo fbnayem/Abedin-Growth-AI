@@ -7,6 +7,14 @@
 
 **Revision history.** *Second pass (2026-09-06).* Applied after direct file-level verification by the orchestrator, not by the adversarial refuters — who returned zero corrections (see §6.4). Changes: six statuses downgraded `PARTIAL → NOT_STARTED` under the document's own rubric (S8, S18, S20, S31, S35, S38); S35 severity raised `MEDIUM → HIGH`; S1 corrected `PARTIAL → IMPLEMENTED_UNVERIFIED`; S19's rationale rewritten off arbitrary-host SSRF and onto the absence of fetch timeouts; four new findings added (safety-flag divergence, browser send path with a deterministic double-send, a kill switch that is worse than inert, and a mail-injection/open-relay primitive); S46's "defaults fail closed" claim corrected; S5's TLS citation and the S22/S41/S44/S45/S48 grep patterns supplied; the tally, severity counts and risk ranking recomputed; and the P0 roadmap rebuilt around a containment step that is a console action rather than a commit.
 
+*Seventh pass (2026-09-08) — the schema gate S48 left open.* `/api/health` printed
+`expectsMigration` and answered "ok" regardless of whether it had been applied. It now compares
+the journal with the database and refuses irreversible actions on any mismatch, with UNKNOWN
+refusing. The first live run found the control fail-closed and useless — the app role could not
+read `drizzle.__drizzle_migrations` at all — which no test could have found. Section 1aa records
+that, the read-only grant and the `db:grants` script that applies it, and a source assertion
+that a mutant defeated by substring.
+
 *Sixth pass (2026-09-08) — the CSP, and a remainder this document invented.* S35 carried
 "still no CSP, and the Gmail send token is still in `localStorage`", and used the second half to
 justify HIGH severity. The CSP now exists. The token had left `localStorage` a day BEFORE that
@@ -3286,6 +3294,104 @@ strict policy silently breaking a local one.
 
 ---
 
+## 1aa. Refusing to act on a schema this build was not written against (2026-09-08)
+
+### The remainder S48 left
+
+> Still PARTIAL: nothing yet refuses to serve when the schema is behind the build.
+
+`/api/health` printed `expectsMigration` — the last migration this build knows about — and then
+answered `status: "ok"` regardless of whether it had been applied. **A verdict that ignores the
+evidence printed beside it is worse than printing neither**, because it looks like the check was
+made.
+
+The scenario is ordinary. A rolling deploy puts new code on a node before the migration job
+finishes; a rollback returns old code to a database that has already moved on. The first fails
+one query at a time, at runtime, after the deploy reported success. The second is quieter and
+worse: this build cannot see columns it does not know about, so a write silently drops fields,
+and a dropped field is indistinguishable from one nobody set.
+
+### What it does
+
+`server/build/schemaCompatibility.ts` compares the checked-in journal against
+`drizzle.__drizzle_migrations` and answers in four states: `MATCHED`, `DATABASE_BEHIND`,
+`DATABASE_AHEAD`, `UNKNOWN`. **UNKNOWN refuses** — "we could not ask the database which
+migrations it has" is not "it has the right ones."
+
+**Counts, not tags, and the limit is stated.** Drizzle stores a hash and a timestamp per applied
+migration, not the journal tag, so the available comparison is how many — the same basis
+`db-verify` uses. It catches ahead and behind, which is what a deploy gets wrong. It cannot
+detect a database at the same count reached by a different path.
+
+A mismatch does **not** refuse to boot. A transient database failure at startup would then brick
+a deployment that is otherwise fine, and a control that takes the service down for a blip gets
+removed. Instead: `/api/health` reports the real state and returns **503**, and the action
+gateway refuses **irreversible** actions only. Serving a read on a mismatched schema is
+recoverable; sending mail on one is not.
+
+The status *code* moves, not just the word. `status: "degraded"` inside a 200 is invisible to
+every load balancer and uptime check that reads the code and not the body.
+
+### The grant this needed, found by running it
+
+First live run: `state: "UNKNOWN"`, `applied: null`, HTTP 503. The application role could not
+read the table — `42501 permission denied for schema drizzle`. The app role has USAGE on
+`public` and nothing else, and `__drizzle_migrations` lives in its own schema.
+
+Fail-closed and useless: it would have refused every send forever rather than only on a
+mismatch. **This is what running it against the real database is for; no test would have found
+it, because no test has that role.**
+
+`scripts/sql/app-role-privileges.sql` now grants USAGE on `drizzle` and **SELECT on that one
+table**. No INSERT: the application must never be able to tell the database it has been
+migrated, because a role that can forge that table can defeat the check that reads it.
+
+Applying it needed a script that did not exist. The privileges file could only be applied by
+`db-apply.ts --confirm`, which also **drops and recreates every table** — so the safe, additive
+half could not be run without the destructive half, which is how a privilege model stops
+matching the file documenting it. `npm run db:grants` applies the file and stops: creates
+nothing, drops nothing, writes no row, and reads the resulting privileges back out of the
+catalogue rather than trusting that the GRANT returned without error. After it, live health
+reports `MATCHED`, 7 of 7, HTTP 200.
+
+### What mutation testing changed, again
+
+Twelve mutants, 12/12 killed — after four survivors, and one of them is worth naming because it
+is a lesson about a technique this document relies on heavily.
+
+**A source assertion was defeated by a substring.** The suite checked that `actionGateway.ts`
+contained `isIrreversible(request.actionType)`. The mutant inverted it to
+`!isIrreversible(request.actionType)` — running the schema check only for *reversible* actions,
+so every send went out on a mismatched schema — and **that string is still present**. The
+assertion passed on code that did the opposite of what it asserted.
+
+`server/tests/schemaGate.invariant.test.ts` replaces it by calling the gateway: a mismatched
+schema blocks `EMAIL_SEND` and does not block `CRM_UPDATE`, and a matched schema does not block
+for the schema at all. Both directions, because either alone is satisfied by the inversion.
+
+The other three were the same shape as before — correct code nothing exercised:
+
+- `const healthy = true` inside the health handler passed, because the assertion checked for the
+  shape of the branch (`res.status(healthy ? 200 : 503)`) and not the value branched on. The
+  decision moved to `server/build/health.ts`, where a test calls it.
+- Two "unreadable means zero" mutations survived in the count readers. Zero is a real,
+  meaningful count — an unmigrated database — so using it to mean "could not read" makes the two
+  indistinguishable, and one must refuse while the other need not. The row parser is now
+  `migrationCountFrom`, exported and tested against ten malformed shapes.
+
+### What this does not do
+
+- **It cannot detect divergence at the same count.** Two different sets of seven migrations
+  compare equal.
+- **The gateway is the only refuser.** A direct Drizzle query elsewhere in the codebase runs on
+  whatever schema is there; this gates the dispatch path, not every read.
+- **Nothing alerts.** The state is reported at `/api/health` and blocks sends. Whether anybody
+  is watching that endpoint is outside this repository.
+- **The cache means up to a minute of staleness** while matched, five seconds while not. A
+  migration finishing does not un-block sends instantly.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -3424,7 +3530,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S45 | Service level objectives: defined and measured | PARTIAL | HIGH | `metrics.service.ts:13-14`; `outbox.routes.ts:23`; `server.ts:96-98`; case-insensitive word-boundary grep `\b(slo\|sla\|p95\|p99\|percentile\|error budget\|availability)\b` over `docs/*.md` (all four files: `DisasterRecovery.md`, `audit-report.md`, `external-setup-required.md`, `production-readiness-checklist.md`) → **zero hits** | No SLO document, targets, percentiles, windows or error budgets; five of six flows have no measurement code; no `approvedAt`/`failedAt` so latency is not even derivable |
 | S46 | Feature flags | PARTIAL | CRITICAL | `actionGateway.ts:38-44`, `:109-126`, `:124`, `:326`; `salesDecisionEngine.ts:27`; `server.ts:6`, `:52`, `:81-82`, `:337` | **Half fails closed, half fails open.** The five `SAFE_MODE` booleans use `=== 'true'` and so default false — but the dispatch gate's `default: return true` (`:124`) **allows** any action type without an explicit case, and the master autonomy flag `globalAutonomousSendEnabled` is **initialised `true`** with no reachable runtime writer. Separately the SAFE_MODE snapshot is taken at module construction, before `dotenv.config()`, so `.env` never reaches the enforcement point. Flags are also process-global, boot-frozen, untenanted, unaudited; two of five gate nothing and Stripe bypasses the system entirely |
 | S47 | Readiness must verify capability, not object existence | PARTIAL | CRITICAL | `server.ts:75-94`, `:78`, `:79`, `:86`; live probe READY while `/api/outbox` → 500 | No query executed; `actionGatewayLoaded` is a hardcoded literal; none of the six required capability checks (query, migration version, worker heartbeat, provider config, auth config, secret resolvability) exists |
-| S48 | Rolling-deploy compatibility: payload versioning, migration ordering | PARTIAL | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. **Store split closed 2026-09-08 (1x):** producer and consumer are now the same PostgreSQL database and the same transaction manager, so a job written by the producer is a job the consumer can see. Still PARTIAL: nothing yet refuses to serve when the schema is behind the build, and the document collections are not folded into the relational tables |
+| S48 | Rolling-deploy compatibility: payload versioning, migration ordering | PARTIAL | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. **Store split closed 2026-09-08 (1x):** producer and consumer are now the same PostgreSQL database and the same transaction manager, so a job written by the producer is a job the consumer can see. ~~Still PARTIAL: nothing yet refuses to serve when the schema is behind the build~~ — **the schema gate landed 2026-09-08 (§1aa)**: `/api/health` answers 503 and the gateway refuses irreversible actions when the applied migration count does not match the build, with UNKNOWN refusing. Still PARTIAL: the document collections are not folded into the relational tables, and the comparison is by count, so divergence at the same count is not detectable |
 | S49 | Release artifact evidence: CI, provenance, migration version, scans, doc claims | PARTIAL | CRITICAL | `server/build/provenance.ts`; `scripts/check-gates-can-fail.mjs`; `scripts/check-dependency-advisories.mjs`; `scripts/check-build-provenance.mjs`; `.github/workflows/ci.yml`; `server/tests/provenance.invariant.test.ts` | **CI, provenance and the self-defeating checks are done.** `/api/health` reports the commit and, separately, whether that commit identifies a released artifact; CI injects it and fails the build if it is unreadable. `readiness.sh` — which created the document it was checking for — is deleted, and a 15th guardrail fails on any check written so it cannot fail. Advisories are ratcheted, one lockfile. Still PARTIAL and CRITICAL: **the false PASS claims in `docs/audit-report.md` are not retracted**, and there is no SBOM, image digest, signed attestation, AI eval report, known-limitations document or rollback runbook naming a real artifact |
 
 ---

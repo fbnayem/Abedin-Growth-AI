@@ -50,6 +50,29 @@ let storeAvailable = true;
 
 
 let realActionsEnabled = true;
+/**
+ * The schema-compatibility gate is mocked to MATCHED.
+ *
+ * S48 added a check that refuses every irreversible action unless the database reports the same
+ * number of applied migrations as this build carries. The datastore double here has no
+ * migrations table, so the real check answers UNKNOWN and — correctly — refuses everything,
+ * which would make every assertion in this file pass for the wrong reason.
+ *
+ * That check has its own file (`schemaCompatibility.invariant.test.ts`), including the
+ * assertion that the gateway consults it before dispatching. This file is about a different
+ * subject, and mocking it here states that rather than leaving a second gate silently deciding
+ * the outcome.
+ */
+vi.mock('../build/schemaCompatibility', () => ({
+  schemaCompatibility: async () => ({
+    state: 'MATCHED',
+    expected: 1,
+    applied: 1,
+    detail: 'mocked for this suite',
+  }),
+  schemaPermitsIrreversibleActions: (c: any) => c.state === 'MATCHED',
+}));
+
 vi.mock('../config/safeMode', () => ({
   isRealActionEnabled: () => realActionsEnabled,
   isFullySafeMode: () => !realActionsEnabled,
