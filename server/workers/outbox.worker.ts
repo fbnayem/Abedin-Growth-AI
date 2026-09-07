@@ -15,6 +15,7 @@ import { listServiceableOrgIds } from '../tenancy/organizations';
 import { collection, addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import { circuitBreaker } from '../agents/salesDecisionEngine';
+import { readEnvelope, mayDispatch, deadLetterReason } from '../domain/outboxEnvelope';
 
 export class OutboxWorker {
   public isRunning = false;
@@ -160,20 +161,42 @@ export class OutboxWorker {
               continue; // Skip sending
           }
 
+          // S48 — CAN THIS BUILD ACT ON THIS JOB AT ALL?
+          //
+          // Asked here, before the gateway, because the gateway's `payload` is typed `any` and
+          // every guard downstream reads fields off it. A guard that evaluates a payload it
+          // does not understand is not a guard: during a rolling deploy it would apply a new
+          // constraint to an old job that cannot carry it, or — on a rollback — quietly drop
+          // the fields a newer build added and report the send as a success.
+          //
+          // Terminal, not retried. Neither an unsupported version nor a payload that does not
+          // parse becomes valid by waiting; retrying would reach the same dead letter five
+          // attempts later, having kept the queue busy failing in the meantime.
+          const envelope = readEnvelope(job);
+          if (mayDispatch(envelope) === false) {
+            const reason = deadLetterReason(envelope);
+            console.warn(`[OutboxWorker] refusing job ${job.id}: ${reason}`);
+            await outboxService.markFailed(orgId, job.id, reason, true);
+            continue;
+          }
+
           const actionRequest = {
             actionType: ActionType.EMAIL_SEND,
             organizationId: orgId,
-            targetId: job.payload.to,
+            targetId: envelope.payload.to,
             conversationId: job.conversationId,
             proposedBy: 'OutboxWorker',
             payload: {
-              to: job.payload.to,
-              subject: job.payload.subject,
-              htmlBody: job.payload.htmlBody,
-              textBody: job.payload.textBody,
-              inReplyTo: job.payload.inReplyTo,
-              references: job.payload.references,
-              threadId: job.payload.threadId,
+              // From the PARSED payload, not from `job.payload`. Reading the raw document here
+              // would make the validation above decorative: the check would pass and the send
+              // would still use whatever the datastore happened to hold.
+              to: envelope.payload.to,
+              subject: envelope.payload.subject,
+              htmlBody: envelope.payload.htmlBody,
+              textBody: envelope.payload.textBody,
+              inReplyTo: envelope.payload.inReplyTo,
+              references: envelope.payload.references,
+              threadId: envelope.payload.threadId,
               // S32 — the job's idempotency key is what the outbound Message-ID is derived
               // from, and therefore what makes this send reconcilable after an ambiguous
               // outcome. The gateway refuses to send without it rather than sending something
@@ -220,13 +243,13 @@ export class OutboxWorker {
                 providerThreadId: providerThreadId,
                 direction: 'OUTBOUND',
                 sender: 'SYSTEM',
-                recipients: [job.payload.to],
-                subject: job.payload.subject,
+                recipients: [envelope.payload.to],
+                subject: envelope.payload.subject,
                 // Renamed with the inbound field. This one is our OWN html, but a column
                 // whose name means different things in different rows is worse than one
                 // that is merely blunt.
-                rawHtmlBody: job.payload.htmlBody,
-                textBody: job.payload.textBody,
+                rawHtmlBody: envelope.payload.htmlBody,
+                textBody: envelope.payload.textBody,
                 status: 'SENT',
                 isAutomated: true,
                 sentAt: new Date(),

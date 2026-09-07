@@ -16,7 +16,10 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "guardrails": "node scripts/check-derived-contact-ids.mjs && node scripts/check-error-envelope.mjs && node scripts/check-no-fabricated-success.mjs && node scripts/check-no-nul-bytes.mjs && node scripts/check-prompt-authority.mjs && node scripts/check-single-price-source.mjs && node scripts/check-time-correctness.mjs && node scripts/check-no-substring-error-classification.mjs && node scripts/check-no-cast-call-arguments.mjs && node scripts/check-no-cast-comparisons.mjs && node scripts/check-no-html-sink.mjs && node scripts/check-abstention-ratchet.mjs && node scripts/check-no-verdict-arithmetic.mjs && node scripts/check-tls-verification.mjs",
-    "verify": "npm run lint && npm run guardrails && npm test"
+    "verify": "npm run lint && npm run guardrails && npm test",
+    "migrate": "tsx scripts/migrate.ts",
+    "db:verify": "tsx scripts/db-verify.ts",
+    "db:tls-pin": "tsx scripts/db-tls-pin.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -1,6 +1,7 @@
 import { firestore } from '../firebase';
 import { orgPath } from '../tenancy/orgScope';
 import { assertTransition, OUTBOX_JOB } from '../domain/stateMachines';
+import { OUTBOX_PAYLOAD_VERSION } from '../domain/outboxEnvelope';
 import { v4 as uuidv4 } from 'uuid';
 import {
   collection,
@@ -63,6 +64,15 @@ import {
 
 export const MAX_ATTEMPTS = 5;
 export const LEASE_MS = 60_000;
+
+/**
+ * S48 — who enqueued this job. Recorded on every row, read by no decision.
+ *
+ * `npm_package_version` is set by npm when the process is started through a script; when it is
+ * not, saying so is better than inventing a number, because a version that is wrong is worse
+ * than one that is missing.
+ */
+export const PRODUCER_ID = `outbox.service@${process.env.npm_package_version ?? 'unknown'}`;
 
 export interface OutboxPayload {
   to: string;
@@ -141,6 +151,16 @@ export class OutboxService {
         conversationId,
         idempotencyKey,
         payload,
+        // S48 — the shape of `payload`, named by the build that wrote it.
+        //
+        // A worker from a different build has no other way to tell an old job from a new one
+        // with a field deliberately absent. Without this the two are the same bytes, and the
+        // consumer's only options are to guess or to dispatch on a guess — which it did.
+        schemaVersion: OUTBOX_PAYLOAD_VERSION,
+        // Not read by any decision. Recorded because when a rolling deploy does strand jobs,
+        // the first question is which build enqueued them, and a queue that cannot answer it
+        // turns a five-minute answer into an archaeology exercise.
+        producer: PRODUCER_ID,
         status: initialStatus,
         ...(initialStatus === 'HUMAN_REVIEW'
           ? {

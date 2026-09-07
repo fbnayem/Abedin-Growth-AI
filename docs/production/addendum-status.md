@@ -3017,7 +3017,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S45 | Service level objectives: defined and measured | NOT_STARTED | HIGH | `metrics.service.ts:13-14`; `outbox.routes.ts:23`; `server.ts:96-98`; case-insensitive word-boundary grep `\b(slo\|sla\|p95\|p99\|percentile\|error budget\|availability)\b` over `docs/*.md` (all four files: `DisasterRecovery.md`, `audit-report.md`, `external-setup-required.md`, `production-readiness-checklist.md`) → **zero hits** | No SLO document, targets, percentiles, windows or error budgets; five of six flows have no measurement code; no `approvedAt`/`failedAt` so latency is not even derivable |
 | S46 | Feature flags | PARTIAL | CRITICAL | `actionGateway.ts:38-44`, `:109-126`, `:124`, `:326`; `salesDecisionEngine.ts:27`; `server.ts:6`, `:52`, `:81-82`, `:337` | **Half fails closed, half fails open.** The five `SAFE_MODE` booleans use `=== 'true'` and so default false — but the dispatch gate's `default: return true` (`:124`) **allows** any action type without an explicit case, and the master autonomy flag `globalAutonomousSendEnabled` is **initialised `true`** with no reachable runtime writer. Separately the SAFE_MODE snapshot is taken at module construction, before `dotenv.config()`, so `.env` never reaches the enforcement point. Flags are also process-global, boot-frozen, untenanted, unaudited; two of five gate nothing and Stripe bypasses the system entirely |
 | S47 | Readiness must verify capability, not object existence | PARTIAL | CRITICAL | `server.ts:75-94`, `:78`, `:79`, `:86`; live probe READY while `/api/outbox` → 500 | No query executed; `actionGatewayLoaded` is a hardcoded literal; none of the six required capability checks (query, migration version, worker heartbeat, provider config, auth config, secret resolvability) exists |
-| S48 | Rolling-deploy compatibility: payload versioning, migration ordering | NOT_STARTED | HIGH | `outbox.service.ts:5-13`; `outbox.worker.ts:84-90`; `actionGateway.ts:22`; `package.json:10`; grep `schemaVersion\|payloadVersion\|envelopeVersion\|"version"\|producer` over `outbox.service.ts`, `outbox.worker.ts`, `actionGateway.ts` → **zero hits** | No payload version field and no consumer validation (`payload: any`); producer and consumer target different databases; no migrate step in the start path |
+| S48 | Rolling-deploy compatibility: payload versioning, migration ordering | PARTIAL | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. Still PARTIAL: producer and consumer still target different stores (Postgres vs Firestore), which S26/P0.0 must resolve; nothing yet refuses to serve when the schema is behind the build |
 | S49 | Release artifact evidence: CI, provenance, migration version, scans, doc claims | NOT_STARTED | CRITICAL | no `.github`; `package.json:2-4` (`version: 0.0.0`, no tags); `scripts/readiness.sh:24,35-39`; `docs/audit-report.md:17,21` | No CI, provenance, SBOM, image digest, scan artifact, eval report or rollback reference; the readiness script fabricates the evidence it checks for; signed docs certify controls the code refutes |
 
 ---
@@ -3748,13 +3748,69 @@ Two default-state findings make this worse than a test-coverage gap: with no Gma
 
 ---
 
-### S48 — Rolling-deploy compatibility · NOT_STARTED · HIGH
+### S48 — Rolling-deploy compatibility · PARTIAL · HIGH
 
 **What exists.** An unversioned job envelope, an unvalidating consumer, and a migration toolchain nothing invokes.
 
 **Decisive evidence.** `OutboxPayload` declares seven fields and no version; the persisted document and the Postgres mirror add none. The consumer destructures `job.payload.*` straight into the request with no validation, and `ActionRequest.payload` is typed `any`; zod appears nowhere in the outbox, worker or gateway path. So a worker cannot reject an unsupported payload version — it cannot detect one. Old-web/new-worker coexistence is not merely unversioned but split across two databases: the live producer inserts into Postgres while the consumer reads Firestore, so any rolling deploy that changes which store the producer targets strands every in-flight job with no drain procedure. `orgId` is a compile-time constant in the worker and every outbox method, so a job carries no tenant identity. An ordered migration ledger *does* exist — `drizzle/meta/_journal.json` lists all three migrations and `drizzle-kit` is installed — but nothing invokes it: there is no migrate script, `start` is a bare `node dist/server.cjs`, and the only committed runner bypasses drizzle-kit to read one hardcoded SQL file with a raw query and no ledger write. Migration 0002 is additive by accident, not by policy.
 
 **Worst case.** A rolling deploy adds a required `consentBasis` field and the new worker treats its absence as "no restriction". During the window when old web instances are still enqueuing, every job they write lacks it; the worker cannot detect this because there is no version and no validation, so it dispatches with the consent gate defaulted open. Nothing logs an anomaly because a missing field is indistinguishable from an intentionally absent optional one. The symmetric rollback failure is worse: an old worker resumed against new-format jobs silently drops the new field, applies none of the new constraint, and reports every send as SUCCESS. Note that this is not hypothetical — the consent gate is *already* defaulted open on every send today, because the payload never carries a `contactId`.
+
+**What changed, 2026-09-08.**
+
+Every job now carries `schemaVersion` and `producer`, and the consumer parses `job.payload`
+with a strict zod schema **before** the gateway sees it. A decision that is not `EXECUTE`
+dead-letters the job terminally and makes zero provider calls. The two constants are
+deliberately separate — `OUTBOX_PAYLOAD_VERSION` is what this build writes,
+`SUPPORTED_PAYLOAD_VERSIONS` is what it will run — because a deploy needs to widen support
+before it switches production, and widening that list is then the single deliberate act that
+makes an older job executable.
+
+**A job with no version is not read as version 1.** That is the obvious reading and it is the
+same inference as the forward failure this section describes: an absent value interpreted as a
+specific known one. §14 rules it out. An unversioned job is dead-lettered for an operator,
+which is recoverable — `DEAD_LETTER -> HUMAN_REVIEW` is a legal transition and the row keeps
+its payload — where sending to a real person on a guess is not.
+`scripts/backfill-outbox-version.ts` stamps such rows deliberately, per tenant, and refuses to
+stamp any job whose payload does not parse under the version being written; a job dead-lettered
+for being malformed should stay dead-lettered rather than acquire a version that makes it look
+executable.
+
+**The schema is strict.** An unrecognised field on a payload claiming to be v1 means the
+producer and this build disagree about what v1 is, and accepting it while ignoring the extra
+field is the backward failure inside a single version number. Refusing forces the bump.
+
+Both directions are exercised for real rather than one being assumed from the other, which is
+why `readEnvelopeFor` takes the supported set as an argument: a v2-only worker refusing a v1
+job, and a v1-only worker refusing a v2 job and naming it as a rollback. 25 invariants; 13 of
+14 mutants killed against the real gate. The recorded survivor is the one that removes the
+worker's guard entirely — it dies at the compiler rather than at an assertion, because
+`envelope.payload` stops narrowing without it, and that is a real barrier but not the one it
+was aimed at. Two mutants survived a first run and both were genuine gaps: a non-integer
+version was refused with the wrong explanation (`found: 1.5` invites adding 1.5 to the
+supported list), and the check that the worker reads only the parsed payload was written
+against the literal string `job.payload`, which one cast — `(job as {…}).payload.to` — walks
+straight past. Both assertions were rewritten rather than the mutants excused.
+
+**Migrations.** `npm run migrate` applies the journal through drizzle's migrator over the
+connection `server/db/tls.ts` verifies, and refuses when the database holds a table no
+migration creates. It is deliberately **not** in `start`: `start` runs on every replica, so
+migrating from it means N replicas racing to apply the same DDL during a rolling deploy, and a
+replica that fails to boot during a deploy is an outage caused by the safety measure. What
+`start` needs instead is a refusal to serve while the schema is behind the build, which is a
+different control and is not yet written.
+
+`drizzle-kit migrate` is not used, for a reason worth recording: `drizzle.config.ts` can hand a
+tool only an `ssl` option, and in pinned mode there is nothing for OpenSSL to verify against,
+so drizzle-kit cannot open a verified connection to this instance at all.
+
+**Two claims in the evidence above are now stale, and one was already stale when written.**
+`orgId` is not a compile-time constant in the worker — P1.1 made every outbox method take the
+organisation explicitly and the worker resolves the tenant list per tick. The job also already
+carried `organizationId`. What remains true, and is why this stays PARTIAL, is the split store:
+the producer writes Postgres while the consumer reads Firestore, so a rolling deploy that
+changed which store the producer targets would still strand every in-flight job. That is P0.0 /
+S26 work, not this row.
 
 **Remediation.** Add `schemaVersion`, `producer` and `orgId` to every enqueued job and to the table, and backfill existing rows to version 1. Validate `job.payload` with zod at the consumer boundary before use, and on an unsupported version move the job to an `UNSUPPORTED_VERSION` dead-letter status rather than dispatching it — reject safely, never best-effort. Collapse the queue onto one store; shipping with the producer on Postgres and the consumer on Firestore guarantees zero delivery. Replace the hardcoded runner with `drizzle-kit migrate` invoked as a real `npm run migrate` in the deploy pipeline. Carry tenant identity on the job. Test: enqueue v1, run a v2 worker, assert dead-letter and zero provider calls; then enqueue v2 and run a v1 worker and assert the same.
 
