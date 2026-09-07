@@ -2,6 +2,12 @@ import { firestore } from '../firebase';
 import { orgPath } from '../tenancy/orgScope';
 import { assertTransition, OUTBOX_JOB } from '../domain/stateMachines';
 import { OUTBOX_PAYLOAD_VERSION } from '../domain/outboxEnvelope';
+import {
+  requeueTargetFor,
+  writeOperatorAction,
+  type Attribution,
+  type OperatorAction,
+} from '../domain/operatorAction';
 import { v4 as uuidv4 } from 'uuid';
 import {
   collection,
@@ -92,6 +98,19 @@ function outboxCollection(organizationId: string) {
 function outboxDoc(organizationId: string, id: string) {
   if (!firestore) return null;
   return doc(firestore, orgPath(organizationId, 'outbox'), id);
+}
+
+/**
+ * S38 — the append-only record of what operators did to this queue.
+ *
+ * Separate from the job document because the job holds only its CURRENT state: an approval
+ * overwrites the previous `approvedBy`, and a rejection leaves nothing comparable. "What has
+ * anyone done to this queue" had no answer that did not involve reading every row and
+ * inferring.
+ */
+function operatorActionsCollection(organizationId: string) {
+  if (!firestore) return null;
+  return collection(firestore, orgPath(organizationId, 'operatorActions'));
 }
 
 /** Exponential backoff with a ceiling, so a failing provider is not hammered. */
@@ -412,7 +431,7 @@ export class OutboxService {
   async approveForSending(
     organizationId: string,
     id: string,
-    actor: string
+    attribution: Attribution
   ): Promise<{ ok: true } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
     const ref = outboxDoc(organizationId, id);
     if (!ref || !firestore) {
@@ -441,9 +460,21 @@ export class OutboxService {
         }
         tx.update(ref, {
           status: 'PENDING',
-          approvedBy: actor,
+          approvedBy: attribution.kind === 'IDENTIFIED' ? attribution.actor : null,
           approvedAt: Date.now(),
           nextAttemptAt: Date.now(),
+        });
+        // In the SAME transaction. A state change that succeeded while its record failed would
+        // be a message released to a customer with nothing saying who released it, which is the
+        // exact gap this replaces.
+        this.writeOperatorAction(tx, {
+          action: 'APPROVE',
+          organizationId,
+          jobId: id,
+          attribution,
+          fromStatus: data.status,
+          toStatus: 'PENDING',
+          reason: null,
         });
         return { ok: true as const };
       });
@@ -460,7 +491,7 @@ export class OutboxService {
   async cancelJob(
     organizationId: string,
     id: string,
-    actor: string,
+    attribution: Attribution,
     reason: string
   ): Promise<{ ok: true } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
     const ref = outboxDoc(organizationId, id);
@@ -491,16 +522,135 @@ export class OutboxService {
         }
         tx.update(ref, {
           status: 'CANCELLED',
-          cancelledBy: actor,
+          cancelledBy: attribution.kind === 'IDENTIFIED' ? attribution.actor : null,
           cancelledReason: reason,
           cancelledAt: new Date().toISOString(),
           leaseUntil: null,
+        });
+        this.writeOperatorAction(tx, {
+          action: 'REJECT',
+          organizationId,
+          jobId: id,
+          attribution,
+          fromStatus: data.status,
+          toStatus: 'CANCELLED',
+          reason,
         });
         return { ok: true as const };
       });
     } catch (e: any) {
       console.error('[Outbox] cancelJob failed:', e?.message);
       return { ok: false, code: 'NOT_FOUND', message: 'Cancellation could not be recorded.' };
+    }
+  }
+
+  /**
+   * S38 — write the audit row, inside the caller's transaction.
+   *
+   * Takes the transaction rather than opening its own, so the state change and the record of it
+   * commit together or not at all. A separate write could succeed while the update failed
+   * (a record of something that did not happen) or fail while the update succeeded (a message
+   * released to a customer with nothing saying who released it). Both are worse than either
+   * half failing.
+   *
+   * `operatorActionRecord` throws on a record that says nothing moved, and that throw aborts the
+   * transaction — which is the intended behaviour, not an accident to be caught here.
+   */
+  private writeOperatorAction(
+    tx: { set: (ref: any, data: any) => void },
+    input: {
+      action: OperatorAction;
+      organizationId: string;
+      jobId: string;
+      attribution: Attribution;
+      fromStatus: string;
+      toStatus: string;
+      reason: string | null;
+    }
+  ): void {
+    const actions = operatorActionsCollection(input.organizationId);
+    // The decision — including the refusal when there is nowhere to record — lives in
+    // server/domain/operatorAction.ts so it can be exercised directly. Asserting it by grepping
+    // this file for a `throw` could not tell `if (!actions)` from `if (false)`, which a
+    // mutation run demonstrated.
+    writeOperatorAction(
+      tx,
+      actions === null ? null : { collection: actions, newDocRef: (c) => doc(c as any, uuidv4()) },
+      { ...input, at: Date.now() }
+    );
+  }
+
+  /**
+   * S38 — the way back from a queue an operator cannot otherwise recover.
+   *
+   * There was none. A job that exhausted its attempts or was refused for a stale draft sat in
+   * DEAD_LETTER, and the only route back was an engineer editing the datastore by hand — with,
+   * by construction, no record of who changed what.
+   *
+   * A DEAD_LETTER job returns to HUMAN_REVIEW, never to PENDING. PENDING is claimable by the
+   * worker on its next tick, so requeueing straight there would let one click re-send something
+   * that had already failed five times or been refused as stale, with no second look. The shared
+   * transition map has no `DEAD_LETTER -> PENDING` edge, and `requeueTargetFor` agrees with it
+   * rather than restating the rule loosely.
+   */
+  async requeue(
+    organizationId: string,
+    id: string,
+    attribution: Attribution,
+    reason: string
+  ): Promise<{ ok: true; toStatus: string } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
+    const ref = outboxDoc(organizationId, id);
+    if (!ref || !firestore) {
+      return { ok: false, code: 'NOT_FOUND', message: 'Datastore unavailable.' };
+    }
+    try {
+      return await runTransaction(firestore, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) {
+          return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };
+        }
+        const data: any = snap.data();
+        const target = requeueTargetFor(data.status);
+        if (target.ok === false) {
+          return { ok: false as const, code: 'ILLEGAL_TRANSITION' as const, message: target.message };
+        }
+        // Checked against the shared map as well, so the two cannot drift apart silently.
+        const verdict = assertTransition(OUTBOX_JOB, data.status, target.toStatus);
+        if (verdict.ok === false) {
+          return {
+            ok: false as const,
+            code: 'ILLEGAL_TRANSITION' as const,
+            message: verdict.message,
+          };
+        }
+        tx.update(ref, {
+          status: target.toStatus,
+          // The attempt counter is NOT reset. An operator asking for another try is not
+          // evidence that the previous five did not happen, and a reset would make the
+          // dead-letter ceiling unreachable by repeated clicking.
+          leaseUntil: null,
+          claimedBy: null,
+          nextAttemptAt: Date.now(),
+          requeuedAt: Date.now(),
+          heldReason:
+            target.toStatus === 'HUMAN_REVIEW'
+              ? `Requeued from DEAD_LETTER: ${reason}`
+              : undefined,
+        });
+        this.writeOperatorAction(tx, {
+          action: 'REQUEUE',
+          organizationId,
+          jobId: id,
+          attribution,
+          fromStatus: data.status,
+          toStatus: target.toStatus,
+          reason,
+        });
+        return { ok: true as const, toStatus: target.toStatus };
+      });
+    } catch (e: any) {
+      console.error('[Outbox] requeue failed:', e?.message);
+      return { ok: false, code: 'NOT_FOUND', message: 'The requeue could not be recorded.' };
     }
   }
 

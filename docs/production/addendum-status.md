@@ -3007,7 +3007,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S35 | Frontend HTML safety / rendering untrusted provider HTML | PARTIAL | HIGH | zero `dangerouslySetInnerHTML` in `src/`; `inboundPipeline.ts:65`; `db/schema.ts:116`; `index.html`; `gmailWorkspaceService.ts:44,71,161` | Landed 2026-09-07 (§1t). The absence of a sink is now an enforced control: `check-no-html-sink` (the 11th guardrail) fails on `dangerouslySetInnerHTML`, `innerHTML =`, `insertAdjacentHTML`, `document.write` and on the return of the name `sanitizedHtmlBody`. Provider HTML reaches every reader as TEXT (`htmlToText`, which drops script CONTENT rather than flattening it) and the raw form is stored under a name that says it is untrusted. No HTML sanitizer was written, on purpose: a hand-rolled one that emits HTML is a known way to ship the hole it claims to close. **Remainder: still no CSP, and the Gmail send token is still in `localStorage`.** Severity is HIGH, not MEDIUM: the stored-XSS sink would exfiltrate the live Gmail **send** credential sitting in `localStorage` |
 | S36 | Rate limits and quotas | PARTIAL | CRITICAL | `package.json:16-37`; `server.ts:58,60-67,337`; `auth.ts:17-21`; `geminiClient.ts:113-143` | No limiter of any kind; anonymous callers admitted as `preview_uid`; expensive Gemini endpoints share the same (absent) protection as reads; no 429 anywhere |
 | S37 | AI and provider cost control | PARTIAL | CRITICAL | `workflowBudgets.ts:10-17` vs `aiSafety.service.ts:13-20`; `inboundPipeline.ts:117`; `salesDecisionEngine.ts:35-40` | Two conflicting budget definitions; the one call site feeds hardcoded literals so no limit can trip; no per-tenant/daily/monthly budget; the cost breaker is never tripped by any code |
-| S38 | Recovery console / safe operator tooling | NOT_STARTED | CRITICAL | `outbox.routes.ts:13,20-38`; `server.ts:337` vs `:560`; `killSwitch.controller.ts:15`; live probe `GET /api/outbox` → 500 | **There is no operator tooling — there is operator-tooling-shaped UI.** The console reads a store the queue does not live in; the kill switch is a stub that returns no `circuitBreaker` field, so the panel crashes; there is no retry, requeue or dead-letter of any kind; operator actions are unaudited and unauthenticated |
+| S38 | Recovery console / safe operator tooling | PARTIAL | CRITICAL | `outbox.routes.ts:13,20-38`; `server.ts:337` vs `:560`; `killSwitch.controller.ts:15`; live probe `GET /api/outbox` → 500 | **There is no operator tooling — there is operator-tooling-shaped UI.** The console reads a store the queue does not live in; the kill switch is a stub that returns no `circuitBreaker` field, so the panel crashes; there is no retry, requeue or dead-letter of any kind; operator actions are unaudited and unauthenticated |
 | S39 | Monolith: ~75 route registrations against empty decomposition folders | PARTIAL | CRITICAL | `server.ts:309-344`, `:760-826`, `:62`, `:193-195` | ~70 of ~75 endpoints inline; controller and repository layers are 100% dead; ~30 hardcoded success stubs; zero request validation; webhooks registered only in the production branch |
 | S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | PARTIAL | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | Four React modules value-import a server agent (only esbuild elision keeps `@google/genai` and the API-key read out of the bundle); two real cycles; no lint rule, no dependency-cruiser, no ESLint |
 | S41 | Adapter contracts | PARTIAL | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). `CalendarProvider` implemented 2026-09-07 (§1s) by `GoogleCalendarService`, and the compiler holds it — renaming `checkAvailability` fails `tsc`, measured by mutation. **Remainder: Stripe, DocuSign and LinkedIn have no adapter and no interface**, and `PAYMENT_CREATE` / `SIGNATURE_SEND` / `EXTERNAL_MESSAGE_SEND` / `CALENDAR_UPDATE` / `CALENDAR_CANCEL` all still fall through the dispatch switch to `Unsupported action type` |
@@ -3687,13 +3687,77 @@ Both must be closed before "move the guards into `dispatchAction`" means anythin
 
 ---
 
-### S38 — Recovery console / safe operator tooling · NOT_STARTED · CRITICAL
+### S38 — Recovery console / safe operator tooling · PARTIAL · CRITICAL
 
 **What exists.** An outbox approve/reject pair and an Outbox view. Nothing else: no retry, requeue, reconcile, dead-letter inspection, batch cancel, attempt counter or backoff — grep for `attempts|retryCount|maxRetries|backoff|leaseUntil|claimedAt|lockedBy|dlq|dead.letter` returns four hits, all the unused config constant `maxRetriesPerAgent`.
 
 **Decisive evidence.** The console reads and writes Postgres (`outbox.routes.ts:13`) while the worker and queue use Firestore; with `DATABASE_URL` empty, `db` throws and a live probe of `GET /api/outbox` returned HTTP 500 with body `{"error":"Failed to fetch outbox"}`. The worker's first per-job statement hits the same Proxy, so every job is caught and `markFailed` — terminal, with no path back from FAILED to PENDING anywhere in the repo. The kill switch is `res.json({ success: true })` and mutates nothing; the real implementation is dead and its bulk-cancel step is itself a comment. Both UI handlers set state from a key neither endpoint returns, so `circuitBreakerState` becomes `undefined` and the admin panel dereferences it on load. The Outbox view filters to `HUMAN_REVIEW || PENDING`, so every FAILED/CANCELLED/AMBIGUOUS row is deliberately hidden and "Queue is Clear" renders over a queue full of dead letters — and even with Postgres connected it would render blank cards, because it reads `msg.to`/`msg.subject`/`msg.textBody` as flat fields while they are nested inside a jsonb `payload`. `actionLogs` has exactly one reference in the repository, the write; nothing reads it, and `/api/logs` reads a different, never-written collection. Approve/reject write no audit record and capture no operator identity, and `requireAuth` admits anonymous callers. `scripts/readiness.sh:34-39` creates the file whose absence it is testing, then reports success.
 
 **Worst case.** A customer replies; the inbound write throws and is silently swallowed. The operator opens the Outbox tab to investigate and gets a 500 and an empty "Queue is Clear" panel. They hit the kill switch; the endpoint changes nothing and the panel it should update crashes. The only way to recover a single message is an engineer hand-editing Firestore, with no audit record of who changed what.
+
+**What changed, 2026-09-08.**
+
+**Most of the evidence above is now stale, and that is worth stating before the new work.**
+P1.2 rebuilt the console onto the same tenant-scoped Firestore queue the worker consumes, so
+it no longer reads Postgres while the worker reads Firestore; `REVIEWABLE_STATUSES` already
+includes `DEAD_LETTER`, so dead letters are not hidden; P0.9 added `attempts`, `nextAttemptAt`,
+`lastError`, leases and a terminal `DEAD_LETTER` with exponential backoff; P0.3 replaced the
+`res.json({ success: true })` kill switch with one that persists, attributes an actor and a
+reason, and refuses to report success when it cannot record the decision. `readiness.sh` is
+deleted (S49). What follows is what was genuinely still missing.
+
+*There was no way back from DEAD_LETTER.* A job that exhausted its attempts or was refused for
+a stale draft could only be recovered by an engineer editing the datastore by hand — with, by
+construction, no record of who changed what. That is the worst case this section describes, and
+it is reached by an operator doing the right thing.
+
+`POST /api/outbox/:id/requeue` returns a DEAD_LETTER job to **HUMAN_REVIEW**, never to PENDING.
+PENDING is claimable by the worker on its next tick, so requeueing straight there would let one
+click re-send something that had already failed five times or been refused as stale, with no
+second look. The shared transition map has no `DEAD_LETTER -> PENDING` edge and
+`requeueTargetFor` agrees with it rather than restating the rule loosely — both are asserted.
+A FAILED job goes to PENDING, because it was already on its way there under backoff and the
+operator is asking for it now rather than for a different outcome. The attempt counter is NOT
+reset: an operator asking for another try is not evidence that the previous five did not
+happen, and resetting would make the dead-letter ceiling unreachable by repeated clicking.
+
+Retry cannot bypass anything, because it never reaches the gateway on its own: the job goes
+back to review, a human approves it, and the worker re-verifies the inbound version and
+approval digest immediately before dispatch.
+
+*Operator actions left no trail.* Approve wrote `approvedBy`/`approvedAt` onto the job — which
+is attribution, not a trail: the next approval overwrites it, a rejection recorded nothing
+comparable, and "what has anyone done to this queue" had no answer that did not involve reading
+every row and inferring. `actionLogs` exists and is written by the gateway for actions it
+dispatched, not for decisions a human made.
+
+Every operator mutation now writes one append-only record to
+`organizations/<org>/operatorActions` **inside the same transaction as the state change**, so a
+change that succeeded while its record failed is not reachable. The record names the action,
+the job, the from- and to-status, the reason and the actor — and `operatorActionRecord` throws
+on a record that would say nothing moved, because a trail asserting that something was reviewed
+and acted on when nothing was is worse than no trail.
+
+*`actorOf` returned the string `unknown-operator`.* That sits in an audit log looking exactly
+like an account of that name, and "nobody can be identified for this action" is a different
+fact. Attribution is now a state with no `actor` field on its unattributed arm, so a caller
+cannot read one off a record that does not have one; a non-string claim is refused rather than
+stringified into `[object Object]`; and **in production an unattributed caller may not mutate
+the queue at all**, since releasing a message to a customer is where attribution matters most.
+
+**A note on how this was tested, because the first attempt was not good enough.** The guards
+were written as conditions inside the route handlers and the service, and asserted by reading
+the source. A mutation run turned each into `if (false)` and every assertion still passed — the
+text they looked for was still there. The three decisions moved into
+`server/domain/operatorAction.ts` as functions a test can call, and the mutants now die: two of
+them at the compiler, because reading a union arm without narrowing does not type-check. 30
+invariants; 14 of 15 mutants killed, the fifteenth recorded as unexpressible without rewriting
+the object literal it targets.
+
+**Still PARTIAL.** No reconciliation worker; no startup assertion that the worker and the
+console resolve to the same backend; no `/reconcile` endpoint; the Outbox view still reads
+`msg.to`/`msg.subject` as flat fields while they are nested inside `payload`; and `/api/logs`
+still reads a collection nothing writes.
 
 **Remediation.** Make one store authoritative and add a startup assertion that fails boot if the worker and the console resolve to different backends. Add `attemptCount`, `nextAttemptAt`, `lastError` and a terminal `DEAD_LETTER` state with exponential backoff. Add `POST /api/outbox/:id/retry` and `/reconcile` that re-enter the ActionGateway so retry cannot bypass flags, ownership lock or policy. Mount the real kill-switch controller including the commented-out bulk cancel, and return the object the UI expects. Implement the reconciliation worker. Show FAILED/DEAD_LETTER rows and read the payload fields from where they actually live. Route every operator mutation through an audit log recording the actor. Test: a failed job becomes retryable, retry is capped, DEAD_LETTER cannot auto-send, retry honours the kill switch, and every operator action produces exactly one audit row with an actor id.
 
