@@ -1,9 +1,6 @@
 import { initializeApp as initializeAdminApp, getApps } from 'firebase-admin/app';
 import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 
-import * as fs from 'fs';
-import * as path from 'path';
-
 /**
  * FIREBASE IS NOW AUTHENTICATION, AND NOTHING ELSE.
  *
@@ -52,38 +49,31 @@ import * as path from 'path';
  * same reason: this is not an informational message.
  */
 
-const PROJECT_ID_FILE = 'firebase-applet-config.json';
-
 /**
- * The project id, from the environment first.
+ * The project id, from the environment. There is no longer a file to fall back to.
  *
- * The checked-in config file is a fallback rather than the source, because it is tracked in
- * git and carries the OAuth client id and API key alongside — credentials that still need
- * rotating and purging from history (P0.6). Reading the id from the environment is what lets a
- * deployment stop depending on that file at all.
+ * This used to read `firebase-applet-config.json` when the environment was unset. That file was
+ * TRACKED IN GIT and carried the apiKey and the OAuth client id alongside the project id, and
+ * the fallback is part of why it stayed tracked: something still depended on it. It is deleted
+ * now, and the four values the browser needs come from `.env` (see `src/lib/firebaseConfig.ts`).
+ *
+ * A MISSING PROJECT ID REFUSES EVERY REQUEST, LOUDLY. `requireAuth` treats a null export as a
+ * refusal rather than a waiver — it used to accept every token when this failed, which is how a
+ * misconfigured deployment degraded silently from "verifies tokens" to "accepts anything".
+ * Erroring here with the variable named is the difference between a deployment that will not
+ * authenticate anybody and one nobody notices is open.
  */
 function resolveProjectId(): string | null {
   const fromEnv = process.env.FIREBASE_PROJECT_ID ?? process.env.GOOGLE_CLOUD_PROJECT;
-  if (typeof fromEnv === 'string' && fromEnv.length > 0) return fromEnv;
-
-  try {
-    const configPath = path.resolve(process.cwd(), PROJECT_ID_FILE);
-    if (!fs.existsSync(configPath)) return null;
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    return typeof config.projectId === 'string' && config.projectId.length > 0
-      ? config.projectId
-      : null;
-  } catch {
-    return null;
-  }
+  return typeof fromEnv === 'string' && fromEnv.trim().length > 0 ? fromEnv.trim() : null;
 }
 
 function initialiseAuth(): any {
   const projectId = resolveProjectId();
   if (!projectId) {
     console.error(
-      '[firebase] No project id. Set FIREBASE_PROJECT_ID. Token verification is UNAVAILABLE, ' +
-        'so every authenticated request will be refused.'
+      '[firebase] No project id. Set FIREBASE_PROJECT_ID in the environment. Token verification ' +
+        'is UNAVAILABLE, so every authenticated request will be refused.'
     );
     return null;
   }

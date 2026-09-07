@@ -1,26 +1,22 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { firebaseAuthConfig } from './firebaseConfig';
 
 /**
- * Only the four fields Firebase Auth needs, rather than the whole config object.
+ * The four fields Firebase Auth needs, read from the environment.
  *
- * The file also carries `firestoreDatabaseId`, `storageBucket`, `messagingSenderId`,
- * `measurementId`, `recaptchaSiteKey` and `oAuthClientId`, and passing the object whole
- * shipped every one of them into the browser bundle — verified by grepping `dist/`, which is
- * the same check that caught the `gmail.send` scope above surviving in the artifact after the
- * source looked clean.
+ * This used to be `initializeApp(firebaseConfig)` with the config imported from the TRACKED
+ * `firebase-applet-config.json`. Vite inlines an imported JSON module, so every value in that
+ * file — the apiKey, the OAuth client id, the storage bucket, the Firestore database id —
+ * was compiled into the browser bundle whether or not anything read it. Verified by grepping
+ * `dist/`, the same check that caught the `gmail.send` scope surviving in the artifact after
+ * the source was fixed.
  *
- * Nothing reads any of them now: the document collections moved to PostgreSQL, so there is no
- * Firestore database to name and no client SDK to name it to. What a page ships is what an
- * attacker gets to read, so it ships what it uses.
+ * Reading them from `import.meta.env` makes rotation an environment edit rather than a commit,
+ * which is most of why "rotate the committed credentials" stayed undone. See
+ * `src/lib/firebaseConfig.ts`.
  */
-const app = initializeApp({
-  apiKey: firebaseConfig.apiKey,
-  authDomain: firebaseConfig.authDomain,
-  projectId: firebaseConfig.projectId,
-  appId: firebaseConfig.appId,
-});
+const app = initializeApp(firebaseAuthConfig(import.meta.env as unknown as Record<string, unknown>));
 const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();

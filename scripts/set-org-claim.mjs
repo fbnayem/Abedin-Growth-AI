@@ -64,25 +64,28 @@ Options:
   --uid      Look the user up by Firebase uid.
   --org      One or more organisation ids, comma separated.
   --revoke   Remove all organisation membership from this user.
-  --project  Firebase project id (defaults to firebase-applet-config.json, then
-             GOOGLE_CLOUD_PROJECT).
+  --project  Firebase project id. Defaults to FIREBASE_PROJECT_ID, then
+             GOOGLE_CLOUD_PROJECT / GCLOUD_PROJECT.
 `
   );
   process.exit(message ? 1 : 0);
 }
 
+/**
+ * The project id, from the environment.
+ *
+ * This used to default to `firebase-applet-config.json`. That file was tracked in git and
+ * carried the apiKey and the OAuth client id alongside the project id; it is deleted, and the
+ * values live in `.env` (see `.env.example`). A script that reads a credential file is a reason
+ * for the credential file to keep existing.
+ */
 function resolveProjectId(explicit) {
   if (explicit) return explicit;
-  const configPath = resolve(process.cwd(), 'firebase-applet-config.json');
-  if (existsSync(configPath)) {
-    try {
-      const config = JSON.parse(readFileSync(configPath, 'utf8'));
-      if (config.projectId) return config.projectId;
-    } catch {
-      // Fall through to the environment.
-    }
-  }
-  return process.env.GOOGLE_CLOUD_PROJECT || process.env.GCLOUD_PROJECT;
+  return (
+    process.env.FIREBASE_PROJECT_ID ||
+    process.env.GOOGLE_CLOUD_PROJECT ||
+    process.env.GCLOUD_PROJECT
+  );
 }
 
 const args = parseArgs(process.argv.slice(2));
