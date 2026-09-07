@@ -37,6 +37,7 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import * as schema from '../server/db/schema';
+import { tablesCreatedByMigrations, tablesNoMigrationCreates } from './lib/migration-tables';
 import 'dotenv/config';
 
 const CONFIRM = process.argv.includes('--confirm');
@@ -77,7 +78,37 @@ for (const t of manifest.tables) {
 }
 say(`    ok — ${manifest.tables.length} tables, ${manifest.totalRows} rows, taken ${manifest.takenAt}`);
 
-const APP_TABLES = manifest.tables.map((t) => t.table);
+/**
+ * The drop set comes from the migrations, not from the backup.
+ *
+ * It used to be `manifest.tables.map((t) => t.table)` — the tables that existed when the backup
+ * was taken. The backup describes the past; the migrations describe what is about to be
+ * created. They agreed on the day this was written, so the first run worked.
+ *
+ * The first run created six tables the backup predated. The second run dropped the fourteen the
+ * manifest listed, left those six standing, and drizzle failed on
+ *
+ *     relation "customer_commitments" already exists
+ *
+ * inside its own transaction — rolling back all six migrations and leaving a database with six
+ * orphan tables, an empty journal and no `organizations`. A destructive script meant to be
+ * re-runnable that worked exactly once, and said nothing, because its verification only runs
+ * after the step that failed.
+ */
+const APP_TABLES = tablesCreatedByMigrations('drizzle').tables;
+
+/**
+ * Tables the backup holds that no migration creates. Not fatal — a migration is allowed to have
+ * removed a table since the backup — but it is the shape of the bug above and it is worth
+ * saying out loud before anything is dropped.
+ */
+const BACKUP_ONLY = manifest.tables
+  .map((t) => t.table)
+  .filter((t) => !APP_TABLES.includes(t));
+if (BACKUP_ONLY.length > 0) {
+  say(`    note: the backup holds ${BACKUP_ONLY.length} table(s) no migration creates: ` +
+    BACKUP_ONLY.join(', '));
+}
 
 // ---------------------------------------------------------------------------
 // Connection strings. Two roles, and the script says which it is using for what.
@@ -98,6 +129,38 @@ async function main() {
   if (!CONFIRM) {
     say('\n--- DRY RUN. Nothing below has been executed. Re-run with --confirm. ---');
   }
+
+  // -------------------------------------------------------------------------
+  // Before dropping anything: is anything standing that this script cannot account for?
+  //
+  // The drop set now comes from the migrations, so a table a migration creates can no longer go
+  // unlisted — that failure is gone by construction. What is left is the other direction: a
+  // table no migration creates, sitting in a database that is about to be rebuilt from
+  // migrations. This script has no way to know whether dropping it would destroy something or
+  // leaving it would break something, and guessing while holding a DROP is the wrong move.
+  //
+  // It has to be asked here rather than later. Drizzle runs all six migrations in one
+  // transaction, so by the time it reports an error the database it describes has already been
+  // rolled back out of existence.
+  const standing = await owner.query(
+    `SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE c.relkind = 'r' AND n.nspname = 'public'
+        AND c.relname NOT LIKE 'google_db_advisor%' AND c.relname NOT LIKE 'hypopg%'
+      ORDER BY c.relname`
+  );
+  const unaccounted = tablesNoMigrationCreates(
+    standing.rows.map((r) => r.name as string),
+    APP_TABLES
+  );
+  if (unaccounted.length > 0) {
+    fail(
+      `${unaccounted.length} table(s) exist that no migration creates: ${unaccounted.join(', ')}.\n` +
+        '  Either a migration was deleted after it ran, or something created them outside the\n' +
+        '  migrations. Find out which before rebuilding this database from the migrations —\n' +
+        '  whichever it is, one of the two records is wrong and this script cannot tell which.'
+    );
+  }
+  say(`    ${standing.rows.length} application table(s) standing, all accounted for`);
 
   // -------------------------------------------------------------------------
   step(2, `Drop ${APP_TABLES.length} application tables and the drizzle journal`);

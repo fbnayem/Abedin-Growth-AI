@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, existsSync, readdirSync, mkdtempSync, writeFileSync, mkdirSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import {
+  tablesCreatedByMigrations,
+  tablesNoMigrationCreates,
+} from '../../scripts/lib/migration-tables';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import * as schema from '../db/schema';
 
@@ -235,5 +241,218 @@ describe('3. no migration is unsafe against a populated table', () => {
     const sql = allSql.map((m) => m.sql).join('\n');
     expect(sql).toMatch(/ALTER TABLE "messages" RENAME COLUMN "sanitized_html_body" TO "raw_html_body"/);
     expect(sql).toMatch(/ALTER TABLE "meetings" RENAME COLUMN "scheduled_time" TO "start_at_utc"/);
+  });
+});
+
+// ===========================================================================
+/**
+ * WHAT A DESTRUCTIVE SCRIPT IS ALLOWED TO BELIEVE ABOUT WHAT IT IS DROPPING.
+ *
+ * `scripts/db-apply.ts` drops the application tables and replays every migration from
+ * nothing. Its drop list came from the backup manifest — the tables that existed when the
+ * backup was taken. The backup is a record of the past; the migrations are a statement about
+ * what is about to be created. On the day the script was written the two sets were equal, and
+ * it worked.
+ *
+ * Its own first run made them unequal. Migrations 0002 and 0003 create six tables the backup
+ * predated, so the second run dropped the fourteen the manifest listed, left those six
+ * standing, and drizzle failed on
+ *
+ *     relation "customer_commitments" already exists
+ *
+ * inside the transaction wrapping all six migrations — which rolled every one of them back.
+ * What survived was six orphan tables, an empty journal, and no `organizations` at all: a
+ * database emptier than the one the script had been pointed at, and no verification output,
+ * because the script verifies at step 6 and died at step 3.
+ *
+ * The tests below are about the derivation, not about that database. A drop set read from a
+ * record of the past is wrong even on the run where it happens to agree.
+ */
+describe('4. the drop set is derived from what the migrations create', () => {
+  const derived = tablesCreatedByMigrations('drizzle');
+
+  /**
+   * Both directions. A table in schema.ts that no migration creates fails at runtime on first
+   * query; a table the migrations create that schema.ts has forgotten is dropped by db-apply
+   * and then recreated with nothing reading it — and neither shows up as a type error.
+   */
+  it('the migrations create exactly the tables schema.ts declares', () => {
+    const declared = [...liveSchema().keys()].sort();
+    expect(derived.tables.filter((t) => !declared.includes(t))).toEqual([]);
+    expect(declared.filter((t) => !derived.tables.includes(t))).toEqual([]);
+  });
+
+  /**
+   * The regression itself. These six are the tables migrations 0002 and 0003 add — the ones
+   * the manifest-derived list could not know about, because they did not exist when the
+   * backup was taken. Named individually rather than counted, so that a change which drops
+   * one of them out of the drop set has to say so here.
+   */
+  it('includes the tables added after the backup was taken', () => {
+    for (const table of [
+      'customer_commitments',
+      'oauth_connections',
+      'objection_ledger',
+      'question_ledger',
+      'quote_snapshots',
+      'campaign_recipients',
+    ]) {
+      expect(derived.tables).toContain(table);
+      expect(derived.createdIn.get(table)).toMatch(/^000[23]_/);
+    }
+  });
+
+  /**
+   * The test that makes the previous one mean something. Everything above would still pass if
+   * db-apply went back to reading `manifest.tables`, because a unit test cannot see a backup
+   * directory that lives outside the repository.
+   */
+  it('db-apply takes its drop list from the migrations, not from the backup manifest', () => {
+    const applySrc = readFileSync('scripts/db-apply.ts', 'utf8');
+    expect(applySrc).toMatch(/const APP_TABLES = tablesCreatedByMigrations\(/);
+    expect(applySrc).not.toMatch(/const APP_TABLES = manifest\.tables/);
+  });
+
+  /**
+   * The precondition that stops the script before a DROP when the database holds something
+   * the migrations do not explain.
+   *
+   * The decision is a function so it can be exercised here. What remains in `db-apply.ts` is
+   * the wiring — read the catalogue, call this, refuse if it returns anything — and that is
+   * asserted below by reading the source, because running it needs a live database. A mutant
+   * that disables the `if` while leaving the call in place survives; it is recorded rather
+   * than claimed dead.
+   */
+  it('a table no migration creates is reported, whatever else is standing', () => {
+    expect(
+      tablesNoMigrationCreates(['contacts', 'leftover', 'messages'], ['contacts', 'messages'])
+    ).toEqual(['leftover']);
+  });
+
+  it('a database holding exactly what the migrations create reports nothing', () => {
+    expect(tablesNoMigrationCreates([...derived.tables], derived.tables)).toEqual([]);
+  });
+
+  /**
+   * The direction that is NOT a refusal. A migration whose table has not been created yet is
+   * the ordinary state of a database about to be migrated; only the other direction is a
+   * question this script cannot answer.
+   */
+  it('a table the migrations create but the database lacks is not reported', () => {
+    expect(tablesNoMigrationCreates([], ['contacts', 'messages'])).toEqual([]);
+  });
+
+  it('the report is ordered, so two runs of the same problem read the same', () => {
+    expect(tablesNoMigrationCreates(['zeta', 'alpha', 'mid'], [])).toEqual(['alpha', 'mid', 'zeta']);
+  });
+
+  /**
+   * And the precondition that stops the script before a DROP when the database holds
+   * something the migrations do not explain.
+   */
+  it('db-apply refuses to drop a database holding tables no migration creates', () => {
+    const applySrc = readFileSync('scripts/db-apply.ts', 'utf8');
+    expect(applySrc).toMatch(/unaccounted/);
+    expect(applySrc).toMatch(/fail\(\s*\n?\s*`\$\{unaccounted\.length\} table\(s\) exist/);
+  });
+});
+
+// ===========================================================================
+/**
+ * The parser behind that drop set, on inputs the real migrations do not contain.
+ *
+ * A parser feeding a DROP has one failure mode that matters: returning a set with something
+ * missing from it. Returning too much is caught by the equality test above; returning too
+ * little is what happened, and it is invisible — the script runs, drops what it was told, and
+ * the gap only appears later as an error from somewhere else.
+ */
+describe('5. the drop-set parser refuses rather than under-reporting', () => {
+  /** A throwaway migration directory holding exactly the files named. */
+  const fixture = (files: Record<string, string>): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'migtables-'));
+    mkdirSync(join(dir, 'meta'));
+    const tags = Object.keys(files).map((f) => f.replace(/\.sql$/, ''));
+    writeFileSync(
+      join(dir, 'meta/_journal.json'),
+      JSON.stringify({
+        version: '7',
+        dialect: 'postgresql',
+        entries: tags.map((tag, idx) => ({ idx, version: '7', when: idx, tag, breakpoints: true })),
+      })
+    );
+    for (const [name, sql] of Object.entries(files)) writeFileSync(join(dir, name), sql);
+    return dir;
+  };
+
+  it('reads a schema-qualified name as the table, not as the schema', () => {
+    const dir = fixture({
+      '0000_a.sql': 'CREATE TABLE "public"."contacts" ("id" text);',
+      '0001_b.sql': 'CREATE TABLE public.accounts ("id" text);',
+    });
+    expect(tablesCreatedByMigrations(dir).tables).toEqual(['accounts', 'contacts']);
+  });
+
+  it('reads a quoted name containing a space whole', () => {
+    const dir = fixture({ '0000_a.sql': 'CREATE TABLE "two words" ("id" text);' });
+    expect(tablesCreatedByMigrations(dir).tables).toEqual(['two words']);
+  });
+
+  /**
+   * `RENAME COLUMN x TO y` and `RENAME TO y` differ by one word and rename different things.
+   * Reading the first as a table rename would drop a real table out of the set and add one
+   * that does not exist.
+   */
+  it('does not read a column rename as a table rename', () => {
+    const dir = fixture({
+      '0000_a.sql': 'CREATE TABLE "messages" ("id" text);',
+      '0001_b.sql': 'ALTER TABLE "messages" RENAME COLUMN "a" TO "b";',
+    });
+    expect(tablesCreatedByMigrations(dir).tables).toEqual(['messages']);
+  });
+
+  it('follows a table rename', () => {
+    const dir = fixture({
+      '0000_a.sql': 'CREATE TABLE "old_name" ("id" text);',
+      '0001_b.sql': 'ALTER TABLE "old_name" RENAME TO "new_name";',
+    });
+    const r = tablesCreatedByMigrations(dir);
+    expect(r.tables).toEqual(['new_name']);
+    expect(r.createdIn.get('new_name')).toBe('0000_a.sql');
+  });
+
+  it('a dropped table leaves the set', () => {
+    const dir = fixture({
+      '0000_a.sql': 'CREATE TABLE "keep" ("id" text);\nCREATE TABLE "gone" ("id" text);',
+      '0001_b.sql': 'DROP TABLE "gone";',
+    });
+    expect(tablesCreatedByMigrations(dir).tables).toEqual(['keep']);
+  });
+
+  /**
+   * The self-check. A CREATE TABLE in a shape the patterns do not match must stop the caller.
+   * Silently skipping it is the original bug in miniature: a drop set with a table missing.
+   */
+  it('throws when a CREATE TABLE cannot be parsed, rather than skipping it', () => {
+    const dir = fixture({
+      '0000_a.sql': 'CREATE TABLE "fine" ("id" text);\nCREATE TABLE 9invalid ("id" text);',
+    });
+    expect(() => tablesCreatedByMigrations(dir)).toThrow(/2 CREATE TABLE statements, 1 parsed/);
+  });
+
+  /**
+   * Replayed from nothing, these migrations would fail. Better to say so from a test than
+   * from inside a transaction that has already rolled back the evidence.
+   */
+  it('throws when two migrations create the same table', () => {
+    const dir = fixture({
+      '0000_a.sql': 'CREATE TABLE "twice" ("id" text);',
+      '0001_b.sql': 'CREATE TABLE "twice" ("id" text);',
+    });
+    expect(() => tablesCreatedByMigrations(dir)).toThrow(/already created/);
+  });
+
+  it('throws when a migration drops a table nothing created', () => {
+    const dir = fixture({ '0000_a.sql': 'DROP TABLE "never_existed";' });
+    expect(() => tablesCreatedByMigrations(dir)).toThrow(/which nothing created/);
   });
 });

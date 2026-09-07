@@ -2973,7 +2973,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S2 | Proof-based status: test inventory, runner, CI | PARTIAL | CRITICAL | `package.json:12-13`; `server/tests/adversarial.test.ts:29-41`; `server/tests/pipeline.test.ts:16-19`; no `.github` | Zero assertions repo-wide; no test runner; no CI; the one runnable test reports 4/4 unconditionally |
 | S3 | A message cannot become SENT without a real provider result | PARTIAL | CRITICAL | `server/workers/outbox.worker.ts:99-100`; `actionGateway.ts:204-207`; `server.ts:511,519` | `|| 'sim_' + Date.now()` fabricates provider ids; two paths return success with no network call; no reconciliation; no retry; unlocked claim |
 | S4 | Tenant integrity at database level | PARTIAL | CRITICAL | `server/tenancy/orgScope.ts`; `server/middleware/tenant.ts`; `server/db/schema.ts`; `firestore.rules:5` | **P1.1/P1.2 landed.** Request-scoped tenant from a signed claim; all 13 tables carry `organization_id NOT NULL`; all 5 composite uniques declared; by-id access 404s on a foreign id; 86 executable invariants. Still PARTIAL: `firestore.rules` remains `allow read, write: if true`, so the *datastore* enforces nothing and every control is bypassable by going direct; the PostgreSQL constraints have no writer |
-| S5 | Migration safety: expand/contract, rollback, backfill, tests | PARTIAL | HIGH | `drizzle/meta/_journal.json`; `run_migrations.cjs:7,10`; `server/db/index.ts:24,29,48-52` | No runner wired; the only script applies migration 0001 only, with no ledger; zero down migrations, zero backfills, zero indexes; TLS verification disabled — `ssl: { rejectUnauthorized: false }` at `server/db/index.ts:24`, `:29` and `run_migrations.cjs:7` |
+| S5 | Migration safety: expand/contract, rollback, backfill, tests | PARTIAL | HIGH | `drizzle/0005_catch_up_to_schema.sql`; `scripts/db-apply.ts`; `scripts/db-verify.ts`; `scripts/lib/migration-tables.ts`; `server/tests/migrations.invariant.test.ts` | **Advanced, not closed.** Migrations now describe `schema.ts` (0005: 2 renames, 76 timestamptz conversions with `AT TIME ZONE`, 11 added columns) and 29 invariants hold them there; drizzle's migrator is wired behind `scripts/db-apply.ts` with a mandatory backup, a pre-drop precondition and catalogue verification; `scripts/db-verify.ts` re-asks from cold. Still PARTIAL: zero down migrations and no up→down→up test; zero `CREATE INDEX`; the 0002 bitemporal columns are still NULL on every historical row; `ssl: { rejectUnauthorized: false }` remains at `server/db/index.ts:24`, `:29`; the live apply is unfinished — the database currently holds six orphan tables and no schema (see the S5 detail) |
 | S6 | State machines: campaign, outbox, meeting, payment, opportunity, autopilot, knowledge | PARTIAL | CRITICAL | `server.ts:303`, `:318`, `:782`, `:744`; `salesDecisionEngine.ts:275-291` | No transition map anywhere; `COMPLETED → ACTIVE` is the default branch; opportunity stage accepts any string; `AUTONOMY_PAUSED_BY_HUMAN` has no writer |
 | S7 | Optimistic concurrency (version / ETag / conditional write) | PARTIAL | HIGH | `server/db/schema.ts:287`; `server.ts:176-181`, `:193-198`, `:297-307` | No `version` column on any table; zero `runTransaction`/`writeBatch`/`increment`; no 409 anywhere; blind whole-document `setDoc` overwrites |
 | S8 | Inbound version stamping and draft staleness | PARTIAL | CRITICAL | `outbox.worker.ts:69`; `aiSafety.service.ts:25-34`; `inboundPipeline.ts:131-144` | **No staleness guard is on a live path.** The wall-clock comparison queries Postgres, which the Firestore write path never populates, so it evaluates zero rows and always passes; the version implementation has no callers and reads a field with no writer. Neither mechanism can ever return "stale" |
@@ -3097,6 +3097,62 @@ The same primitive reaches further than the outbox. Anyone can set `autonomyPaus
 **Decisive evidence.** No runner is wired: no `db:migrate` script, and grep for `drizzle-orm/*/migrator` and `migrate(` returns zero hits. `run_migrations.cjs:10` hardcodes `drizzle/0001_curvy_toad_men.sql`, ignoring the journal, so 0000 (which creates the tables 0001 references) and 0002 can never be applied by it; it writes no ledger row, so a second run re-executes `CREATE TABLE` and aborts. TLS certificate verification is disabled on every Postgres path: `ssl: { rejectUnauthorized: false }` appears at `server/db/index.ts:24`, again at `server/db/index.ts:29`, and at `run_migrations.cjs:7` — three places, including the connection that stores plaintext `access_token` / `refresh_token`. (The original write-up asserted "three places" without citing any of them; the anchors are recorded here so the claim is checkable.) Zero down migrations, zero backfills (0002 adds five bitemporal columns and leaves every historical row NULL), zero `CREATE INDEX` across all three files, zero `CHECK`/`pgEnum`, and no `version` column.
 
 **Worst case.** An operator runs `node run_migrations.cjs` against a fresh database; 0001's foreign key to `contacts` fails because 0000 was never applied, the implicit transaction rolls the whole file back, and with no ledger nobody knows what state the schema is in. If forced through by hand without 0002, the app boots against a schema missing every bitemporal column, `db` returns a real pool instead of the throwing Proxy, and the worker begins dead-lettering every queued customer email mid-loop.
+
+**What changed, 2026-09-07.** The database was connected for the first time, and three things
+came out of it that no amount of reading the code would have produced.
+
+*The migrations did not describe `schema.ts`, and the whole gate was green over it.* Three
+commits had changed `server/db/schema.ts` without generating a migration. `drizzle-kit check`
+passed, because it validates the migrations against each other and not against the schema the
+application queries. `tsc` passed, because TypeScript reads `schema.ts` and never the SQL. All
+1,074 tests passed, because none of them touched a database. Applied to an empty database the
+migration set would have built `messages.sanitized_html_body` and left every query for
+`raw_html_body` failing at runtime — after reporting success. `drizzle/0005_catch_up_to_schema.sql`
+closes the gap in 89 statements, and `server/tests/migrations.invariant.test.ts` now holds the
+latest snapshot against `schema.ts` column-for-column so the next divergence fails a test
+rather than a customer query.
+
+*The backfill in 0003 would have failed on the real data.* Dry-run as a SELECT against the live
+rows, `UNIQUE(organization_id, email_key)` collided on 19 groups covering 43 of the 718
+contacts. Those contacts are in the backup and are deliberately not restored.
+
+*`scripts/db-apply.ts` was destructive, meant to be re-runnable, and worked exactly once.* Its
+drop list came from the backup manifest — the tables that existed when the backup was taken.
+The backup is a record of the past; the migrations are a statement about what is about to be
+created. They were the same set on the day the script was written. Its own first run made them
+different: migrations 0002 and 0003 create six tables the backup predated. The second run
+dropped the fourteen the manifest listed, left those six standing, and drizzle failed on
+`relation "customer_commitments" already exists` inside the transaction wrapping all six
+migrations — rolling every one of them back. What survived was six orphan tables, an empty
+journal and no `organizations` at all: a database emptier than the one the script was pointed
+at, with no verification output, because the script verifies at step 6 and died at step 3.
+
+The drop set is now derived from the migration files themselves
+(`scripts/lib/migration-tables.ts`), so a migration that adds a table puts it in the drop set
+the moment the file exists. A parser feeding a DROP has one failure mode that matters —
+returning a set with something missing from it — so it counts the CREATE TABLE / DROP TABLE /
+RENAME TO phrases each file contains, compares that with what it parsed, and throws on a
+disagreement rather than silently shrinking the set. `db-apply.ts` also refuses now, before any
+DROP, if the database holds a table no migration accounts for. 16 further invariants; 11 of 12
+mutants killed against the real gate (`tsc` + 13 guardrails + 1,104 tests), the twelfth
+recorded: disabling the `if` that acts on the precondition leaves the source assertion intact,
+and observing the refusal itself needs a live database.
+
+**Live state, verified against the catalogue (`scripts/db-verify.ts`), not against the absence
+of an error.** As of this entry the database holds 6 orphan tables, 0 rows, an empty migration
+journal and no `organizations`. The repaired `db-apply.ts` dry-runs clean and would fix it; the
+run is outstanding. Two problems will remain after it:
+
+- **The application role is a member of `cloudsqlsuperuser`,** and through it of `pg_monitor`,
+  `pg_signal_backend`, `pg_checkpoint`, `pg_read_all_settings`, `pg_read_all_stats` and
+  `pg_stat_scan_tables`. Every direct grant is correct — the schema ACL reads
+  `growth-ai-dat-user-747=U/pg_database_owner`, USAGE and no CREATE — and
+  `has_schema_privilege(role, 'public', 'CREATE')` still answers true, because the privilege
+  arrives through membership, which a REVOKE naming the role does nothing about. Cloud SQL
+  grants `cloudsqlsuperuser` to every user created through the console or the API. The fix is
+  to create the application role with SQL instead.
+- **`ssl: { rejectUnauthorized: false }`** on every Postgres path, now that there is a real
+  server on the other end of it.
 
 **Remediation.** Replace `run_migrations.cjs` with drizzle's `migrate({ migrationsFolder: './drizzle' })` behind `npm run db:migrate`. Set `rejectUnauthorized: true` with the provider CA in all three places. Add a 0003 expand migration declaring status/stage enums or CHECKs and a `version integer NOT NULL DEFAULT 0`. Add the missing indexes (org ids, partial index on `outbox_messages(status) WHERE status='PENDING'`, `messages(conversation_id, received_at DESC)`). Backfill the bitemporal columns before anything reads them as a validity predicate. Write down-migrations and an up→down→up schema-equality test.
 
