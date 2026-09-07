@@ -44,6 +44,7 @@ import {
 import { outboxWorker } from "./server/workers/outbox.worker";
 import { stripeRouter } from "./server/routes/stripe.routes";
 import { outboxRouter } from "./server/routes/outbox.routes";
+import { autonomyRouter } from "./server/routes/autonomy.routes";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
 import { simulatePitchBattle } from './server/agents/pitchBattleAgent';
@@ -172,6 +173,11 @@ for (const aiPath of [
   // Health check
   app.use("/api/stripe", stripeRouter);
   app.use("/api/outbox", outboxRouter);
+
+  // The per-conversation autonomy lock. Two places already refused to dispatch when it was
+  // set; until this router existed, nothing in the running system could set it — the only
+  // writer was a service with no callers. See server/routes/autonomy.routes.ts.
+  app.use("/api/autonomy", autonomyRouter);
 
 
   // EXECUTABLE READINESS CHECK (Requirement X)

@@ -19,6 +19,7 @@ import {
   maySend,
   refusalReason,
 } from '../domain/campaignSafety';
+import { lockStateOf, mayProceed, refusalFor } from '../domain/autonomyLock';
 import type { Availability } from '../providers/types';
 import {
   reconcileEmailSend,
@@ -518,19 +519,33 @@ export class ActionGateway {
     }
   }
 
+  /**
+   * True when autonomy is LOCKED for this conversation and the send must not proceed.
+   *
+   * Every branch that used to answer "not locked" on an unknown state now answers locked.
+   * `if (!store) return false` said a missing datastore meant no human had taken the
+   * conversation; a missing document said the same. Neither was a reading — both were the
+   * absence of one, and §14 forbids resolving that to permission. `lockStateOf` is the single
+   * place that decides, so this and the worker can no longer disagree: the worker honoured
+   * `status === 'AUTONOMY_PAUSED_BY_HUMAN'` and this did not, so a conversation paused by
+   * status was stopped there and permitted here.
+   */
   private async checkHumanOwnershipLock(orgId: string, conversationId: string): Promise<boolean> {
-    if (!store) return false;
     try {
-      const docSnap = await getDoc(doc(store, orgPath(orgId, 'conversations'), conversationId));
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        if (data?.autonomyPausedByHuman) {
-          return true;
-        }
-      }
-      return false;
+      // No datastore and no document are THE SAME FACT — we could not read — so they take the
+      // same path rather than an early `return false` that says "nobody has paused this".
+      // Written this way deliberately: a literal `return true` here would be correct and
+      // untested, and a mutation of it survived the whole gate once. There is no branch left
+      // to mutate; `lockStateOf` decides, and it is covered.
+      const docSnap = store
+        ? await getDoc(doc(store, orgPath(orgId, 'conversations'), conversationId))
+        : null;
+      const state = lockStateOf(docSnap?.exists() ?? false, docSnap?.data());
+      if (mayProceed(state)) return false;
+      console.warn(`[ActionGateway] ${refusalFor(state, conversationId)}`);
+      return true;
     } catch (e) {
-      console.error("Error checking human ownership lock:", e);
+      console.error('Error checking human ownership lock:', e);
       return true; // Fail closed
     }
   }

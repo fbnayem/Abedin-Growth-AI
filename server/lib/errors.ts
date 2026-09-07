@@ -68,6 +68,17 @@ export const ErrorCodes = {
   TENANT_INVALID: 403,
   /** A control said no: Safe Rebuild Mode, the kill switch, consent, suppression. */
   POLICY_BLOCKED: 403,
+  /**
+   * The action must be attributable to an operator and the request carried no identity.
+   *
+   * Added because two routes were sending `'FORBIDDEN' as ErrorCode` — a code that has never
+   * existed in this taxonomy. The cast is what let it compile, and the status was right only
+   * because both call sites also passed `{ status: 403 }` explicitly; `ErrorCodes['FORBIDDEN']`
+   * is `undefined`, so without that the envelope would have answered 500 for a refusal. The
+   * body still carried a `code` no client could branch on, which is the one thing this envelope
+   * exists to provide.
+   */
+  ATTRIBUTION_REQUIRED: 403,
   /** An unauthenticated machine endpoint whose signature did not verify. */
   WEBHOOK_VERIFICATION_FAILED: 401,
   NOT_FOUND: 404,

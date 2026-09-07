@@ -7,6 +7,15 @@
 
 **Revision history.** *Second pass (2026-09-06).* Applied after direct file-level verification by the orchestrator, not by the adversarial refuters — who returned zero corrections (see §6.4). Changes: six statuses downgraded `PARTIAL → NOT_STARTED` under the document's own rubric (S8, S18, S20, S31, S35, S38); S35 severity raised `MEDIUM → HIGH`; S1 corrected `PARTIAL → IMPLEMENTED_UNVERIFIED`; S19's rationale rewritten off arbitrary-host SSRF and onto the absence of fetch timeouts; four new findings added (safety-flag divergence, browser send path with a deterministic double-send, a kill switch that is worse than inert, and a mail-injection/open-relay primitive); S46's "defaults fail closed" claim corrected; S5's TLS citation and the S22/S41/S44/S45/S48 grep patterns supplied; the tally, severity counts and risk ranking recomputed; and the P0 roadmap rebuilt around a containment step that is a console action rather than a commit.
 
+*Fifth pass (2026-09-08) — a stop control that could not be engaged.* The per-conversation
+autonomy lock had two enforcers and no reachable writer: `actionGateway` and `outbox.worker`
+both refused to dispatch when `autonomyPausedByHuman` was set, and the only writer lived in a
+service with no callers. A human could not stop one conversation without halting the whole
+tenant. Three §14 inversions in the reads, and the two readers disagreed with each other about
+what counted as paused. Section 1y records the fix, the deletion of the dead shadow module that
+held the writer, an invented error code the envelope guardrail could not see, and three mutation
+survivors that changed the design rather than the tests.
+
 *Fourth pass (2026-09-08) — the datastore split is closed, and one premise of this document
 is now false.* Firebase is no longer a database here. The document collections moved to the
 PostgreSQL instance this system already runs, `server/firebase.ts` initialises authentication
@@ -3051,6 +3060,125 @@ It is recorded rather than fixed because changing what the send path does is not
 smuggle into a re-platform under cover of a type error. The coercion beside it *was* fixed
 (`"6" > 5` was true by string coercion, `{} > 5` was false, so a malformed stored version
 silently decided staleness). The inversion needs its own change, its own tests and its own row.
+
+---
+
+## 1y. A stop control with two enforcers and no way to engage it (2026-09-08)
+
+### What was wrong
+
+`actionGateway.checkHumanOwnershipLock` refuses to dispatch when `autonomyPausedByHuman` is set
+on a conversation. `outbox.worker` reads the same flag again immediately before dispatch, so a
+lock set after queueing still stops the job. Both are careful; both carry comments explaining
+how they honour it.
+
+**Nothing in the running system could set it.** The only writer was
+`aiSafetyService.setHumanOwnershipLock`, and `aiSafetyService` had no callers anywhere in the
+repository — `outbox.worker` imported the module and never used it. There was no route, no
+service and no operator surface that could pause a conversation.
+
+So a human watching the system draft the wrong thing to a customer had no way to stop it *for
+that customer*. There was a kill switch for the whole organisation and nothing between that and
+letting the send go — and an operator who has to halt the entire outbound queue to take over
+one thread will not do it.
+
+That is worse than an absent control. The enforcement made it look present.
+
+### Three inversions in the reads, and a disagreement between them
+
+All three read an unknown state as permission (§14):
+
+1. `if (!store) return false` — no datastore meant "not locked". This runs at `dispatchAction`
+   line 226, before anything else refuses on a null store, so it decided on its own.
+2. A missing conversation document meant "not locked". Nothing had been read at all.
+3. Truthiness decided the outcome. `autonomyPausedByHuman: "false"` is truthy and would have
+   paused; `0` is falsy and would have run. Neither value was written by anything here.
+
+And the two readers disagreed: the worker honoured `status === 'AUTONOMY_PAUSED_BY_HUMAN'` as a
+pause, the gateway did not. **A conversation paused by status was stopped by one guard and
+permitted by the other, for the same send.**
+
+### What is there now
+
+`server/domain/autonomyLock.ts` answers "may autonomy proceed?" as three states, and both
+guards call it, so they cannot drift apart again. `UNKNOWN` refuses: these guards *are* the
+enforcement, so "we could not tell whether a human has taken this conversation" cannot resolve
+to "no human has".
+
+One place reads a missing value as permission, and it is stated rather than buried: a document
+with no lock field at all is `RUNNING`. The field is written only by a pause or a resume, so its
+absence is the positive fact that nobody has acted. Reading it as UNKNOWN would refuse every
+send in the system forever — not a safer system, a stopped one, and a control that stops
+everything gets switched off.
+
+`server/services/autonomyLock.service.ts` and `server/routes/autonomy.routes.ts` are the writer:
+`POST /api/autonomy/:conversationId`, authenticated, tenant-scoped, attributed through the same
+`operatorGate` the outbox console uses, and requiring a reason **in both directions** —
+resuming most of all, because that hands a customer conversation back to an autonomous system.
+
+An ordering detail that decides whether a resume works at all: an explicit `false` beats the
+legacy status. Checked the other way round, a conversation paused by status could never be
+resumed — the operator sets the flag, the read keeps seeing the status, and the API reports
+success while the send stays blocked forever.
+
+### The dead shadow module is gone
+
+`server/services/aiSafety.service.ts` is deleted. It held a duplicate `WorkflowBudget` (the live
+one is `server/policies/workflowBudgets.ts`), a `recordWorkflowUsage` whose own comment said
+"Here we simulate checking limits" and which checked one of its six budget fields, a
+`checkStaleDraft` that answered "not stale" when it could not tell — and the only writer this
+lock had. The live staleness enforcement is `draftIntegrity.service.ts`, which `inboundPipeline`
+and `outbox.worker` both use.
+
+### An invented error code, and the guardrail that could not see it
+
+Two routes were calling `sendError(req, res, 'FORBIDDEN' as ErrorCode, ...)`. There has never
+been a `FORBIDDEN` in the taxonomy; the cast is what let it compile.
+
+`sendError` computes `options.status ?? ErrorCodes[code] ?? 500`, so an unknown code answers
+**500** unless the call site also passes an explicit status. Both did, which is exactly why
+nothing ever looked wrong — and the body still carried a `code` no client could branch on, which
+is the entire reason the envelope exists.
+
+`ATTRIBUTION_REQUIRED: 403` now exists, both casts are gone, and
+`scripts/check-error-envelope.mjs` gained a second rule that reads the taxonomy out of
+`errors.ts` and checks every literal code handed to `sendError`. Run against the pre-fix file
+from git it reports `'FORBIDDEN' is not in ErrorCodes` and exits 1; against the fixed tree it
+passes.
+
+### What mutation testing changed about the design
+
+Twenty-three mutants, killed 23/23 — but not on the first pass. Three survived, and all three
+said the same thing: **the behaviour was correct and nothing exercised it.**
+
+- Reporting a lock state that had not been written (`const to = 'PAUSED'` regardless of what was
+  asked) survived the whole gate.
+- Deleting the route's attribution check survived.
+- Disabling the new guardrail's report branch survived, because a guardrail run against a clean
+  tree is silent whether or not it is still capable of speaking.
+
+The first two were answered by moving the logic out of the express handler into a service a test
+can call directly — which is why `autonomyLock.service.ts` exists at all. The third was answered
+by running the guardrail against a temporary tree that actually contains the defect, and
+asserting both that it fails there and that it passes on a valid code.
+
+**One survivor turned out to be an equivalent mutant, and was measured rather than argued.** The
+gateway's `lockStateOf(docSnap?.exists() ?? false, docSnap?.data())` was mutated to pass `true`
+for a null snapshot; both forms return `UNKNOWN`, because `undefined` data is not an object and
+is rejected a line earlier. Confirmed by calling the function both ways before replacing the
+mutant with one that is not equivalent — `?? true` **and** `?? {}` — which then died against the
+new gateway tests.
+
+### What this does not do
+
+- It is one conversation at a time. There is still no way to pause a *contact* across
+  conversations, and no bulk operator surface.
+- Two operators acting at once is last-writer-wins. Deliberate: making a pause fail because a
+  browser tab was stale would mean the safe direction is the one that can be refused. A pause
+  can always be re-asserted, and the audit shows both.
+- No UI. The endpoint exists and is mounted; nothing in `src/` calls it yet.
+- The lock is not surfaced in the outbox console, so an operator reviewing a queued message
+  cannot see from there whether the conversation is paused.
 
 ---
 

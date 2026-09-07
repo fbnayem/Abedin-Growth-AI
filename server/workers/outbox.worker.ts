@@ -1,5 +1,10 @@
 import { outboxService } from '../services/outbox.service';
-import { aiSafetyService } from '../services/aiSafety.service';
+import {
+  lockStateOf,
+  mayProceed,
+  refusalFor,
+  LOCK_STATUS,
+} from '../domain/autonomyLock';
 import { actionGateway, ActionType, isFabricatedProviderId } from '../gateway/actionGateway';
 
 import { db } from '../db/index';
@@ -126,13 +131,19 @@ export class OutboxWorker {
           // Rule P: HUMAN OWNERSHIP LOCK.
           // Note the ActionGateway performs this check too (checkHumanOwnershipLock); it is
           // repeated here so a lock set after queueing stops the job before dispatch.
+          //
+          // The truthiness test that used to be here read `autonomyPausedByHuman` and a legacy
+          // status directly. It let coercion decide: `"false"` is truthy and `0` is falsy, and
+          // a conversation document that did not exist read as "no human has taken this".
+          // `lockStateOf` answers in three states and is shared with the gateway, so the two
+          // can no longer disagree about the same conversation.
           const convSnap = await getDoc(
             doc(store!, orgPath(orgId, 'conversations'), job.conversationId)
           );
-          const convData: any = convSnap.exists() ? convSnap.data() : null;
-          if (convData?.autonomyPausedByHuman || convData?.status === 'AUTONOMY_PAUSED_BY_HUMAN') {
-              console.warn(`Human ownership lock active for conversation ${job.conversationId}. Skipping autonomous send.`);
-              await outboxService.markFailed(orgId, job.id, 'AUTONOMY_PAUSED_BY_HUMAN', true);
+          const lock = lockStateOf(convSnap.exists(), convSnap.data());
+          if (!mayProceed(lock)) {
+              console.warn(`${refusalFor(lock, job.conversationId)} Skipping autonomous send.`);
+              await outboxService.markFailed(orgId, job.id, LOCK_STATUS, true);
               continue;
           }
 

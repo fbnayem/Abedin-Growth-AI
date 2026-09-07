@@ -58,7 +58,7 @@ const REVIEWABLE_STATUSES = ['HUMAN_REVIEW', 'PENDING', 'DEAD_LETTER'] as const;
 function attributedOrRefused(req: any, res: any): Attribution | null {
   const gate = operatorGate(req.user, isProduction);
   if (gate.allowed === false) {
-    sendError(req, res, 'FORBIDDEN' as ErrorCode, gate.message, { status: 403 });
+    sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
     return null;
   }
   return gate.attribution;
