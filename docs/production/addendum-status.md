@@ -2994,7 +2994,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S23 | Agent abstention | PARTIAL | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | Landed 2026-09-07 (§1v). `ModelOutcome<T>` is a discriminated union a caller must branch on; `generateJsonOrAbstain` replaces the silent substitution on the live drafting and extraction paths; the 107-line canned reply template and the 82 lines of fact-inventing heuristics are deleted; an abstained extraction records ZERO facts; `ABSTAINED` is a disposition distinct from `SUPPRESSED`. Three dead agents whose fallbacks fabricated emails, a confidence of 0.88 and a `policyStatus: "ALLOW"` were removed. **Remainder: 10 legacy `safeGenerateJSON` call sites still substitute silently (held by a ratchet; 11 -> 10 in §1w); no caller ever SETS a confidence, so `LOW_CONFIDENCE` and `CONFLICTING_EVIDENCE` are declared and unreachable, and the policy engine confidence gate still has nothing to read** |
 | S24 | Specialist disagreement detection and resolution | PARTIAL | CRITICAL | `server/domain/adjudication.ts`; `independentAuditor.ts`; `inboundPipeline.ts` (the audit step); `adjudication.invariant.test.ts` | Landed 2026-09-07 (§1w). `adjudicate` combines findings by worst-severity with no accumulator and no threshold — tested monotone over 81 ordered subset pairs and non-compensatory in both directions. `reconcile` has no majority, tie-break, first-wins or confidence rule, and `consulted: false` carries no value, so an unasked specialist cannot be represented as an agreeing one. `specialistsRequired`, written at three sites and read at none, has its first reader and fails closed. The auditor now runs on the live path; its safety record is tri-state and derived; its two "independent" price checks were **measured identical over 1,350 drafts (0 disagreements)** and collapsed to one. A dead second reply gate that forced a detected phone violation to `PASS` was deleted. **Remainder: no specialist agent is invoked on any live path, so no two opinions are yet produced — what the check proves today is that the system knows it has not asked** |
 | S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts` (`quoteAvailability`) | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`. The auditor no longer penalises a reply for OMITTING the list price (P1.7), and since §1w it refuses to clear a stated amount when quotes were not looked up: `quote: null` used to mean both "this customer has no quote" and "nobody looked", and the live pipeline — whose context bundle records `QUOTE` as unavailable — was the caller that had not looked, so list pricing was being authorised for customers who may hold a negotiated one |
-| S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | NOT_STARTED | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | No campaign execution engine exists; none of the 14 required guards is implemented; a reply does not stop the sequence because both stop mechanisms query an empty Postgres |
+| S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | PARTIAL | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | No campaign execution engine exists; none of the 14 required guards is implemented; a reply does not stop the sequence because both stop mechanisms query an empty Postgres |
 
 | S27 | Deliverability: sender identity health and fabricated metrics | PARTIAL | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
 | S28 | Bounce, DSN and automated-mail classification before replying | PARTIAL | CRITICAL | `inboundPipeline.ts:112`; `models.ts:814-834`; `salesDecisionEngine.ts:133-134`; `schema.ts:122` | Landed 2026-09-07 (§1t). `classifyAutomation` reads DSN fields, `multipart/report`, `X-Failed-Recipients`, null `Return-Path`, `List-*`, RFC 3834 `Auto-Submitted`, `Precedence` and whole role local-parts — never subject prose. Only `NO_AUTOMATION_MARKERS` permits a reply, and the gate runs BEFORE the first model call. A permanent (5.x.x) bounce writes `hardBounced`, the suppression flag the gateway already read and nothing ever wrote. **Remainder: no complaint/feedback-loop handling, and an out-of-office carrying no headers is still replied to** — deliberately, because a subject regex is prose-classification |
@@ -3516,7 +3516,7 @@ and reads the handlers, because driving them needs Firestore and an authenticate
 
 ---
 
-### S26 — Campaign contact safety · NOT_STARTED · CRITICAL
+### S26 — Campaign contact safety · PARTIAL · CRITICAL
 
 **New finding, 2026-09-08 — the suppression check runs, and cannot see a real unsubscribe.**
 
@@ -3592,6 +3592,55 @@ inbound reply still does not durably suppress the sequence — only the reply it
 Both must be closed before "move the guards into `dispatchAction`" means anything: the browser sender must be deleted (P0.1) and the outbox must stop accepting anonymous producers (P0.0).
 
 **Worst case.** A prospect replies "remove me and do not contact anyone at this company again". The inbound write throws and is swallowed by an empty `console.error`; the unsubscribe is never recorded anywhere `isSuppressed` can see it. Queued jobs keep draining: the stale-draft check finds an empty Postgres table, concludes no newer inbound arrived, and the gateway applies no suppression, no cap and no quiet hours while resolving `consentGiven = true`. Steps 2 and 3 send at 3am local time with no unsubscribe header, and the UI already shows the contact as CONTACTED.
+
+**What changed, 2026-09-08 — the fourteen guards exist and are enforced at the chokepoint.**
+
+This section records them as "moot for want of a send loop". That is true of the campaign
+scheduler — there still is not one — and false of `dispatchAction`, which every autonomous
+send already passes through. A guard written when the loop is built is a guard written under
+delivery pressure; this was the cheap moment.
+
+`server/domain/campaignSafety.ts` evaluates all fourteen: suppression, hard bounce, spam
+complaint, wrong person, existing customer, active conversation, pending human reply,
+frequency cap, cooldown, duplicate campaign, conflicting campaign, daily recipient limit,
+per-domain limit and quiet hours. Pure — no clock, no datastore, no environment — so every
+case can be held still, and the recipient's local hour is passed IN rather than computed,
+because a quiet-hours rule that reads the server clock sends at 3am to anyone in another
+timezone (§30).
+
+**A guard whose input is missing is NOT_RUN, and NOT_RUN REFUSES.** This is the one place it
+differs from the independent auditor, which reports NOT_RUN and defers to the gateway: these
+guards ARE the enforcement, so there is nothing downstream to defer to. "We could not tell
+whether it is 3am for this recipient" is not "it is not 3am", and §14 forbids the second
+reading. Every non-clean outcome is BLOCKING — there is no tradeable severity here.
+
+**The consequence is deliberate and worth stating plainly.** With the data this system holds —
+no campaign membership, no per-organisation daily counters, no recipient timezone, no
+per-contact send history on this path — several guards cannot run, so autonomous sending is
+now REFUSED at the gateway. Nothing that works today stops working: `REAL_EMAIL_SEND_ENABLED`
+is false and this system has never sent an autonomous email. What changes is that it will not
+silently begin sending unguarded when that flag is flipped, which is precisely the transition
+this section's worst case describes.
+
+The gateway declares the three unavailable inputs as **not loaded** rather than passing values
+that would make their guards pass, and reads customer status, conversation state and pending
+review as three states — a record silent on customer status is unknown, not "not a customer",
+which is the §14 inversion in its smallest form.
+
+41 invariants; 14 of 14 mutants killed against the real gate. Two survived a first pass and
+both were real: `maySend` weakened from `=== PASS` to `!== BLOCK` survived because every
+finding is currently BLOCKING, so the two are equivalent *today* — and one further edit,
+itself a mutant that dies, makes them differ and permits a send. Two individually survivable
+weakenings that together open the gate. The other was the tri-state read above.
+
+**Still PARTIAL and still CRITICAL.** There is no campaign execution engine: no enrolment
+record, no per-contact sequence state, no scheduler, and "Bulk Enroll in Campaign" still marks
+leads CONTACTED in local React state with no server call. No `List-Unsubscribe` header. An
+inbound reply still does not durably cancel a sequence — only the reply it arrived on. And the
+premise this section names holds: the producer writes Postgres while the consumer reads
+Firestore, so the stop rules and the queue are still not reading the same store. That is P0.0,
+which is blocked on P0.6, which is blocked on firebase-admin credentials that do not exist in
+this environment.
 
 **Remediation.** Keep `REAL_EMAIL_SEND_ENABLED` false until one real chokepoint enforces suppression. Unify the datastore — until the pipeline, the worker and the safety rules read the same store, every stop rule is a no-op by construction. Move all fourteen guards into `dispatchAction` as fail-closed pre-execution checks reading that store. Require `contactId` on every EMAIL_SEND. On inbound persist, atomically cancel all PENDING outbox jobs for that conversation in the same batch. Wire or delete the dead safety imports. Add `List-Unsubscribe`. Replace the local-state enrolment with a real server call. Test: suppressed recipient → zero provider calls; inbound reply → all PENDING jobs CANCELLED; 3am local → deferred; 51st send under a cap of 50 → blocked.
 

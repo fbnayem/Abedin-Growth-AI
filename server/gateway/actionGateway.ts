@@ -14,6 +14,11 @@ import { assertCapability, CapabilityError, normalizeScopes, type Capability } f
 import { assertTimeZone, isWithinBusinessHours, parseInstant, DEFAULT_BUSINESS_HOURS, systemClock, type Clock } from '../../shared/domain/time';
 import { outboundMessageId } from '../lib/messageIdentity';
 import { calendarService } from '../services/calendar.service';
+import {
+  evaluateCampaignSafety,
+  maySend,
+  refusalReason,
+} from '../domain/campaignSafety';
 import type { Availability } from '../providers/types';
 import {
   reconcileEmailSend,
@@ -642,6 +647,66 @@ export class ActionGateway {
         if (!policyResult.allowed) {
             console.warn(`[ActionGateway] Email blocked by outreach policy: ${policyResult.reason}`);
             return { success: false, blockedReason: policyResult.reason, errorCode: 'POLICY_BLOCKED' };
+        }
+
+        // S26 — THE FOURTEEN CAMPAIGN GUARDS.
+        //
+        // This gateway implemented a feature flag, an ownership lock, a jurisdiction call and —
+        // since P0.10 — suppression and consent. It implemented none of: frequency cap,
+        // cooldown, quiet hours, daily recipient limit, per-domain limit, duplicate or
+        // conflicting campaign membership, active conversation, pending human reply, wrong
+        // person, or existing customer.
+        //
+        // S26 calls those "moot for want of a send loop", which is true of the campaign
+        // scheduler and not of this function: every autonomous send already passes through
+        // here.
+        //
+        // A guard whose input is missing is NOT_RUN, and NOT_RUN REFUSES. There is nothing
+        // downstream of this to defer to, so an unknown condition cannot resolve to permission
+        // (§14): "we could not tell whether it is 3am for this recipient" is not "it is not
+        // 3am".
+        //
+        // The consequence is deliberate. With the data this system currently holds — no
+        // campaign membership, no per-organisation daily counters, no recipient timezone —
+        // several guards cannot run and autonomous sending is REFUSED. Nothing that works today
+        // stops working: REAL_EMAIL_SEND_ENABLED is false and this system has never sent an
+        // autonomous email. What changes is that it will not silently begin sending unguarded
+        // when that flag is flipped.
+        const safety = evaluateCampaignSafety({
+            suppressed: contactData.suppressed === true,
+            hardBounced: contactData.hardBounced === true,
+            complained: contactData.complained === true,
+            wrongPerson: contactData.wrongPerson === true,
+            // Read as a tri-state: a record that does not say is not a record that says no.
+            isExistingCustomer:
+                typeof contactData.isExistingCustomer === 'boolean'
+                    ? contactData.isExistingCustomer
+                    : undefined,
+            hasActiveConversation:
+                typeof contactData.hasActiveConversation === 'boolean'
+                    ? contactData.hasActiveConversation
+                    : undefined,
+            hasPendingHumanReply:
+                typeof contactData.hasPendingHumanReply === 'boolean'
+                    ? contactData.hasPendingHumanReply
+                    : undefined,
+            // Not loaded: there is no per-contact send history query on this path yet, and
+            // claiming it was loaded to make the guard pass is the defect this replaces.
+            contactHistoryLoaded: false,
+            campaignMembershipLoaded: false,
+            recipientsToday: undefined,
+            sendsToThisDomainToday: undefined,
+            recipientLocalHour: undefined,
+        });
+
+        if (maySend(safety) === false) {
+            const reason =
+                `Campaign safety refused this send. ${refusalReason(safety)}` +
+                (safety.notRun.length > 0
+                    ? ` | ${safety.notRun.length} guard(s) could not run: ${safety.notRun.join(', ')}`
+                    : '');
+            console.warn(`[ActionGateway] ${reason}`);
+            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
         }
 
         if (!firestore) return { success: false, error: 'Firestore not initialized' };
