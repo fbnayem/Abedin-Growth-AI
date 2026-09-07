@@ -7,6 +7,12 @@
 
 **Revision history.** *Second pass (2026-09-06).* Applied after direct file-level verification by the orchestrator, not by the adversarial refuters — who returned zero corrections (see §6.4). Changes: six statuses downgraded `PARTIAL → NOT_STARTED` under the document's own rubric (S8, S18, S20, S31, S35, S38); S35 severity raised `MEDIUM → HIGH`; S1 corrected `PARTIAL → IMPLEMENTED_UNVERIFIED`; S19's rationale rewritten off arbitrary-host SSRF and onto the absence of fetch timeouts; four new findings added (safety-flag divergence, browser send path with a deterministic double-send, a kill switch that is worse than inert, and a mail-injection/open-relay primitive); S46's "defaults fail closed" claim corrected; S5's TLS citation and the S22/S41/S44/S45/S48 grep patterns supplied; the tally, severity counts and risk ranking recomputed; and the P0 roadmap rebuilt around a containment step that is a console action rather than a commit.
 
+*Sixth pass (2026-09-08) — the CSP, and a remainder this document invented.* S35 carried
+"still no CSP, and the Gmail send token is still in `localStorage`", and used the second half to
+justify HIGH severity. The CSP now exists. The token had left `localStorage` a day BEFORE that
+line was written. Section 1z records both, and the severity is kept at HIGH on ground that is
+actually true.
+
 *Fifth pass (2026-09-08) — a stop control that could not be engaged.* The per-conversation
 autonomy lock had two enforcers and no reachable writer: `actionGateway` and `outbox.worker`
 both refused to dispatch when `autonomyPausedByHuman` was set, and the only writer lived in a
@@ -2394,7 +2400,7 @@ about the test that fails to catch it.
 | **S16** MIME | PARTIAL | PARTIAL | charset, RFC 2047, alternatives, DSN, embedded messages, caps and outbound header injection are all closed. Never run against real Gmail traffic |
 | **S28** bounce/DSN | NOT_STARTED | PARTIAL | classification and hard-bounce suppression land; no complaint/feedback-loop handling, and an out-of-office with no headers is still replied to |
 | **S17** attachments | NOT_STARTED | PARTIAL | attachments are recorded with name, type and size instead of vanishing. No allowlist, no content sniffing, no scanning, no storage, no retention |
-| **S35** HTML safety | NOT_STARTED | PARTIAL | the lying name is gone, content reaches readers as text, and a guardrail holds the boundary. **No CSP yet**, and the Gmail send token is still in `localStorage` |
+| **S35** HTML safety | NOT_STARTED | PARTIAL | the lying name is gone, content reaches readers as text, and a guardrail holds the boundary. ~~**No CSP yet**, and the Gmail send token is still in `localStorage`~~ — both corrected 2026-09-08, see §1z; the CSP exists and the token had already left `localStorage` before this line was written |
 
 On `Content-Transfer-Encoding`: it is deliberately NOT applied to Gmail part bodies, and that is a
 decision rather than an omission. `format=full` returns `body.data` already CTE-decoded, so the
@@ -3182,6 +3188,104 @@ new gateway tests.
 
 ---
 
+## 1z. The CSP, and a remainder this document invented (2026-09-08)
+
+### The header that did not exist
+
+There was no `Content-Security-Policy` anywhere: no header, no `helmet`, no `<meta http-equiv>`.
+The string did not appear once in the repository.
+
+It mattered more here than it does in most applications, and the codebase already said so.
+`gmailWorkspaceService.ts`, written when the OAuth token was moved out of `localStorage`:
+
+> With no HTML sanitizer and no CSP in this app (see S35), that is a realistic path, so the
+> token now lives in memory only and dies with the tab.
+
+This origin renders untrusted content — inbound email text, from strangers — and holds a live
+Google credential in memory. A script injected here reads the operator's mailbox and sends as
+them. A CSP is the control that stops an injected script *loading* or *reaching* anywhere.
+
+`server/middleware/securityHeaders.ts` is mounted before anything that can answer a request, so
+a route added later is covered by default rather than by somebody remembering.
+
+**Every origin in it was taken from what the application actually loads.** The two `<script
+src>` tags in `index.html`, the Google API hosts the client calls, the sign-in popup and the
+Firebase auth iframe. Nothing from a template. The production build has no inline script —
+checked in `dist/index.html` — so **production does not permit `'unsafe-inline'` for scripts**,
+which is the concession that usually makes a policy decorative. Development does, because Vite
+injects an inline react-refresh preamble and compiles with `eval`; the two policies are a
+function of one boolean so a test can assert the production one without being in production.
+
+Two decisions worth naming because they look like mistakes:
+
+- **`style-src` permits `'unsafe-inline'`, and that is a real weakening.** React renders
+  `style={{...}}` as inline style attributes, which this directive governs. Removing it means
+  removing every inline style in the UI first. It is stated rather than quietly included.
+- **`Cross-Origin-Opener-Policy` is `same-origin-allow-popups`, not `same-origin`.** The
+  stricter value severs the opener relationship `signInWithPopup` needs to return the
+  credential, and the login hangs with no error anyone could act on. That is the most likely
+  well-meant regression here, so a test pins it.
+
+The policy is checked **against the HTML**, not against a list somebody typed: adding a
+`<script src>` from a new origin without permitting it fails a test rather than a browser
+console nobody is watching. Both `index.html` and the built `dist/index.html` are checked,
+because the source looking clean is not the artifact being clean — the lesson from the
+`gmail.send` scope that survived in the bundle after the source was fixed.
+
+### A remainder that was already closed when it was written
+
+S35 read:
+
+> **Remainder: still no CSP, and the Gmail send token is still in `localStorage`.** Severity is
+> HIGH, not MEDIUM: the stored-XSS sink would exfiltrate the live Gmail **send** credential
+> sitting in `localStorage`.
+
+The second half was **false when written**, and it is the half the severity rested on.
+
+- The token moved to memory-only in `b94c7d4`, **2026-09-06**.
+- That row was written in `a99ce83`, **2026-09-07**.
+
+A day apart. The audit recorded, as an outstanding remainder, something that had been fixed the
+day before — and then used it to argue a severity. This is precisely the failure §1's grading
+standard exists to prevent, reproduced inside the audit of that standard, for the third time in
+this document's history.
+
+**The severity stays HIGH, on ground that is actually true.** Persistence was never the only
+route: a script injected into this origin can read the in-memory token out of the running page
+and exfiltrate every rendered inbox message. The conclusion survives; the reason given for it
+did not.
+
+### What mutation testing changed
+
+Fifteen mutants, 15/15 killed — after one survivor changed the design.
+
+`server.ts` passed `securityHeaders(process.env.NODE_ENV !== 'production')`. Replacing that
+argument with a bare `true` — serving production the development policy, with `'unsafe-inline'`
+and `'unsafe-eval'` — **passed the entire gate**, because the tests exercised the function
+directly and nothing checked how the application called it.
+
+The fix was not another assertion about source text. The environment decision moved *inside* the
+middleware as a parameter default, so there is no argument at the call site left to get wrong,
+and the default is asserted by setting `NODE_ENV` and reading which policy comes out —
+including that an **unset** `NODE_ENV` yields the development policy. That is the safer of the
+two mistakes: an omitted environment gets a working page under a loose policy, rather than a
+strict policy silently breaking a local one.
+
+### What this does not do
+
+- **It is not deployed anywhere.** The header is set by this Express app; if a CDN or proxy ever
+  fronts it, that layer has to pass it through.
+- **`'unsafe-inline'` for styles remains.** A page with an XSS hole can still inject styles, and
+  CSS alone can exfiltrate some content through attribute selectors and background URLs.
+- **No `report-uri` / `report-to`.** Nothing collects violation reports, so a directive that is
+  too tight in a real browser would show up as a broken feature rather than as a report. The
+  policy was checked against what the page loads, which is not the same as having watched a
+  browser enforce it.
+- **No HTML sanitizer, still on purpose.** Content reaches readers as text; a hand-rolled
+  sanitizer that emits HTML is a known way to ship the hole it claims to close.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -3307,7 +3411,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S32 | Ambiguous provider result and reconciliation | PARTIAL | HIGH | `server/lib/providerError.ts`; `actionGateway.ts` (single classifier); `providerError.invariant.test.ts` | Detection is fixed and structural. The old test (`e.message.includes('timeout')`) matched **none** of the errors this system actually raises — including its own `HttpTimeoutError`, whose message says "timed out", not "timeout" — so the AMBIGUOUS branch never fired and timed-out sends were retryable. Now classified by type/`code`/HTTP status, with UNKNOWN resolving to AMBIGUOUS (§14). Reconciliation landed 2026-09-07 (§1r): sends carry a Message-ID derived from the idempotency key, the gateway queries the provider after an ambiguous outcome, and the three verdicts drive three behaviours — only NOT_APPLIED permits a retry. **Remainder: never exercised against a real Gmail account, and only EMAIL_SEND is reconcilable** — CALENDAR_CREATE, PAYMENT_CREATE and SIGNATURE_SEND reach the same branch and get STILL_UNKNOWN by default |
 | S33 | Webhook signature, dedupe and ordering | PARTIAL | CRITICAL | `server.ts:58`, `:62`, `:773`, `:781-782`, `:810-811`; `stripe.routes.ts:55,62-69` | Stripe verification never succeeds (body already parsed); DocuSign unverified and unauthenticated; no event ledger, no dedupe, no ordering watermark; Gmail acks 200 before processing |
 | S34 | CSV / spreadsheet formula injection on export | PARTIAL | HIGH | `src/utils/exportUtils.ts:39-40`, `:18`; `LeadsView.tsx:198`; `server.ts:112-119` | Only `"` is doubled; no neutralisation of `=`, `+`, `-`, `@`, tab or CR; columns derived from `Object.keys(data[0])`, so attacker-injected keys become columns |
-| S35 | Frontend HTML safety / rendering untrusted provider HTML | PARTIAL | HIGH | zero `dangerouslySetInnerHTML` in `src/`; `inboundPipeline.ts:65`; `db/schema.ts:116`; `index.html`; `gmailWorkspaceService.ts:44,71,161` | Landed 2026-09-07 (§1t). The absence of a sink is now an enforced control: `check-no-html-sink` (the 11th guardrail) fails on `dangerouslySetInnerHTML`, `innerHTML =`, `insertAdjacentHTML`, `document.write` and on the return of the name `sanitizedHtmlBody`. Provider HTML reaches every reader as TEXT (`htmlToText`, which drops script CONTENT rather than flattening it) and the raw form is stored under a name that says it is untrusted. No HTML sanitizer was written, on purpose: a hand-rolled one that emits HTML is a known way to ship the hole it claims to close. **Remainder: still no CSP, and the Gmail send token is still in `localStorage`.** Severity is HIGH, not MEDIUM: the stored-XSS sink would exfiltrate the live Gmail **send** credential sitting in `localStorage` |
+| S35 | Frontend HTML safety / rendering untrusted provider HTML | PARTIAL | HIGH | zero `dangerouslySetInnerHTML` in `src/`; `inboundPipeline.ts:65`; `db/schema.ts:116`; `index.html`; `gmailWorkspaceService.ts:44,71,161` | Landed 2026-09-07 (§1t). The absence of a sink is now an enforced control: `check-no-html-sink` (the 11th guardrail) fails on `dangerouslySetInnerHTML`, `innerHTML =`, `insertAdjacentHTML`, `document.write` and on the return of the name `sanitizedHtmlBody`. Provider HTML reaches every reader as TEXT (`htmlToText`, which drops script CONTENT rather than flattening it) and the raw form is stored under a name that says it is untrusted. No HTML sanitizer was written, on purpose: a hand-rolled one that emits HTML is a known way to ship the hole it claims to close. ~~**Remainder: still no CSP, and the Gmail send token is still in `localStorage`.** Severity is HIGH, not MEDIUM: the stored-XSS sink would exfiltrate the live Gmail **send** credential sitting in `localStorage`~~ **CORRECTED 2026-09-08 (§1z) — both halves of that remainder were wrong.** A CSP now exists (`server/middleware/securityHeaders.ts`), set on every response before any route can answer. And the token was **already** out of `localStorage` when this row was written: it moved to memory-only in `b94c7d4` on 2026-09-06, and this row is from `a99ce83` on 2026-09-07 — an outstanding remainder that had been closed the day before, used here to justify the severity. **Severity stays HIGH**, on the corrected ground: a script injected into this origin can still read the in-memory token out of the running page and exfiltrate every rendered inbox message. Persistence was never the only route |
 | S36 | Rate limits and quotas | PARTIAL | CRITICAL | `package.json:16-37`; `server.ts:58,60-67,337`; `auth.ts:17-21`; `geminiClient.ts:113-143` | No limiter of any kind; anonymous callers admitted as `preview_uid`; expensive Gemini endpoints share the same (absent) protection as reads; no 429 anywhere |
 | S37 | AI and provider cost control | PARTIAL | CRITICAL | `workflowBudgets.ts:10-17` vs `aiSafety.service.ts:13-20`; `inboundPipeline.ts:117`; `salesDecisionEngine.ts:35-40` | Two conflicting budget definitions; the one call site feeds hardcoded literals so no limit can trip; no per-tenant/daily/monthly budget; the cost breaker is never tripped by any code |
 | S38 | Recovery console / safe operator tooling | PARTIAL | CRITICAL | `outbox.routes.ts:13,20-38`; `server.ts:337` vs `:560`; `killSwitch.controller.ts:15`; live probe `GET /api/outbox` → 500 | **There is no operator tooling — there is operator-tooling-shaped UI.** The console reads a store the queue does not live in; the kill switch is a stub that returns no `circuitBreaker` field, so the panel crashes; there is no retry, requeue or dead-letter of any kind; operator actions are unaudited and unauthenticated |

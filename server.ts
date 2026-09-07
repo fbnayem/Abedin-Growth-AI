@@ -13,6 +13,7 @@ import { PrivacyService } from './server/services/privacy.service';
 import { globalStore } from "./server/dataStore";
 import { store } from "./server/store";
 import { requireAuth } from "./server/middleware/auth";
+import { securityHeaders } from "./server/middleware/securityHeaders";
 import { resolveTenant } from "./server/middleware/tenant";
 import { orgScope, orgPath, isValidOrgId } from "./server/tenancy/orgScope";
 import { assertTransition, CAMPAIGN, MEETING, OPPORTUNITY } from "./server/domain/stateMachines";
@@ -108,6 +109,13 @@ async function startServer() {
   // every error body, so a user reporting a failure can be traced to a log line without being
   // asked to reproduce it.
   app.use(requestId);
+
+  // S35 — Security headers, including the Content-Security-Policy this application did not
+  // have. Mounted here, before anything that can answer a request, so a route added later is
+  // covered by default rather than by somebody remembering. `server/middleware/securityHeaders.ts`
+  // records which origin each directive exists for and why COOP is `same-origin-allow-popups`
+  // rather than `same-origin` — the stricter value silently breaks Google sign-in.
+  app.use(securityHeaders());
 
   app.use('/api/signature/webhook', express.raw({ type: '*/*' }));
   app.use(express.json());
