@@ -2,8 +2,8 @@
 // dotenv.config() at evaluation time, guaranteeing .env has been loaded before any flag is
 // read, no matter how this gateway is reached. See server/config/safeMode.ts.
 import { isRealActionEnabled } from '../config/safeMode';
-import { firestore } from '../firebase';
-import { collection, doc, getDoc, getDocs, setDoc, query, where } from 'firebase/firestore';
+import { store } from '../store';
+import { collection, doc, getDoc, getDocs, setDoc, query, where } from '../store';
 import { gmailService } from '../services/gmail.service';
 import { outreachPolicyService } from '../policies/outreachPolicy';
 import { fetchWithTimeout } from '../lib/httpClient';
@@ -429,7 +429,7 @@ export class ActionGateway {
     request: ActionRequest,
     capability: Capability
   ): Promise<ActionResult | null> {
-    if (!firestore) {
+    if (!store) {
       return {
         success: false,
         errorCode: 'CAPABILITY_NOT_GRANTED',
@@ -440,7 +440,7 @@ export class ActionGateway {
     try {
       const snap = await getDocs(
         query(
-          collection(firestore, 'oauth_connections'),
+          collection(store, 'oauth_connections'),
           where('organizationId', '==', request.organizationId)
         )
       );
@@ -519,9 +519,9 @@ export class ActionGateway {
   }
 
   private async checkHumanOwnershipLock(orgId: string, conversationId: string): Promise<boolean> {
-    if (!firestore) return false;
+    if (!store) return false;
     try {
-      const docSnap = await getDoc(doc(firestore, orgPath(orgId, 'conversations'), conversationId));
+      const docSnap = await getDoc(doc(store, orgPath(orgId, 'conversations'), conversationId));
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data?.autonomyPausedByHuman) {
@@ -536,9 +536,9 @@ export class ActionGateway {
   }
 
   private async logAction(actionId: string, status: string, request: ActionRequest, resultDetails?: any) {
-    if (!firestore) return;
+    if (!store) return;
     try {
-      await setDoc(doc(firestore, orgPath(request.organizationId, 'actionLogs'), actionId), {
+      await setDoc(doc(store, orgPath(request.organizationId, 'actionLogs'), actionId), {
         actionId,
         status,
         actionType: request.actionType,
@@ -584,7 +584,7 @@ export class ActionGateway {
         // check for one tenant was therefore answered from another tenant's contact records:
         // an unknown recipient could look consented, and a suppressed one could look clear.
         const contactSnap = await getDoc(
-          doc(firestore, orgPath(request.organizationId, 'contacts'), request.payload.contactId)
+          doc(store, orgPath(request.organizationId, 'contacts'), request.payload.contactId)
         );
         if (!contactSnap.exists()) {
             const reason =
@@ -709,9 +709,9 @@ export class ActionGateway {
             return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
         }
 
-        if (!firestore) return { success: false, error: 'Firestore not initialized' };
+        if (!store) return { success: false, error: 'Datastore not initialized' };
         // Fetch oauth token for organization
-        const q = query(collection(firestore, 'oauth_connections'), where('organizationId', '==', request.organizationId));
+        const q = query(collection(store, 'oauth_connections'), where('organizationId', '==', request.organizationId));
         const oauthsSnap = await getDocs(q);
         // P0.8 — This used to default to the literal 'mock_token' and, on finding it, RETURN
         // SUCCESS with a locally-minted `sim_email_<timestamp>` id. Because server.ts wrote
@@ -723,7 +723,11 @@ export class ActionGateway {
         oauthsSnap.forEach(doc => {
             const d = doc.data();
             if (d.provider === 'gmail' || d.provider === 'GMAIL') {
-                accessToken = d.accessToken ?? null;
+                // Narrowed rather than cast. Under the Firestore SDK this was `any`, so a
+                // token stored as a number or an object was assigned here and then compared
+                // against the string 'mock_token' — a comparison that could never match, on a
+                // value that could never work. A non-string credential is no credential.
+                accessToken = typeof d.accessToken === 'string' ? d.accessToken : null;
             }
         });
 
@@ -936,9 +940,9 @@ export class ActionGateway {
    * and it belongs in one place where the accepted spellings are written down once.
    */
   private async findGoogleAccessToken(organizationId: string): Promise<string | null> {
-    if (!firestore) return null;
+    if (!store) return null;
     const q = query(
-      collection(firestore, 'oauth_connections'),
+      collection(store, 'oauth_connections'),
       where('organizationId', '==', organizationId)
     );
     const snap = await getDocs(q);
@@ -947,7 +951,7 @@ export class ActionGateway {
       const row = d.data();
       const provider = typeof row.provider === 'string' ? row.provider.toLowerCase() : '';
       if (provider === 'gmail' || provider === 'google' || provider === 'google-calendar') {
-        accessToken = row.accessToken ?? null;
+        accessToken = typeof row.accessToken === 'string' ? row.accessToken : null;
       }
     });
     // P0.8 — a fabricated token is not a token. `'mock_token'` is named explicitly because

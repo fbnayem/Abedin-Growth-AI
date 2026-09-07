@@ -37,8 +37,60 @@ function getTableConfigSafe(value: any) {
   }
 }
 
-/** `organizations` IS the tenant, so it does not carry a reference to one. */
-const TENANT_EXEMPT = new Set(['organizations']);
+/**
+ * `organizations` IS the tenant, so it does not carry a reference to one.
+ *
+ * `documents` is exempt for a different reason, and the difference is worth stating rather
+ * than hiding in a set literal. It holds the document collections that moved out of Firestore,
+ * addressed by path. Most of those paths are tenant-scoped and its `org_id` is DERIVED from
+ * the path rather than passed alongside it — so the column cannot disagree with the row it
+ * describes, which is a stronger property than the FK this rule checks for.
+ *
+ * It is nullable because three collections legitimately have no tenant: `oauth_connections`,
+ * `system_settings`, and `organizations` itself. It carries no foreign key because the
+ * `organizations` collection would reference itself at bootstrap.
+ *
+ * Waiving the rule without replacing it would be the hole this file exists to close, so the
+ * property is proved instead in `documents carries a derived tenant` below, and the derivation
+ * itself in `store.invariant.test.ts`.
+ */
+const TENANT_EXEMPT = new Set(['organizations', 'documents']);
+
+describe('§4 — documents carries a derived tenant, since it is exempt from the FK rule', () => {
+  const documents = tables.find(([, tbl]) => getTableConfigSafe(tbl)?.name === 'documents');
+
+  it('the table is actually in the schema', () => {
+    // Without this the three assertions below pass vacuously if the export is ever renamed,
+    // which would silently restore the exemption with nothing standing in its place.
+    expect(documents, 'no `documents` table in schema.ts').toBeDefined();
+  });
+
+  it('has an org_id column', () => {
+    const config = getTableConfigSafe(documents![1])!;
+    const column = config.columns.find((c) => c.name === 'org_id');
+    expect(column, 'documents has no org_id column').toBeDefined();
+  });
+
+  it('org_id is nullable, because three collections have no tenant', () => {
+    // Asserted rather than assumed: making it NOT NULL would look like tightening and would
+    // in fact break `oauth_connections`, `system_settings` and `organizations`, which are
+    // top-level and tenantless by construction.
+    const config = getTableConfigSafe(documents![1])!;
+    const column = config.columns.find((c) => c.name === 'org_id')!;
+    expect(column.notNull).toBe(false);
+  });
+
+  it('org_id is indexed, so a tenant question can be asked of the real database', () => {
+    // The point of storing the tenant as a column rather than matching a path prefix is that
+    // `WHERE org_id <> $1` is a question SQL can answer. An unindexed column makes that
+    // question too slow to ask on a real table, and a check nobody runs is not a check.
+    const config = getTableConfigSafe(documents![1])!;
+    const indexed = config.indexes.some((i) =>
+      i.config.columns.some((c: any) => c.name === 'org_id')
+    );
+    expect(indexed, 'documents.org_id is not indexed').toBe(true);
+  });
+});
 
 describe('§4 — every tenant-owned table carries the tenant, NOT NULL', () => {
   it('found the schema', () => {

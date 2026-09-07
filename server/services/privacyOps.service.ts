@@ -1,12 +1,12 @@
-import { firestore } from '../firebase';
+import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
-import { collection, getDocs, doc, deleteDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, updateDoc } from '../store';
 
 export class PrivacyOpsService {
   // R. PRIVACY OPERATIONS
   async anonymizeContact(orgId: string, contactId: string) {
-    if (!firestore) return;
-    const contactRef = doc(firestore, orgPath(orgId, 'contacts'), contactId);
+    if (!store) return;
+    const contactRef = doc(store, orgPath(orgId, 'contacts'), contactId);
     
     // Anonymize PII
     await updateDoc(contactRef, {

@@ -1,4 +1,4 @@
-import { firestore } from '../firebase';
+import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
 import { assertTransition, OUTBOX_JOB } from '../domain/stateMachines';
 import { OUTBOX_PAYLOAD_VERSION } from '../domain/outboxEnvelope';
@@ -21,7 +21,7 @@ import {
   updateDoc,
   runTransaction,
   orderBy,
-} from 'firebase/firestore';
+} from '../store';
 
 /**
  * P0.7 / P0.9 — The outbox queue.
@@ -91,13 +91,13 @@ export interface OutboxPayload {
 }
 
 function outboxCollection(organizationId: string) {
-  if (!firestore) return null;
-  return collection(firestore, orgPath(organizationId, 'outbox'));
+  if (!store) return null;
+  return collection(store, orgPath(organizationId, 'outbox'));
 }
 
 function outboxDoc(organizationId: string, id: string) {
-  if (!firestore) return null;
-  return doc(firestore, orgPath(organizationId, 'outbox'), id);
+  if (!store) return null;
+  return doc(store, orgPath(organizationId, 'outbox'), id);
 }
 
 /**
@@ -109,8 +109,8 @@ function outboxDoc(organizationId: string, id: string) {
  * inferring.
  */
 function operatorActionsCollection(organizationId: string) {
-  if (!firestore) return null;
-  return collection(firestore, orgPath(organizationId, 'operatorActions'));
+  if (!store) return null;
+  return collection(store, orgPath(organizationId, 'operatorActions'));
 }
 
 /** Exponential backoff with a ceiling, so a failing provider is not hammered. */
@@ -146,7 +146,7 @@ export class OutboxService {
     heldReason?: string
   ) {
     const outboxRef = outboxCollection(organizationId);
-    if (!outboxRef || !firestore) return null;
+    if (!outboxRef || !store) return null;
     try {
       // Idempotency check. NOTE: this is a read-then-write and is therefore racy under
       // concurrency; the durable guarantee comes from using the idempotency key as the
@@ -212,7 +212,7 @@ export class OutboxService {
     workerId = 'outbox-worker'
   ): Promise<any[]> {
     const outboxRef = outboxCollection(organizationId);
-    if (!outboxRef || !firestore) return [];
+    if (!outboxRef || !store) return [];
 
     let candidates: any[] = [];
     try {
@@ -237,7 +237,7 @@ export class OutboxService {
       if (!ref) continue;
 
       try {
-        const won = await runTransaction(firestore, async (tx) => {
+        const won = await runTransaction(store, async (tx) => {
           const fresh = await tx.get(ref);
           if (!fresh.exists()) return null;
           const data: any = fresh.data();
@@ -291,7 +291,7 @@ export class OutboxService {
    */
   async reapExpiredLeases(organizationId: string): Promise<number> {
     const outboxRef = outboxCollection(organizationId);
-    if (!outboxRef || !firestore) return 0;
+    if (!outboxRef || !store) return 0;
 
     let reaped = 0;
     try {
@@ -349,10 +349,10 @@ export class OutboxService {
    */
   async markFailed(organizationId: string, id: string, error: string, terminal = false) {
     const ref = outboxDoc(organizationId, id);
-    if (!ref || !firestore) return;
+    if (!ref || !store) return;
 
     try {
-      await runTransaction(firestore, async (tx) => {
+      await runTransaction(store, async (tx) => {
         const fresh = await tx.get(ref);
         if (!fresh.exists()) return;
         const data: any = fresh.data();
@@ -434,11 +434,11 @@ export class OutboxService {
     attribution: Attribution
   ): Promise<{ ok: true } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
     const ref = outboxDoc(organizationId, id);
-    if (!ref || !firestore) {
+    if (!ref || !store) {
       return { ok: false, code: 'NOT_FOUND', message: 'Datastore unavailable.' };
     }
     try {
-      return await runTransaction(firestore, async (tx) => {
+      return await runTransaction(store, async (tx) => {
         const snap = await tx.get(ref);
         if (!snap.exists()) {
           return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };
@@ -495,11 +495,11 @@ export class OutboxService {
     reason: string
   ): Promise<{ ok: true } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
     const ref = outboxDoc(organizationId, id);
-    if (!ref || !firestore) {
+    if (!ref || !store) {
       return { ok: false, code: 'NOT_FOUND', message: 'Datastore unavailable.' };
     }
     try {
-      return await runTransaction(firestore, async (tx) => {
+      return await runTransaction(store, async (tx) => {
         const snap = await tx.get(ref);
         if (!snap.exists()) {
           return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };
@@ -600,11 +600,11 @@ export class OutboxService {
     reason: string
   ): Promise<{ ok: true; toStatus: string } | { ok: false; code: 'NOT_FOUND' | 'ILLEGAL_TRANSITION'; message: string }> {
     const ref = outboxDoc(organizationId, id);
-    if (!ref || !firestore) {
+    if (!ref || !store) {
       return { ok: false, code: 'NOT_FOUND', message: 'Datastore unavailable.' };
     }
     try {
-      return await runTransaction(firestore, async (tx) => {
+      return await runTransaction(store, async (tx) => {
         const snap = await tx.get(ref);
         if (!snap.exists()) {
           return { ok: false as const, code: 'NOT_FOUND' as const, message: 'No such outbox job.' };

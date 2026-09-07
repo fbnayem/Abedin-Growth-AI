@@ -1,6 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
-import { collection, doc, setDoc } from 'firebase/firestore';
-import { firestore } from '../firebase';
+import { collection, doc, setDoc } from '../store';
+import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
 import type { AIRunLog } from '../../shared/domain/models';
 import type { ModelCallRecord } from './modelCallLog';
@@ -190,7 +190,7 @@ function categoryOf(calls: readonly ModelCallRecord[]): 'FAST' | 'SMART' | 'DEEP
 export async function writeRunLog(input: RunLogInput): Promise<RunLogOutcome> {
   const row = buildRunLog(input);
 
-  if (!firestore) {
+  if (!store) {
     console.error(
       `[runLog] Datastore unavailable; run ${row.id} for organisation ${input.organizationId} ` +
         'was NOT recorded. The reply proceeded, but this run is not reproducible.'
@@ -199,7 +199,7 @@ export async function writeRunLog(input: RunLogInput): Promise<RunLogOutcome> {
   }
 
   try {
-    await setDoc(doc(collection(firestore, orgPath(input.organizationId, 'ai_run_logs')), row.id), row);
+    await setDoc(doc(collection(store, orgPath(input.organizationId, 'ai_run_logs')), row.id), row);
     return { ok: true, id: row.id };
   } catch (e: any) {
     // Loud, because a run log that fails silently is indistinguishable from the writer that

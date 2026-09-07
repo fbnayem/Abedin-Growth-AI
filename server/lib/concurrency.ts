@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
-import { runTransaction, type DocumentReference } from 'firebase/firestore';
-import { firestore } from '../firebase';
+import { runTransaction, type DocumentReference } from '../store';
+import { store } from '../store';
 import { sendError } from './errors';
 
 /**
@@ -33,7 +33,9 @@ import { sendError } from './errors';
  * -------------
  * Every mutable document carries `version`, an integer that increments on each write. A
  * mutation states the version it believes it is updating; the comparison and the write happen
- * inside one Firestore transaction, so nothing can interleave between them. A mismatch is a
+ * inside one SERIALIZABLE transaction, so nothing can interleave between them. (It was a
+ * Firestore transaction until 2026-09-08; PostgreSQL detects the same read-write conflict
+ * through SSI and aborts the same way — see `server/store/index.ts`.) A mismatch is a
  * 409 carrying the current version, which is enough for a client to re-read, re-apply and
  * retry.
  *
@@ -149,12 +151,12 @@ export async function mutateWithVersion<T extends Record<string, unknown>>(
   produceNext: (current: T | null) => T,
   options: { requireExisting?: boolean } = {}
 ): Promise<MutationOutcome<T>> {
-  if (!firestore) {
+  if (!store) {
     return { ok: false, code: 'STORE_UNAVAILABLE', message: 'Datastore unavailable.' };
   }
 
   try {
-    return await runTransaction(firestore, async (tx) => {
+    return await runTransaction(store, async (tx) => {
       const snap = await tx.get(ref);
       const exists = snap.exists();
       const current = exists ? (snap.data() as T) : null;

@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
-import { doc, getDoc } from 'firebase/firestore';
-import { firestore } from '../firebase';
+import { doc, getDoc } from '../store';
+import { store } from '../store';
 import { sendError, type ErrorCode } from '../lib/errors';
 import {
   attachTenant,
@@ -182,7 +182,7 @@ export async function checkMembershipRevoked(
   orgId: string,
   uid: string
 ): Promise<RevocationOutcome> {
-  if (!firestore) {
+  if (!store) {
     return {
       revoked: true,
       code: 'TENANT_REVOCATION_UNVERIFIABLE',
@@ -190,7 +190,7 @@ export async function checkMembershipRevoked(
     };
   }
   try {
-    const snap = await getDoc(doc(firestore, orgPath(orgId, 'members'), uid));
+    const snap = await getDoc(doc(store, orgPath(orgId, 'members'), uid));
     if (!snap.exists()) return { revoked: false };
     const status = (snap.data() as any)?.status;
     if (status === undefined || status === 'ACTIVE') return { revoked: false };

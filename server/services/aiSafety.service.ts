@@ -1,6 +1,6 @@
-import { firestore } from '../firebase';
+import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc } from '../store';
 
 export interface WorkflowBudget {
   maxAgentStepsPerReply: number;
@@ -24,11 +24,15 @@ export class AiSafetyService {
   
   // D. STALE DRAFT PROTECTION
   async checkStaleDraft(orgId: string, conversationId: string, draftVersionAtGeneration: number): Promise<boolean> {
-    if (!firestore) return false;
-    const convRef = doc(firestore, orgPath(orgId, 'conversations'), conversationId);
+    if (!store) return false;
+    const convRef = doc(store, orgPath(orgId, 'conversations'), conversationId);
     const snap = await getDoc(convRef);
     if (!snap.exists()) return false;
-    const currentVersion = snap.data().inboundMessageVersion || 0;
+    // The store returns `unknown` where the SDK returned `any`. Coerced here rather than
+    // compared loosely: `"6" > 5` was true by string-to-number coercion and `{} > 5` was
+    // false, so a malformed stored version silently decided whether a draft was stale.
+    const raw = Number(snap.data()?.inboundMessageVersion);
+    const currentVersion = Number.isFinite(raw) ? raw : 0;
     
     // If newer inbound message arrived, invalidate draft
     return currentVersion > draftVersionAtGeneration;
@@ -36,8 +40,8 @@ export class AiSafetyService {
 
   // P. HUMAN OWNERSHIP LOCK
   async setHumanOwnershipLock(orgId: string, conversationId: string, isPaused: boolean) {
-    if (!firestore) return;
-    const convRef = doc(firestore, orgPath(orgId, 'conversations'), conversationId);
+    if (!store) return;
+    const convRef = doc(store, orgPath(orgId, 'conversations'), conversationId);
     await updateDoc(convRef, {
       autonomyPausedByHuman: isPaused,
       pausedAt: isPaused ? Date.now() : null

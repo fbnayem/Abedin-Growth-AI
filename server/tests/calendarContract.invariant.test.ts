@@ -46,14 +46,8 @@ void _idempotencyKeyIsRequired;
 // capabilityPreflight.invariant.test.ts.
 // ---------------------------------------------------------------------------
 let oauthDocs: Record<string, unknown>[] = [];
-let firestoreAvailable = true;
+let storeAvailable = true;
 
-vi.mock('../firebase', () => ({
-  get firestore() {
-    return firestoreAvailable ? {} : null;
-  },
-  firebaseAuth: null,
-}));
 
 let realActionsEnabled = true;
 vi.mock('../config/safeMode', () => ({
@@ -62,7 +56,10 @@ vi.mock('../config/safeMode', () => ({
   safeModeSnapshot: () => ({}),
 }));
 
-vi.mock('firebase/firestore', () => ({
+vi.mock('../store', () => ({
+  get store() {
+    return storeAvailable ? {} : null;
+  },
   collection: (_db: unknown, path: string) => ({ path }),
   query: (ref: any) => ref,
   where: (field: string, op: string, value: unknown) => ({ field, op, value }),
@@ -144,7 +141,7 @@ describe('S31 — free/busy reports busy, and the create request count is zero',
     oauthDocs = [
       { provider: 'gmail', scopes: [CALENDAR_SCOPE], status: 'ACTIVE', expiresAt: null, accessToken: 'real-token' },
     ];
-    firestoreAvailable = true;
+    storeAvailable = true;
     realActionsEnabled = true;
     availabilityAnswer = { availability: 'FREE', reason: 'stub' };
     availabilityThrows = null;

@@ -16,16 +16,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 let membershipDocs: Record<string, any> = {};
 let membershipShouldThrow = false;
-let firestoreAvailable = true;
+let storeAvailable = true;
 
-vi.mock('../firebase', () => ({
-  get firestore() {
-    return firestoreAvailable ? {} : null;
+
+vi.mock('../store', () => ({
+  get store() {
+    return storeAvailable ? {} : null;
   },
-  firebaseAuth: null,
-}));
-
-vi.mock('firebase/firestore', () => ({
   doc: (_db: unknown, path: string, id: string) => ({ path: `${path}/${id}` }),
   getDoc: async (ref: any) => {
     if (membershipShouldThrow) throw new Error('datastore unavailable');
@@ -78,7 +75,7 @@ const req = (over: any = {}) => ({ headers: {}, user: { uid: 'u1' }, ...over });
 beforeEach(() => {
   membershipDocs = {};
   membershipShouldThrow = false;
-  firestoreAvailable = true;
+  storeAvailable = true;
   delete process.env.DEV_DEFAULT_ORG_ID;
   delete process.env.NODE_ENV;
 });
@@ -280,7 +277,7 @@ describe('§26 — the datastore may revoke, never grant', () => {
   });
 
   it('FAILS CLOSED when the datastore is unavailable entirely', async () => {
-    firestoreAvailable = false;
+    storeAvailable = false;
     const outcome = await checkMembershipRevoked('acme', 'u1');
     expect(outcome.revoked).toBe(true);
   });

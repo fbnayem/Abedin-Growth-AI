@@ -28,10 +28,10 @@
  * because a job that is dead-lettered for being malformed should stay dead-lettered rather than
  * gain a version that makes it look executable.
  */
-import { firestore } from '../server/firebase';
+import { store } from '../server/store';
 import { orgPath } from '../server/tenancy/orgScope';
 import { OUTBOX_PAYLOAD_VERSION, outboxPayloadV1 } from '../server/domain/outboxEnvelope';
-import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc } from '../server/store';
 import 'dotenv/config';
 
 const CONFIRM = process.argv.includes('--confirm');
@@ -44,12 +44,12 @@ if (!ORG || ORG.startsWith('--')) {
 }
 
 (async () => {
-  if (!firestore) {
-    console.error('REFUSING: no Firestore connection.');
+  if (!store) {
+    console.error('REFUSING: no database connection.');
     process.exit(2);
   }
 
-  const snap = await getDocs(collection(firestore, orgPath(ORG, 'outbox')));
+  const snap = await getDocs(collection(store, orgPath(ORG, 'outbox')));
   console.log(`organisation ${ORG}: ${snap.size} job(s)`);
 
   const toStamp: string[] = [];
@@ -92,7 +92,7 @@ if (!ORG || ORG.startsWith('--')) {
 
   let stamped = 0;
   for (const id of toStamp) {
-    await updateDoc(doc(firestore, orgPath(ORG, 'outbox'), id), {
+    await updateDoc(doc(store, orgPath(ORG, 'outbox'), id), {
       schemaVersion: OUTBOX_PAYLOAD_VERSION,
       // Recorded so the row says a person decided this, rather than looking like it was
       // enqueued by a build that stamped versions.

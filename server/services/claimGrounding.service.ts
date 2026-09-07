@@ -1,5 +1,5 @@
-import { firestore } from '../firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { store } from '../store';
+import { collection, getDocs, query, where } from '../store';
 
 export interface ApprovedClaim {
   id: string;
@@ -12,7 +12,7 @@ export interface ApprovedClaim {
 export class ClaimGroundingService {
   // L. CLAIM-LEVEL GROUNDING
   async getApprovedClaims(orgId: string, topics: string[]): Promise<ApprovedClaim[]> {
-    if (!firestore || topics.length === 0) return [];
+    if (!store || topics.length === 0) return [];
     
     // In a real implementation this would fetch from a verified CMS or vector DB.
     // For now we mock the interface.

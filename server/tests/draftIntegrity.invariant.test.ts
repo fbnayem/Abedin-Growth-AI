@@ -17,15 +17,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 let mockVersions: Record<string, number> = {};
 let versionShouldThrow = false;
 
-vi.mock('../firebase', () => ({
-  firestore: {},
-  firebaseAuth: null,
-}));
 
 // Keyed on the FULL path, not the document id. Keying on the id alone could not express
 // two tenants each holding a conversation called 'conv_1', which is exactly the collision
 // P1.1 has to survive.
-vi.mock('firebase/firestore', () => ({
+vi.mock('../store', () => ({
+  store: {},
   doc: (_db: unknown, path: string, id: string) => ({ path: `${path}/${id}`, id }),
   getDoc: async (ref: any) => {
     if (versionShouldThrow) throw new Error('datastore unavailable');

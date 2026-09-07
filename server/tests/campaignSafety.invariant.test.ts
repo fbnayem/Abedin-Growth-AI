@@ -264,7 +264,7 @@ describe('5. the gateway consults it before dispatching', () => {
     expect(check).toBeGreaterThan(-1);
 
     const tokenFetch = gateway.indexOf(
-      "const q = query(collection(firestore, 'oauth_connections')"
+      "const q = query(collection(store, 'oauth_connections')"
     );
     expect(tokenFetch).toBeGreaterThan(-1);
     expect(check).toBeLessThan(tokenFetch);

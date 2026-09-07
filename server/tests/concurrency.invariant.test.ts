@@ -23,10 +23,6 @@ let transactionShouldThrow = false;
 /** Fires once, between the transaction's read and its write, to simulate a real interleave. */
 let interleave: (() => void) | null = null;
 
-vi.mock('../firebase', () => ({
-  firestore: {},
-  firebaseAuth: null,
-}));
 
 /**
  * A Firestore transaction double that actually behaves like one.
@@ -36,7 +32,8 @@ vi.mock('../firebase', () => ({
  * an interleaving-writer test pass while proving nothing, so reads are tracked and the commit
  * is checked against them — the same guarantee the real store gives.
  */
-vi.mock('firebase/firestore', () => ({
+vi.mock('../store', () => ({
+  store: {},
   runTransaction: async (_db: unknown, fn: any) => {
     if (transactionShouldThrow) throw new Error('aborted: too much contention');
 

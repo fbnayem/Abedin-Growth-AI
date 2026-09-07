@@ -8,8 +8,8 @@ import {
   limit as fsLimit,
   runTransaction,
   type DocumentReference,
-} from 'firebase/firestore';
-import { firestore } from '../firebase';
+} from '../store';
+import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
 import { accountDocId, accountDomain, contactDocId, tryContactDocId } from './identity';
 import { planContactMerge, type MergeableContact, type MergeRefusal } from '../domain/contactMerge';
@@ -63,7 +63,7 @@ export async function createContactIfAbsent(
   email: unknown,
   buildDocument: (id: string) => Record<string, unknown>
 ): Promise<ContactCreateOutcome> {
-  if (!firestore) {
+  if (!store) {
     return { ok: false, code: 'STORE_UNAVAILABLE', message: 'Datastore unavailable.' };
   }
 
@@ -78,9 +78,9 @@ export async function createContactIfAbsent(
     };
   }
 
-  const ref = doc(firestore, orgPath(orgId, 'contacts'), id);
+  const ref = doc(store, orgPath(orgId, 'contacts'), id);
 
-  return await runTransaction(firestore, async (tx) => {
+  return await runTransaction(store, async (tx) => {
     const snap = await tx.get(ref);
     if (snap.exists()) {
       return {
@@ -115,7 +115,7 @@ export async function ensureAccount(
   email: unknown,
   seed: Record<string, unknown> = {}
 ): Promise<AccountOutcome> {
-  if (!firestore) {
+  if (!store) {
     return { ok: false, code: 'STORE_UNAVAILABLE', message: 'Datastore unavailable.' };
   }
 
@@ -131,9 +131,9 @@ export async function ensureAccount(
     };
   }
 
-  const ref = doc(firestore, orgPath(orgId, 'accounts'), id);
+  const ref = doc(store, orgPath(orgId, 'accounts'), id);
 
-  return await runTransaction(firestore, async (tx) => {
+  return await runTransaction(store, async (tx) => {
     const snap = await tx.get(ref);
     if (snap.exists()) return { ok: true as const, id, created: false };
     const now = new Date().toISOString();
@@ -188,7 +188,7 @@ export async function mergeContacts(
   duplicateId: string,
   options: { mergedBy?: string; resume?: boolean } = {}
 ): Promise<MergeOutcome> {
-  if (!firestore) {
+  if (!store) {
     return { ok: false, code: 'STORE_UNAVAILABLE', message: 'Datastore unavailable.' };
   }
 
@@ -202,7 +202,7 @@ export async function mergeContacts(
   for (const target of CONTACT_REFERENCES) {
     const snap = await getDocs(
       query(
-        collection(firestore, orgPath(orgId, target.collection)),
+        collection(store, orgPath(orgId, target.collection)),
         where(target.field, '==', duplicateId),
         fsLimit(MAX_REPARENT + 1)
       )
@@ -222,11 +222,13 @@ export async function mergeContacts(
     };
   }
 
-  const survivorRef = doc(firestore, orgPath(orgId, 'contacts'), survivorId);
-  const duplicateRef = doc(firestore, orgPath(orgId, 'contacts'), duplicateId);
+  const survivorRef = doc(store, orgPath(orgId, 'contacts'), survivorId);
+  const duplicateRef = doc(store, orgPath(orgId, 'contacts'), duplicateId);
 
-  return await runTransaction(firestore, async (tx) => {
-    // Firestore requires every read before every write.
+  return await runTransaction(store, async (tx) => {
+    // Every read before every write. PostgreSQL does not require this the way Firestore did,
+    // but the ordering is still what completes the transaction's conflict set before it decides
+    // anything, so it is kept deliberately rather than left standing as a fossil.
     const [survivorSnap, duplicateSnap] = await Promise.all([
       tx.get(survivorRef),
       tx.get(duplicateRef),
@@ -303,7 +305,7 @@ export async function findDuplicateCandidates(
   email: unknown,
   options: { limit?: number } = {}
 ): Promise<{ id: string; reason: string }[]> {
-  if (!firestore) return [];
+  if (!store) return [];
   const key = tryContactDocId(email);
   if (key === null) return [];
 
@@ -312,7 +314,7 @@ export async function findDuplicateCandidates(
 
   // The exact record, if it exists. Reported rather than merged, because "already exists" is
   // an answer the caller needs, not a duplicate to resolve.
-  const exact = await getDoc(doc(firestore, orgPath(orgId, 'contacts'), key));
+  const exact = await getDoc(doc(store, orgPath(orgId, 'contacts'), key));
   if (exact.exists()) candidates.push({ id: key, reason: 'EXACT_EMAIL' });
 
   return candidates.slice(0, cap);

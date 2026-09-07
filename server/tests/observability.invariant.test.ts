@@ -323,7 +323,7 @@ describe('5. the log endpoint can actually return a log', () => {
     const pipeline = stripped('server/services/inboundPipeline.ts');
     expect(pipeline).toContain('await writeRunLog({');
     const runLog = stripped('server/lib/runLog.ts');
-    expect(runLog).toMatch(/setDoc\(\s*doc\(collection\(firestore, orgPath\(input\.organizationId, 'ai_run_logs'\)\)/);
+    expect(runLog).toMatch(/setDoc\(\s*doc\(collection\(store, orgPath\(input\.organizationId, 'ai_run_logs'\)\)/);
   });
 
   it('the status badge does not render a FAILED run in success colours', () => {

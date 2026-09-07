@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * INVARIANTS (addendum §4, §18 / P0.0).
@@ -43,31 +44,87 @@ describe('§4 — the datastore is not world-writable', () => {
   });
 });
 
-describe('P0.0 — the file records why it cannot be deployed yet', () => {
-  it('warns that the server is still an unauthenticated client-SDK caller', () => {
-    // Deploying these rules before the server moves to firebase-admin would deny the server and
-    // stop the application. That is the whole reason this has not shipped, and a reader opening
-    // this file needs it before they reach for `firebase deploy`.
-    expect(RULES).toMatch(/DO NOT DEPLOY/i);
-    expect(RULES).toMatch(/firebase-admin/);
-    expect(RULES).toMatch(/signInAnonymously/);
+describe('the rules are deployable now, and the file says what still needs a console', () => {
+  it('no longer tells the reader not to deploy', () => {
+    // This assertion is the inverse of the one it replaces, and the replaced one predicted it:
+    // "This test failing is a prompt to re-read that file, not a defect."
+    //
+    // Matched against the text with the historical paragraph removed, because that paragraph
+    // quotes the old warning in order to explain why it lifted. A check that reads the
+    // explanation as the defect teaches people to delete the explanation.
+    const withoutHistory = RULES.replace(/This block used to read[\s\S]*?open\./, '');
+    expect(withoutHistory).not.toMatch(/DO NOT DEPLOY/i);
   });
 
-  it('names credential rotation as a separate step', () => {
-    // Closing the rules does not un-publish a key that has been public.
+  it('names the three steps that are still a console action', () => {
+    // Deploying the rules, rotating the published credentials and auditing what was written
+    // while the door was open are three different jobs. Doing the first does not do the others,
+    // and the file is where somebody reaching for `firebase deploy` will look.
+    expect(RULES).toMatch(/firebase deploy --only firestore:rules/);
     expect(RULES).toMatch(/[Rr]otate/);
     expect(RULES).toMatch(/apiKey/);
+    expect(RULES).toMatch(/[Aa]udit the live Firestore/);
+  });
+
+  it('says a rules file in a repository is not a deployed rule', () => {
+    // The single most likely misreading of this change is that closing the file closed the
+    // database. It did not. Until step 1 runs, the live instance is exactly as open as it was.
+    expect(RULES).toMatch(/still world-readable and world-writable/);
   });
 });
 
-describe('P0.0 — the server is still on the client SDK, which is why the above holds', () => {
-  it('imports signInAnonymously and does not call it', () => {
-    // If this ever stops being true, the deploy warning in firestore.rules is stale and the
-    // rules may be deployable. This test failing is a prompt to re-read that file, not a defect.
+describe('what makes deny-all safe: nothing reads Firestore any more', () => {
+  /**
+   * The reason the deploy warning lifted is not that credentials arrived. It is that the
+   * dependency went away: the document collections moved to PostgreSQL, so there is no reader
+   * left for deny-all to deny.
+   *
+   * That is a property of the whole server, not of one file, so it is checked across the whole
+   * server. If any module starts talking to Firestore again, deploying these rules would stop
+   * the application — and this test failing is the warning that the file's header has gone
+   * stale again.
+   */
+  const sources = (dir: string): string[] => {
+    const out: string[] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'tests' || entry.name === 'node_modules') continue;
+        out.push(...sources(full));
+      } else if (entry.name.endsWith('.ts')) {
+        out.push(full);
+      }
+    }
+    return out;
+  };
+
+  it('scanned a meaningful number of server files', () => {
+    // A floor, so a broken walk cannot report "no offenders" from an empty list.
+    expect(sources('server').length).toBeGreaterThan(40);
+  });
+
+  it('no server module imports firebase/firestore', () => {
+    const offenders = [...sources('server'), 'server.ts'].filter((f) =>
+      readFileSync(f, 'utf8').includes('firebase/firestore')
+    );
+    expect(offenders, `still on the Firestore SDK: ${offenders.join(', ')}`).toEqual([]);
+  });
+
+  it('server/firebase.ts initialises authentication and nothing else', () => {
     const firebase = readFileSync('server/firebase.ts', 'utf8');
-    const active = firebase.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
-    expect(active).toContain('signInAnonymously');
-    expect(active).not.toMatch(/signInAnonymously\s*\(/);
-    expect(active).toContain('firebase/firestore');
+    const active = firebase
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    expect(active).not.toContain('firebase/firestore');
+    expect(active).not.toContain('getFirestore');
+    expect(active).not.toContain('signInAnonymously');
+    expect(active).toContain('firebase-admin/auth');
+  });
+
+  it('the browser bundle still never imports firestore either', () => {
+    // True before this change and still true. Stated because the rules header rests on it:
+    // if a client ever did read Firestore directly, deny-all would break the product.
+    const client = readFileSync('src/lib/firebase.ts', 'utf8');
+    expect(client).not.toContain('firebase/firestore');
   });
 });

@@ -8,10 +8,10 @@ import { getCircuitBreakerState, setCircuitBreaker } from './server/services/cir
 import { isFabricatedProviderId, actionGateway, ActionType } from './server/gateway/actionGateway';
 import { verifyDocuSignSignature, verifyPubSubToken } from './server/services/webhookVerification.service';
 import { standardApiLimiter, aiOperationLimiter, webhookLimiter } from './server/middleware/rateLimit';
-import { collection, getDocs, getDoc, addDoc, doc, setDoc, updateDoc, query, where, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, getDoc, addDoc, doc, setDoc, updateDoc, query, where, orderBy, limit } from './server/store';
 import { PrivacyService } from './server/services/privacy.service';
 import { globalStore } from "./server/dataStore";
-import { firestore } from "./server/firebase";
+import { store } from "./server/store";
 import { requireAuth } from "./server/middleware/auth";
 import { resolveTenant } from "./server/middleware/tenant";
 import { orgScope, orgPath, isValidOrgId } from "./server/tenancy/orgScope";
@@ -185,7 +185,7 @@ for (const aiPath of [
       // operator-facing indicator and the enforcement point are now the same read.
       const flags = safeModeSnapshot();
       const checks = {
-        databaseConnectivity: !!firestore,
+        databaseConnectivity: !!store,
         actionGatewayLoaded: true, // We import it statically
         safeRebuildMode: {
           email: flags.REAL_EMAIL_SEND_ENABLED,
@@ -232,7 +232,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/leads", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'contacts')));
+      const snap = await getDocs(collection(store, orgPath(orgScope(req), 'contacts')));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       // filter for leads
@@ -443,7 +443,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/inbox", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'conversations')));
+      const snap = await getDocs(collection(store, orgPath(orgScope(req), 'conversations')));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
@@ -470,14 +470,14 @@ app.get("/api/health", (req: Request, res: Response) => {
         category: input.category ?? null,
         tags: input.tags ?? [],
       };
-      await addDoc(collection(firestore, orgPath(orgScope(req), 'knowledge')), payload);
+      await addDoc(collection(store, orgPath(orgScope(req), 'knowledge')), payload);
       res.json(payload);
     } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.get("/api/knowledge", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'knowledge')));
+      const snap = await getDocs(collection(store, orgPath(orgScope(req), 'knowledge')));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
@@ -496,7 +496,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       // one row per run, on every exit path including the failures. An empty list now means
       // no run has happened, which is a different fact from "nothing records them" — and
       // saying which is the whole reason this field is here rather than a bare array.
-      const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'ai_run_logs')), orderBy('createdAt', 'desc'), limit(50)));
+      const snap = await getDocs(query(collection(store, orgPath(orgScope(req), 'ai_run_logs')), orderBy('createdAt', 'desc'), limit(50)));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json({
@@ -515,7 +515,7 @@ app.get("/api/health", (req: Request, res: Response) => {
   app.get("/api/pipeline", async (req: Request, res: Response) => {
     try {
       // P1.3 — See /api/campaigns: the version travels with every row.
-      const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'opportunities')));
+      const snap = await getDocs(collection(store, orgPath(orgScope(req), 'opportunities')));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
@@ -535,7 +535,7 @@ app.get("/api/health", (req: Request, res: Response) => {
    * is updating unless the read gives it one.
    */
   async function readSingleton(req: Request, res: Response, collectionName: string) {
-    const ref = doc(firestore, orgPath(orgScope(req), collectionName), 'main');
+    const ref = doc(store, orgPath(orgScope(req), collectionName), 'main');
     const snap = await getDoc(ref);
     const data: any = snap.exists() ? snap.data() : {};
     const version = versionOf(data, snap.exists());
@@ -575,7 +575,7 @@ app.get("/api/health", (req: Request, res: Response) => {
     collectionName: string,
     payload: Record<string, unknown>
   ) {
-    const ref = doc(firestore, orgPath(orgScope(req), collectionName), 'main');
+    const ref = doc(store, orgPath(orgScope(req), collectionName), 'main');
     const expected = expectedVersionFrom(req);
 
     if (expected.ok === false) {
@@ -645,7 +645,7 @@ app.get("/api/health", (req: Request, res: Response) => {
       // P1.3 — Regeneration replaced the company brain blind, which is the most damaging
       // instance of the lost update in this file: the brain is stringified into every outbound
       // prompt, so silently discarding an operator's edit changes what customers are told.
-      const ref = doc(firestore, orgPath(orgScope(req), 'company_brain'), 'main');
+      const ref = doc(store, orgPath(orgScope(req), 'company_brain'), 'main');
       const expected = expectedVersionFrom(req);
       if (expected.ok === false) {
         const snap = await getDoc(ref);
@@ -740,7 +740,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/campaigns", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(collection(firestore, orgPath(orgScope(req), 'campaigns')));
+      const snap = await getDocs(collection(store, orgPath(orgScope(req), 'campaigns')));
       const items: any[] = [];
       // P1.3 — The version travels with every row. A client cannot state the version it is
       // updating unless the read gives it one, so omitting this would make the write path
@@ -765,7 +765,7 @@ app.get("/api/health", (req: Request, res: Response) => {
   const setCampaignStatus = async (req: Request, res: Response) => {
     try {
       const desired = (req.body || {}).status;
-      const docRef = doc(firestore, orgPath(orgScope(req), 'campaigns'), req.params.id);
+      const docRef = doc(store, orgPath(orgScope(req), 'campaigns'), req.params.id);
       const snap = await getDoc(docRef);
       if (!snap.exists()) {
         return sendError(req, res, 'NOT_FOUND', 'No such campaign.');
@@ -853,7 +853,7 @@ app.get("/api/health", (req: Request, res: Response) => {
    */
   const setOpportunityStage = async (req: Request, res: Response) => {
     try {
-      const docRef = doc(firestore, orgPath(orgScope(req), 'opportunities'), req.params.id);
+      const docRef = doc(store, orgPath(orgScope(req), 'opportunities'), req.params.id);
 
       // The path is tenant-scoped, so an id belonging to another organisation resolves to
       // nothing. 404, not 403: saying "forbidden" would confirm the id exists in some other
@@ -1165,33 +1165,37 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/dashboard", async (req: Request, res: Response) => {
     try {
-      if (!firestore) return sendError(req, res, 'STORE_UNAVAILABLE', 'The datastore is not available.');
+      if (!store) return sendError(req, res, 'STORE_UNAVAILABLE', 'The datastore is not available.');
       const orgId = orgScope(req);
 
-      const contactsSnap = await getDocs(collection(firestore, orgPath(orgId, 'contacts')));
+      const contactsSnap = await getDocs(collection(store, orgPath(orgId, 'contacts')));
       let qualifiedLeadsCount = 0;
       contactsSnap.forEach(doc => {
          const s = doc.data().status;
          if (s === "QUALIFIED" || s === "ENGAGED" || s === "DEMO_SCHEDULED") qualifiedLeadsCount++;
       });
 
-      const convsSnap = await getDocs(collection(firestore, orgPath(orgId, 'conversations')));
+      const convsSnap = await getDocs(collection(store, orgPath(orgId, 'conversations')));
       let positiveConversationsCount = 0;
       convsSnap.forEach(doc => {
          const s = doc.data().status;
          if (s === "ACTIVE" || s === "HUMAN_NEEDED" || s === "MEETING_REQUESTED") positiveConversationsCount++;
       });
 
-      const meetingsSnap = await getDocs(collection(firestore, orgPath(orgId, 'meetings')));
+      const meetingsSnap = await getDocs(collection(store, orgPath(orgId, 'meetings')));
       let meetingsBookedCount = 0;
       meetingsSnap.forEach(doc => {
          if (doc.data().status === "CONFIRMED") meetingsBookedCount++;
       });
 
-      const oppsSnap = await getDocs(collection(firestore, orgPath(orgId, 'opportunities')));
+      const oppsSnap = await getDocs(collection(store, orgPath(orgId, 'opportunities')));
       let pipelineValue = 0;
       oppsSnap.forEach(doc => {
-          pipelineValue += (doc.data().value || 0);
+          // `value` comes back from the store as `unknown` rather than the SDK's `any`.
+          // Coerced explicitly: a non-numeric value used to be added straight into the total,
+          // where `undefined` would have turned the whole pipeline figure into NaN.
+          const value = Number(doc.data().value);
+          pipelineValue += Number.isFinite(value) ? value : 0;
       });
 
       res.json({
@@ -1217,9 +1221,9 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/analytics/funnel", async (req: Request, res: Response) => {
     try {
-      const allContactsSnap = await getDocs(collection(firestore, orgPath(orgScope(req), 'contacts'))); const allContacts: any[] = []; allContactsSnap.forEach(d => allContacts.push(d.data()));
-      const allConvsSnap = await getDocs(collection(firestore, orgPath(orgScope(req), 'conversations'))); const allConvs: any[] = []; allConvsSnap.forEach(d => allConvs.push(d.data()));
-      const allMeetingsSnap = await getDocs(collection(firestore, orgPath(orgScope(req), 'meetings'))); const allMeetings: any[] = []; allMeetingsSnap.forEach(d => allMeetings.push(d.data()));
+      const allContactsSnap = await getDocs(collection(store, orgPath(orgScope(req), 'contacts'))); const allContacts: any[] = []; allContactsSnap.forEach(d => allContacts.push(d.data()));
+      const allConvsSnap = await getDocs(collection(store, orgPath(orgScope(req), 'conversations'))); const allConvs: any[] = []; allConvsSnap.forEach(d => allConvs.push(d.data()));
+      const allMeetingsSnap = await getDocs(collection(store, orgPath(orgScope(req), 'meetings'))); const allMeetings: any[] = []; allMeetingsSnap.forEach(d => allMeetings.push(d.data()));
 
       const discovered = allContacts.length;
       const qualified = 15; // mock complex AI score for now
@@ -1269,7 +1273,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/investors", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'contacts')), where('type', '==', 'INVESTOR')));
+      const snap = await getDocs(query(collection(store, orgPath(orgScope(req), 'contacts')), where('type', '==', 'INVESTOR')));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
@@ -1290,7 +1294,7 @@ app.get("/api/health", (req: Request, res: Response) => {
 
   app.get("/api/partners", async (req: Request, res: Response) => {
     try {
-      const snap = await getDocs(query(collection(firestore, orgPath(orgScope(req), 'contacts')), where('type', '==', 'PARTNER')));
+      const snap = await getDocs(query(collection(store, orgPath(orgScope(req), 'contacts')), where('type', '==', 'PARTNER')));
       const items: any[] = [];
       snap.forEach((d: any) => items.push(d.data()));
       res.json(items);
@@ -1376,11 +1380,11 @@ app.get("/api/health", (req: Request, res: Response) => {
         );
       }
 
-      const existing = await getDocs(query(collection(firestore, 'oauth_connections'), where('organizationId', '==', orgId), where('provider', '==', 'gmail')));
+      const existing = await getDocs(query(collection(store, 'oauth_connections'), where('organizationId', '==', orgId), where('provider', '==', 'gmail')));
       if (!existing.empty) {
         await updateDoc(existing.docs[0].ref, record);
       } else {
-        await addDoc(collection(firestore, 'oauth_connections'), { id: 'oauth_' + Date.now(), ...record });
+        await addDoc(collection(store, 'oauth_connections'), { id: 'oauth_' + Date.now(), ...record });
       }
       res.json({ success: true });
     } catch(e) {
@@ -1535,7 +1539,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         isABTestingEnabled: !!isABTestingEnabled
       };
 
-      await addDoc(collection(firestore, orgPath(orgScope(req), 'campaigns')), newCampaign);
+      await addDoc(collection(store, orgPath(orgScope(req), 'campaigns')), newCampaign);
       res.json(newCampaign);
     } catch(e: any) { sendCaught(req, res, e); }
   });
@@ -1574,7 +1578,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         nextStep: input.nextStep ?? null,
         expectedCloseDate: input.expectedCloseDate ?? null,
       };
-      await addDoc(collection(firestore, orgPath(orgScope(req), 'opportunities')), payload);
+      await addDoc(collection(store, orgPath(orgScope(req), 'opportunities')), payload);
       res.json(payload);
     } catch(e: any) {
       console.error(e);
@@ -1643,7 +1647,7 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       const endMs = startMs + duration * 60_000;
 
       // Conflict detection against existing non-cancelled meetings.
-      const existingSnap = await getDocs(collection(firestore, orgPath(orgScope(req), 'meetings')));
+      const existingSnap = await getDocs(collection(store, orgPath(orgScope(req), 'meetings')));
       const conflicts: any[] = [];
       existingSnap.forEach((d) => {
         const m: any = d.data();
@@ -1757,14 +1761,14 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
         meetUrl,
         createdAt: new Date(),
       };
-      await addDoc(collection(firestore, orgPath(orgScope(req), 'meetings')), payload);
+      await addDoc(collection(store, orgPath(orgScope(req), 'meetings')), payload);
       res.json(payload);
     } catch(e: any) { sendCaught(req, res, e); }
   });
 
   app.get("/api/meetings", async (req: Request, res: Response) => {
     try {
-      const dbMeetingsSnap = await getDocs(collection(firestore, orgPath(orgScope(req), 'meetings'))); const dbMeetings: any[] = []; dbMeetingsSnap.forEach(d => dbMeetings.push(d.data()));
+      const dbMeetingsSnap = await getDocs(collection(store, orgPath(orgScope(req), 'meetings'))); const dbMeetings: any[] = []; dbMeetingsSnap.forEach(d => dbMeetings.push(d.data()));
       const mapped = dbMeetings.map(m => ({
         id: m.id,
         contactId: m.contactId,
@@ -1896,7 +1900,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
         // P0.14 — Gate the transition on current state instead of writing CONFIRMED
         // unconditionally. Webhook delivery is duplicated, delayed and out of order, so a
         // late replay must not resurrect a meeting that has since been cancelled.
-        const meetingRef = doc(firestore, orgPath(envelopeOrgId, 'meetings'), meetingId);
+        const meetingRef = doc(store, orgPath(envelopeOrgId, 'meetings'), meetingId);
         const snap = await getDoc(meetingRef);
         if (!snap.exists()) {
           console.warn(`[signature/webhook] Meeting ${meetingId} not found; ignoring event.`);

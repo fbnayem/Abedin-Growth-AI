@@ -7,7 +7,17 @@
 
 **Revision history.** *Second pass (2026-09-06).* Applied after direct file-level verification by the orchestrator, not by the adversarial refuters — who returned zero corrections (see §6.4). Changes: six statuses downgraded `PARTIAL → NOT_STARTED` under the document's own rubric (S8, S18, S20, S31, S35, S38); S35 severity raised `MEDIUM → HIGH`; S1 corrected `PARTIAL → IMPLEMENTED_UNVERIFIED`; S19's rationale rewritten off arbitrary-host SSRF and onto the absence of fetch timeouts; four new findings added (safety-flag divergence, browser send path with a deterministic double-send, a kill switch that is worse than inert, and a mail-injection/open-relay primitive); S46's "defaults fail closed" claim corrected; S5's TLS citation and the S22/S41/S44/S45/S48 grep patterns supplied; the tally, severity counts and risk ranking recomputed; and the P0 roadmap rebuilt around a containment step that is a console action rather than a commit.
 
-*Third pass (2026-09-06), verification of the second.* The second pass was checked line-by-line against the file and the source it cites, and **three of its claims were not true when written**: the S38 downgrade had been applied to the matrix row but not to its detail heading, which still read `PARTIAL`; the S35 detail block was never added, having been dropped under a MEDIUM-severity scope rule that no longer applied once S35 became HIGH; and **the P0 roadmap had not been rebuilt at all** — the note above asserted a containment-first ordering while the document still carried the original `P0.1–P0.14`. All three are now corrected: S38's heading matches its row and its body, S35 has a full detail block, and P0 is rebuilt as `P0.0–P0.15` with the stub-deletion item demoted to P1.13 and rate-limit enforcement promoted from P3.6 to P0.5. This is recorded rather than quietly fixed because it is the document's own subject matter: a completion claim that no one checked was, once checked, false in three places — which is precisely the failure mode §1's grading standard exists to prevent, reproduced inside the audit of that standard.
+*Fourth pass (2026-09-08) — the datastore split is closed, and one premise of this document
+is now false.* Firebase is no longer a database here. The document collections moved to the
+PostgreSQL instance this system already runs, `server/firebase.ts` initialises authentication
+and nothing else, and no module in the repository imports the Firestore SDK. That falsifies a
+claim this document repeats in more than a hundred places — that the live store is Firestore
+and the PostgreSQL constraints have no writer — and it removes the dependency that made
+`firestore.rules` undeployable. **P0.6 (the Admin-SDK re-platform) is cancelled rather than
+completed:** it existed to make deny-all rules survivable, and it was blocked on credentials
+that never arrived. Removing the dependency achieved what satisfying it would have. Section 1x
+records what moved, what did not, and a defect the migration introduced and the live verifier
+caught. *Third pass (2026-09-06), verification of the second.* The second pass was checked line-by-line against the file and the source it cites, and **three of its claims were not true when written**: the S38 downgrade had been applied to the matrix row but not to its detail heading, which still read `PARTIAL`; the S35 detail block was never added, having been dropped under a MEDIUM-severity scope rule that no longer applied once S35 became HIGH; and **the P0 roadmap had not been rebuilt at all** — the note above asserted a containment-first ordering while the document still carried the original `P0.1–P0.14`. All three are now corrected: S38's heading matches its row and its body, S35 has a full detail block, and P0 is rebuilt as `P0.0–P0.15` with the stub-deletion item demoted to P1.13 and rate-limit enforcement promoted from P3.6 to P0.5. This is recorded rather than quietly fixed because it is the document's own subject matter: a completion claim that no one checked was, once checked, false in three places — which is precisely the failure mode §1's grading standard exists to prevent, reproduced inside the audit of that standard.
 
 ---
 
@@ -67,7 +77,7 @@ P0.4, P0.5, P0.7, P0.8, P0.9, P0.10, P0.11, P0.13, P0.14 and P0.15 followed. As 
 | **P0.13** Calendar conflict | The live booking path (`POST /api/meetings`) was a bare `addDoc` spreading `...req.body`, with no validation and no conflict check; the free/busy logic sat in unreachable gateway code. It now validates, projects explicit fields, refuses overlaps, and marks `providerSyncStatus: 'PENDING_CALENDAR_SYNC'` rather than implying a real booking. | Overlapping slot → **`409`, nothing written**. Adjacent slot (touching, half-open interval) → `200`. Invalid date and out-of-range duration → `400`. |
 | **P0.15** Payments | `/api/meetings/:id/process-payment` returned `{success:true}` without contacting any provider — an operator would believe a customer had paid. It now returns `501`. Stripe checkout is gated on `REAL_PAYMENT_ENABLED` **and** the durable circuit breaker before any call to Stripe. | Stub → `501` with an explanatory code. |
 
-**Still open after both batches.** **P0.0** (containment: lock the rules, rotate the committed credentials) is a console action and remains the highest-priority item — several fixes above are explicitly conditional on it, in particular P0.8's corollary that a Firestore-sourced token must not be treated as authoritative while the store is world-writable. **P0.6** (migrating ~30 handlers to the Admin SDK) is a substantial re-platform that P0.0 gates. **P0.12** (inbound-version stamping and approval digests) is partly unblocked — the store unification was its prerequisite — but the stale-draft check still compares wall-clock timestamps, which §8 forbids as the primary mechanism. And **P2** remains the binding constraint on all of it: until a test runner exists, nothing here can rise above `IMPLEMENTED_UNVERIFIED`.
+**Still open after both batches.** *(Partly superseded on 2026-09-08 — see section 1x. The code half of P0.0 is done and P0.6 is cancelled; the console half of P0.0 stands.)* **P0.0** (containment: lock the rules, rotate the committed credentials) is a console action and remains the highest-priority item — several fixes above are explicitly conditional on it, in particular P0.8's corollary that a Firestore-sourced token must not be treated as authoritative while the store is world-writable. **P0.6** (migrating ~30 handlers to the Admin SDK) is a substantial re-platform that P0.0 gates. **P0.12** (inbound-version stamping and approval digests) is partly unblocked — the store unification was its prerequisite — but the stale-draft check still compares wall-clock timestamps, which §8 forbids as the primary mechanism. And **P2** remains the binding constraint on all of it: until a test runner exists, nothing here can rise above `IMPLEMENTED_UNVERIFIED`.
 
 ---
 
@@ -185,6 +195,16 @@ The obvious fix is a grep. The obvious fix does not work: `grep -rlP "\x00"` ret
 **It does not move further, and the reason is not a technicality.** §4 is tenant integrity *at database level*. `firestore.rules` is still `allow read, write: if true`, so the datastore enforces nothing: every control described above lives in the application, and anyone with the committed `apiKey` can bypass the application entirely and read or write any organisation's data directly from a browser console. On the PostgreSQL side the constraints are declared but nothing writes through them — `DATABASE_URL` is unset and the live store is Firestore. Both halves of "at database level" are still missing.
 
 So the blocker for `VERIFIED` has **moved**, not lifted. Section 1c said `VERIFIED` was unreachable because there was no tenant path to prove. There is one now. What stands in the way today is **P0.0**: no test can prove cross-tenant isolation while the datastore is open to anonymous readers and writers, because the property being tested is bypassable by construction. That is a console action, and it is not mine to perform.
+
+> **Updated 2026-09-08 (section 1x).** Half of this is no longer true and the half that remains
+> is a different half. The live store is PostgreSQL now, not Firestore: `documents.org_id` is
+> derived from the path it is stored beside, so a row cannot claim a tenant its path does not
+> support, and `scripts/store-verify.ts` asks the real database that question rather than
+> asking a string. The application is also no longer bypassable *through Firestore*, because
+> nothing reads Firestore. What still blocks `VERIFIED` is narrower and unchanged in kind: the
+> live Firestore instance holds old data and is still world-open until somebody deploys the
+> rules, and PostgreSQL row-level security is not enabled, so "at database level" still rests
+> on every query carrying its predicate rather than on the database refusing to answer.
 
 **S15, S26 and S29 do not move.** S29 gains a single shared normalisation module with tests — replacing two incompatible normalisers — but the merge operation still does not exist and the deterministic document id that would enforce the same uniqueness on Firestore is P1.5. S15's composite uniques are declared on a store nothing writes to. S26 gains a `campaign_recipients` table carrying the required unique, and **nothing writes to it**: it is scaffolding placed deliberately so that campaign execution cannot later be built without the constraint, not evidence of a control.
 
@@ -2879,6 +2899,161 @@ real scan uses, including the file gate.
 
 ---
 
+## 1x. Firebase is no longer a database — the two-store split, closed (2026-09-08)
+
+### The question
+
+> "why we need to use firebase??"
+
+It was doing two unrelated jobs and only one of them had ever been decided.
+
+**Authentication — justified.** The browser signs in with Google through Firebase Auth and the
+server verifies the ID token (`server/middleware/auth.ts:95`). Replacing that means owning
+token issuance, refresh and revocation, and there is no reason to.
+
+**Firestore — never a decision.** `server/firebase.ts` said so in its own comment:
+
+```
+// 1. Client SDK for Firestore (to bypass IAM limits via anonymous auth)
+// Anonymous auth removed since firestore rules are relaxed for the preview environment
+```
+
+The server reached the datastore with the **client** SDK, unauthenticated. Security rules apply
+to the client SDK, so `firestore.rules` could not be tightened without denying the server —
+which is why `allow read, write: if true` was still live with the API key committed to a public
+repository. The workaround and the exposure were the same fact seen from two sides.
+
+### What was measured before choosing, rather than assumed
+
+1. **Firebase Auth needs no service account.** `verifyIdToken` initialised with `projectId`
+   alone reached token *decoding* and rejected a malformed token on its merits — `auth/argument-error`,
+   not a credentials error. It verifies a JWT against Google's public certificates. (`checkRevoked: true`
+   would need credentials; it is not used.) So the half of Firebase worth keeping was never
+   blocked on the credentials this document has been waiting for.
+
+2. **PostgreSQL already declared the same entities.** Twenty tables in `server/db/schema.ts`,
+   including `outbox_messages` and `oauth_connections`.
+
+3. **The Firestore API surface actually in use was tiny.** Equality filters only — no `>=`, no
+   `in`, no `array-contains`; one `orderBy('createdAt', 'desc')`; no `increment()` and no
+   `serverTimestamp()` anywhere in production code; three `{ merge }` sites. A replacement had
+   to cover far less than the SDK's surface suggested.
+
+This reordered the roadmap. **P0.6 was not the only route**, and this document had recorded it
+as though it were: the Admin-SDK re-platform kept two stores, kept the split, and was blocked
+on credentials that never arrived. Moving the collections into PostgreSQL was the same volume
+of work, closed the split, and needed nothing that did not already exist.
+
+### What changed
+
+`server/store/index.ts` is a document store — collections, documents, equality queries,
+transactions — over the PostgreSQL instance this system already runs, on the pinned TLS
+connection. Migration `0006_document_store` adds one table; `documents.org_id` is **derived**
+from the path rather than passed beside it, so a row cannot claim a tenant its path does not
+support. Sixteen production files, one script and `server/firebase.ts` moved across; no module
+in the repository imports the Firestore SDK, and `scripts/check-no-firestore.mjs` (guardrail
+19) fails the build if one does.
+
+**`firestore.rules` is now deployable, and its header says why the warning lifted.** Not because
+credentials arrived — because there is no reader left to deny.
+
+### The defect this introduced, what caught it, and the wrong explanation I gave it first
+
+The first `runTransaction` retried on serialization failure five times with no pause. Under
+`npm run verify` that was invisible — a mock transaction has no contention to lose to.
+
+Run against the real database with eight concurrent read-modify-writes on one document, **two
+of the eight ran out of attempts and threw 40001.** The counter finished at six.
+
+**They threw. They were not silently lost, and an earlier draft of this section and of the code
+comment said "silently lost" — which was wrong in the direction that matters.** The transaction
+raised the error to its caller and `scripts/store-verify.ts` reported it as a hard failure;
+that is the system behaving correctly under a limit that was set too low, not a lost write.
+Overstating a risk is the same class of error as understating one, and it is the second time
+this document has had to record that correction.
+
+I then explained the failure as a thundering herd — every loser retrying in the same instant —
+and fixed it with a jittered exponential backoff *and* by raising the attempt count from five
+to ten. Both landed together, and the fix worked: eight writers, five consecutive clean runs.
+
+**Mutation testing then killed the explanation.** Nineteen mutants were run against
+`npm run verify` and `npm run store:verify`; eighteen died. The survivor was the one that
+removed the backoff — which meant either the backoff did nothing, or nothing tested it. So it
+was measured properly: five repetitions per cell, counting transactions that exhausted their
+attempts.
+
+| writers | attempts | jitter | failures / writers |
+|---|---|---|---|
+| 8 | 5 | no | 14 / 40 |
+| 8 | 5 | yes | 15 / 40 |
+| 8 | 10 | no | **0 / 40** |
+| 8 | 10 | yes | **0 / 40** |
+| 16 | 10 | no | 17 / 80 |
+| 16 | 10 | yes | 19 / 80 |
+| 24 | 10 | no | 25 / 120 |
+| 24 | 10 | yes | 25 / 120 |
+
+**The attempt count carried the fix entirely. The jitter is inside the noise at every level,
+and at sixteen writers the jittered runs were marginally worse.** These transactions are short
+and conflict at COMMIT, so spreading retries out in time delays the collision rather than
+preventing it. Jittered backoff is the standard advice for this shape of problem; it is not
+what was wrong here.
+
+The backoff is therefore removed rather than kept and excused — machinery that cannot be shown
+to do anything is machinery no test can pin, which is how the survivor arose in the first
+place. `MAX_ATTEMPTS = 10` carries the guarantee, the mutant that drops it back to five is
+killed by the live verifier, and the measurement is written into the source beside the number
+so it can be argued with.
+
+**What this does not fix, stated rather than implied away.** At sixteen and twenty-four
+concurrent writers on a single document, transactions still exhaust ten attempts — 25 of 120 at
+the top of that table. They throw; the caller decides. Retry tuning is the wrong instrument for
+that case, and the right one is not hitting one row from twenty-four places at once. Nothing
+here does — the outbox gives every job its own row — but a future counter document would need a
+different design, not a larger number.
+
+**Why the live verifier is a script and not a suite.** CI has no database. A suite that skipped
+when the store was unreachable would have reported green over every one of the above.
+
+### Six unchecked reads the SDK's `any` had been hiding
+
+The store returns `Record<string, unknown>` where the client SDK returned `any`, and `tsc`
+immediately found six places reading stored data without checking it. Two matter on their own:
+
+- `actionGateway` assigned `d.accessToken` — of any type — and then compared it against the
+  string `'mock_token'`. A credential stored as a number or an object passed the fabrication
+  check by never matching it, and would have been handed to the provider.
+- `server.ts` added `doc.data().value` straight into a pipeline total. One `undefined` turned
+  the whole reported figure into `NaN`.
+
+All six are now narrowed at the read.
+
+### What this does **not** do — stated because the temptation is to read it as more
+
+- **The live Firestore instance is still world-open.** A rules file in a repository is a
+  proposal. Until `firebase deploy --only firestore:rules` runs, nothing has changed at Google.
+  What *has* changed is that deploying it can no longer break the application.
+- **The committed credentials still need rotating and purging from git history.** Closing the
+  rules does not un-publish a key that has been public. This is now the whole of P0.0.
+- **It is a document store, not a normalisation.** The twenty relational tables are unchanged
+  and the collections are not folded into them. One database and one transaction manager is
+  what was won; one schema is not. The relational `outbox_messages` table still has no writer.
+- **CI still cannot prove the store.** Thirty invariants run in the suite; the thirty-one
+  live checks run only where there is a database.
+
+### An inversion found here and deliberately left alone
+
+`aiSafety.checkStaleDraft` returns `false` — *not stale, the draft may be used* — when the store
+is unavailable or the conversation document is missing. That is §14 inverted: "we could not
+tell whether a newer message arrived" is being read as "none did".
+
+It is recorded rather than fixed because changing what the send path does is not a thing to
+smuggle into a re-platform under cover of a type error. The coercion beside it *was* fixed
+(`"6" > 5` was true by string coercion, `{} > 5` was false, so a malformed stored version
+silently decided staleness). The inversion needs its own change, its own tests and its own row.
+
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
@@ -3012,12 +3187,12 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | PARTIAL | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | Four React modules value-import a server agent (only esbuild elision keeps `@google/genai` and the API-key read out of the bundle); two real cycles; no lint rule, no dependency-cruiser, no ESLint |
 | S41 | Adapter contracts | PARTIAL | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). `CalendarProvider` implemented 2026-09-07 (§1s) by `GoogleCalendarService`, and the compiler holds it — renaming `checkAvailability` fails `tsc`, measured by mutation. **Remainder: Stripe, DocuSign and LinkedIn have no adapter and no interface**, and `PAYMENT_CREATE` / `SIGNATURE_SEND` / `EXTERNAL_MESSAGE_SEND` / `CALENDAR_UPDATE` / `CALENDAR_CANCEL` all still fall through the dispatch switch to `Unsupported action type` |
 | S42 | Chaos / fault-injection across the autonomous send path | PARTIAL | CRITICAL | `db/index.ts:48-51`; `outbox.worker.ts:49,134-137`; `gmail.service.ts:151-167`; `geminiClient.ts:139-145` | Zero fault-injection tests; every one of the 15 required failure modes is unhandled — DB down, mid-sequence commit failure, post-send crash, timeout, 401, 429, 500, malformed AI JSON, duplicate/out-of-order webhook, concurrent claim, concurrent human edit |
-| S43 | Outbox transaction boundaries: atomic claim, crash recovery, duplicates | PARTIAL | CRITICAL | `outbox.service.ts:47-62`; `outbox.worker.ts:23,95,120`; `schema.ts:147-156` | The "claim" is a read; no lease, no CAS, no transaction, no attempt counter, no re-entrancy guard; producer writes Postgres while consumer reads Firestore |
+| S43 | Outbox transaction boundaries: atomic claim, crash recovery, duplicates | PARTIAL | CRITICAL | `outbox.service.ts:47-62`; `outbox.worker.ts:23,95,120`; `schema.ts:147-156` | The "claim" is a read; no lease, no CAS, no transaction, no attempt counter, no re-entrancy guard; producer writes Postgres while consumer reads Firestore. **Store split closed 2026-09-08 (1x)** — one database, one transaction manager, and the claim now runs under SERIALIZABLE with a proven single winner; the lease, attempt counter and re-entrancy guard are still absent |
 | S44 | Alerting: thresholds and destinations | PARTIAL | HIGH | `metrics.service.ts:12-20`; `inboundPipeline.ts:147`; `salesDecisionEngine.ts:30-31`; case-insensitive grep `pagerduty\|slack\|sentry\|datadog\|prometheus\|opentelemetry\|cloudmonitoring\|webhookUrl\|alertTransport` over `server/ src/ package.json` → **one hit**, the comment `// In production, send to Datadog / Prometheus` at `metrics.service.ts:12` | One threshold (`>2000ms` → `console.warn`) on a line that never executes; `incrementCounter` has an empty body; zero of eleven required signals have a threshold or a destination; no alert client is a dependency |
 | S45 | Service level objectives: defined and measured | PARTIAL | HIGH | `metrics.service.ts:13-14`; `outbox.routes.ts:23`; `server.ts:96-98`; case-insensitive word-boundary grep `\b(slo\|sla\|p95\|p99\|percentile\|error budget\|availability)\b` over `docs/*.md` (all four files: `DisasterRecovery.md`, `audit-report.md`, `external-setup-required.md`, `production-readiness-checklist.md`) → **zero hits** | No SLO document, targets, percentiles, windows or error budgets; five of six flows have no measurement code; no `approvedAt`/`failedAt` so latency is not even derivable |
 | S46 | Feature flags | PARTIAL | CRITICAL | `actionGateway.ts:38-44`, `:109-126`, `:124`, `:326`; `salesDecisionEngine.ts:27`; `server.ts:6`, `:52`, `:81-82`, `:337` | **Half fails closed, half fails open.** The five `SAFE_MODE` booleans use `=== 'true'` and so default false — but the dispatch gate's `default: return true` (`:124`) **allows** any action type without an explicit case, and the master autonomy flag `globalAutonomousSendEnabled` is **initialised `true`** with no reachable runtime writer. Separately the SAFE_MODE snapshot is taken at module construction, before `dotenv.config()`, so `.env` never reaches the enforcement point. Flags are also process-global, boot-frozen, untenanted, unaudited; two of five gate nothing and Stripe bypasses the system entirely |
 | S47 | Readiness must verify capability, not object existence | PARTIAL | CRITICAL | `server.ts:75-94`, `:78`, `:79`, `:86`; live probe READY while `/api/outbox` → 500 | No query executed; `actionGatewayLoaded` is a hardcoded literal; none of the six required capability checks (query, migration version, worker heartbeat, provider config, auth config, secret resolvability) exists |
-| S48 | Rolling-deploy compatibility: payload versioning, migration ordering | PARTIAL | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. Still PARTIAL: producer and consumer still target different stores (Postgres vs Firestore), which S26/P0.0 must resolve; nothing yet refuses to serve when the schema is behind the build |
+| S48 | Rolling-deploy compatibility: payload versioning, migration ordering | PARTIAL | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. **Store split closed 2026-09-08 (1x):** producer and consumer are now the same PostgreSQL database and the same transaction manager, so a job written by the producer is a job the consumer can see. Still PARTIAL: nothing yet refuses to serve when the schema is behind the build, and the document collections are not folded into the relational tables |
 | S49 | Release artifact evidence: CI, provenance, migration version, scans, doc claims | PARTIAL | CRITICAL | `server/build/provenance.ts`; `scripts/check-gates-can-fail.mjs`; `scripts/check-dependency-advisories.mjs`; `scripts/check-build-provenance.mjs`; `.github/workflows/ci.yml`; `server/tests/provenance.invariant.test.ts` | **CI, provenance and the self-defeating checks are done.** `/api/health` reports the commit and, separately, whether that commit identifies a released artifact; CI injects it and fails the build if it is unreadable. `readiness.sh` — which created the document it was checking for — is deleted, and a 15th guardrail fails on any check written so it cannot fail. Advisories are ratcheted, one lockfile. Still PARTIAL and CRITICAL: **the false PASS claims in `docs/audit-report.md` are not retracted**, and there is no SBOM, image digest, signed attestation, AI eval report, known-limitations document or rollback runbook naming a real artifact |
 
 ---
@@ -3637,10 +3812,15 @@ weakenings that together open the gate. The other was the tri-state read above.
 record, no per-contact sequence state, no scheduler, and "Bulk Enroll in Campaign" still marks
 leads CONTACTED in local React state with no server call. No `List-Unsubscribe` header. An
 inbound reply still does not durably cancel a sequence — only the reply it arrived on. And the
-premise this section names holds: the producer writes Postgres while the consumer reads
-Firestore, so the stop rules and the queue are still not reading the same store. That is P0.0,
-which is blocked on P0.6, which is blocked on firebase-admin credentials that do not exist in
-this environment.
+premise this section names no longer holds. **Closed 2026-09-08 (section 1x):** the document
+collections moved to PostgreSQL, so the stop rules and the queue read the same store, in the
+same database, under the same transaction manager. It was not unblocked by the credentials it
+was waiting on — the Firebase dependency was removed instead.
+
+What keeps S26 PARTIAL is now only what it always separately was: there is no campaign
+execution engine, no enrolment record, no `List-Unsubscribe` header, and an inbound reply still
+does not durably cancel a sequence. Several guards therefore still have no data and still
+refuse, which is the intended behaviour and not a defect.
 
 **Remediation.** Keep `REAL_EMAIL_SEND_ENABLED` false until one real chokepoint enforces suppression. Unify the datastore — until the pipeline, the worker and the safety rules read the same store, every stop rule is a no-op by construction. Move all fourteen guards into `dispatchAction` as fail-closed pre-execution checks reading that store. Require `contactId` on every EMAIL_SEND. On inbound persist, atomically cancel all PENDING outbox jobs for that conversation in the same batch. Wire or delete the dead safety imports. Add `List-Unsubscribe`. Replace the local-state enrolment with a real server call. Test: suppressed recipient → zero provider calls; inbound reply → all PENDING jobs CANCELLED; 3am local → deferred; 51st send under a cap of 50 → blocked.
 
@@ -4293,14 +4473,14 @@ Ordered by dependency; each step assumes the ones above it. Two ordering princip
 
 | # | Step | Why it sits here | Sections |
 |---:|---|---|---|
-| **P0.0** | **Contain the live exposure — a console action, not a commit.** Replace `firestore.rules:5` `allow read, write: if true` with deny-all. Revoke and rotate the Firebase `apiKey` and the OAuth client id committed in `firebase-applet-config.json`. Then audit the live database for documents an anonymous party may already have written — `oauth_connections` first, because the gateway selects the send token from it and takes the *last* match (`actionGateway.ts:198-201`), then the knowledge and company-brain corpora that feed model prompts. **Accept that local dev breaks.** | The exposure is live, remote, unauthenticated and sitting on a public GitHub repository *right now*. This audit established the product has never sent an autonomous email in any environment, so **nothing of value is protected by keeping the dev server functional.** In the previous draft this sat third and was bundled with an Admin-SDK re-platform on the argument that "both must land together"; that inverts the priority and gates emergency containment behind a refactoring project. The re-platform is now P0.6. | S4, S18, S26, S49 |
+| **P0.0** | *(2026-09-08: the code half is DONE — see 1x. `firestore.rules` is deny-all and now deployable, because nothing reads Firestore. The console half below stands unchanged and is now the whole of this item.)* **Contain the live exposure — a console action, not a commit.** Replace `firestore.rules:5` `allow read, write: if true` with deny-all. Revoke and rotate the Firebase `apiKey` and the OAuth client id committed in `firebase-applet-config.json`. Then audit the live database for documents an anonymous party may already have written — `oauth_connections` first, because the gateway selects the send token from it and takes the *last* match (`actionGateway.ts:198-201`), then the knowledge and company-brain corpora that feed model prompts. **Accept that local dev breaks.** | The exposure is live, remote, unauthenticated and sitting on a public GitHub repository *right now*. This audit established the product has never sent an autonomous email in any environment, so **nothing of value is protected by keeping the dev server functional.** In the previous draft this sat third and was bundled with an Admin-SDK re-platform on the argument that "both must land together"; that inverts the priority and gates emergency containment behind a refactoring project. The re-platform is now P0.6. | S4, S18, S26, S49 |
 | **P0.1** | **Remove the browser send path.** Delete the direct `workspaceGmailService.sendEmail` call at `src/pages/InboxView.tsx:596-614`. Fix the `await onSendReply(...)` that sits **outside** the `if` block and **outside** the `try`, so it currently runs on success *and* on failure. Move the `gmail.send` OAuth bearer token out of `localStorage` (`gmailWorkspaceService.ts:44,71,161`) into a server-held session. | This is the **only code path in the repository that can put a message in a stranger's inbox today**, and it bypasses the ActionGateway, `outreachPolicy`, the outbox, the circuit breaker and every `REAL_*` flag. The double-dispatch is deterministic, not a race: it is latent only because `/api/inbox/:id/reply` is still the stub at `server.ts:312`. This item was **absent from the previous P0 entirely** — the single largest omission in the first roadmap. | S3, S26, S35, S43 |
 | **P0.2** | **Make the flag operators read the flag the system enforces.** `SAFE_MODE` is snapshotted at module-evaluation (`actionGateway.ts:38-44`, singleton at `:326`) via the `server.ts:6` import chain, which ES-module hoisting runs *before* `dotenv.config()` at `server.ts:52` — so `.env` never reaches enforcement, while `/api/readiness` reads `process.env` at request time (`server.ts:81-82`). Load configuration once, before any module with side effects, and have both readiness and the gateway read that single resolved object. Change `checkFeatureFlag`'s `default: return true` (`:124`) to `return false`, and initialise `globalAutonomousSendEnabled` to `false` (`salesDecisionEngine.ts:27`). | Every safety decision below is meaningless if the enforcement point and the operator display can disagree — and today they can disagree in both directions. A dispatch gate whose default branch returns `true` fails **open**, which is the opposite of the addendum's requirement that production action flags fail closed. | S46, S47, S13 |
 | **P0.3** | **Make the kill switch durable, shared and fail-closed.** Replace the `res.json({ success: true })` stub at `server.ts:337` with a real handler that persists an operator-set flag to shared storage with a reason and an actor, cancels PENDING jobs, and returns the object the UI reads — the UI currently does `setCircuitBreakerState(data.circuitBreaker)` on a response with no such field, yielding `undefined` and a `TypeError` on the next render. Reconcile it with `GET /api/inbox/circuit-breaker` (`server.ts:560`), which returns the real state, so read and write stop disagreeing by design. | Every later step is exercised against real providers and needs a working stop lever first. The previous draft specified "mount the existing controller", which would still flip a **process-local boolean** (`salesDecisionEngine.ts:27`) — invisible to a second replica and, until P0.0, living in a store an attacker can write. Durable shared state with a fail-closed default is the requirement, not a mounted controller. | S38, S46, S49 |
 | **P0.4** | **Fail closed on authentication.** Delete the no-header `preview_uid` fallback (`auth.ts:17-21`), the hardcoded `demo_bary` bearer (`:26`), and the accept-any-token path taken when `firebaseAuth` failed to initialise (`:35-39`). Replace the `/webhook` auth bypass at `server.ts:62` — which is a `req.path.includes('/webhook')` **substring** test, not an allowlist — with an explicit two-path allowlist. | Tenancy, rate limits, audit attribution, operator accountability and the recovery console's actor field are all keyed on identity. A substring bypass means any route whose path merely *contains* the word is unauthenticated. | S4, S12, S36, S38 |
 | **P0.5** | **Rate-limit the anonymous AI-spend path.** `/api/webhooks/gmail` is auth-exempt via P0.4's substring bug and signature-unverified, and it drives the uncapped loop at `gmailHistorySync.service.ts:29-47` whose provider 429s are swallowed by `continue`. Add tiered limiters with structured 429s, a per-org daily and per-tenant monthly AI budget, and a hard cap on messages processed per notification. Add fetch timeouts: `grep -rE "AbortController\|signal:\|timeout" server/` returns **nothing**, on a 5-second un-awaited `setInterval` (`outbox.worker.ts:23`) with no re-entrancy guard, so a hung Google connection accumulates unbounded concurrent ticks. | **Promoted from P3.6.** An unauthenticated, signature-unverified endpoint driving an uncapped paid-AI loop is an open financial-loss primitive reachable by anyone — that is safety-critical, not "operational maturity". Pair it with P0.14, which fixes the signature verification. | S36, S37, S19, S42 |
-| **P0.6** | **Move server Firestore access to firebase-admin and enforce tenant-scoped rules in code.** The engineering half of the old P0.3: re-platform the ~30 client-SDK handlers in `server.ts` onto the Admin SDK so the deny-all rules from P0.0 can stand, and gate rules on a verified `orgId` claim. Purge the rotated credentials from git history. | Proceeds at engineering pace *after* containment, rather than blocking it. Until it lands, dev runs against emulators or a locked staging project. | S4, S49 |
-| **P0.7** | **Unify the outbox onto one store.** The producer writes Postgres (`inboundPipeline.ts`), the consumer reads Firestore (`outbox.worker.ts`), and the review console reads a third view (`outbox.routes.ts:13`). Pick one, rewrite the other two, and add a boot assertion that fails if they diverge. | Approval, suppression, staleness, reconciliation and every stop rule are no-ops while producer, consumer and console read different rows. | S43, S26, S38, S48, S1 |
+| **P0.6** | **CANCELLED 2026-09-08 — the dependency was removed instead of satisfied (see 1x).** This item existed so deny-all rules could coexist with a working server, and it was blocked on firebase-admin credentials that never arrived. The document collections moved to PostgreSQL instead, so there is no server Firestore access left to re-platform. What survives from this row is the credential purge, which is now part of P0.0. ~~**Move server Firestore access to firebase-admin and enforce tenant-scoped rules in code.**~~ The engineering half of the old P0.3: re-platform the ~30 client-SDK handlers in `server.ts` onto the Admin SDK so the deny-all rules from P0.0 can stand, and gate rules on a verified `orgId` claim. Purge the rotated credentials from git history. | Proceeds at engineering pace *after* containment, rather than blocking it. Until it lands, dev runs against emulators or a locked staging project. | S4, S49 |
+| **P0.7** | *(2026-09-08: substantially done — see 1x. Producer, consumer and console all reach the outbox through `outboxService`, which now writes PostgreSQL. One database, one transaction manager. NOT closed: the relational `outbox_messages` table still exists and still has no writer, so there are two SHAPES in one store where there were two stores, and the boot assertion this row asks for does not exist.)* **Unify the outbox onto one store.** The producer writes Postgres (`inboundPipeline.ts`), the consumer reads Firestore (`outbox.worker.ts`), and the review console reads a third view (`outbox.routes.ts:13`). Pick one, rewrite the other two, and add a boot assertion that fails if they diverge. | Approval, suppression, staleness, reconciliation and every stop rule are no-ops while producer, consumer and console read different rows. | S43, S26, S38, S48, S1 |
 | **P0.8** | **Delete every fabricated-success path — and do not trust a Firestore-sourced token until P0.0 lands.** Remove the `'mock_token'` branch and the `demoMode` branch; stop persisting `'mock_token'` as an access token; remove the `\|\| 'sim_' + Date.now()` provider-id fallbacks; reject any provider id matching `/^(sim\|mock\|test)_/` before writing SENT; persist simulated sends as `SIMULATED`, never `SENT`. | Until this lands, every "successful send" is unfalsifiable and no test of the send path means anything. **Corollary, new in this revision:** removing the `mock_token` branch *without* P0.0 converts the world-writable `oauth_connections` collection into the send-mode switch — an attacker writes a row and the simulation guard disappears. Order matters. | S3, S27, S42, S10 |
 | **P0.9** | **Make the outbox claim atomic.** Transactional claim writing `status='CLAIMED'`, `claimedBy`, `leaseUntil`, `attempts+1`; process only claimed rows; add a lease reaper and a `processing` re-entrancy guard on the 5-second interval. | Prevents duplicate sends across replicas and across overlapping ticks — the highest-frequency customer-visible failure once sending is real. | S43, S7, S42 |
 | **P0.10** | **Enforce suppression and consent at the gateway.** Add a fail-closed suppression/bounce/complaint check inside `executeEmailSend`; require an explicit `contactId` on every `EMAIL_SEND` and reject without one; replace the `'US'` and `true` defaults with `INSUFFICIENT_DATA` routed to human review; remove the hardcoded `isB2B: true`; normalise country to ISO codes. | This is the legal exposure (GDPR Art. 21 / PECR). **The previous draft's stated dependency on P0.7 and P0.4 was false and has been removed:** a fail-closed check that demands an affirmative consent record and rejects otherwise is store-agnostic and implementable today. Making the highest-liability control wait on a datastore-unification project kept it open longest for no technical reason. | S26, S14, S28, S13 |

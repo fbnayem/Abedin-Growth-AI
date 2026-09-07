@@ -2,7 +2,25 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+/**
+ * Only the four fields Firebase Auth needs, rather than the whole config object.
+ *
+ * The file also carries `firestoreDatabaseId`, `storageBucket`, `messagingSenderId`,
+ * `measurementId`, `recaptchaSiteKey` and `oAuthClientId`, and passing the object whole
+ * shipped every one of them into the browser bundle — verified by grepping `dist/`, which is
+ * the same check that caught the `gmail.send` scope above surviving in the artifact after the
+ * source looked clean.
+ *
+ * Nothing reads any of them now: the document collections moved to PostgreSQL, so there is no
+ * Firestore database to name and no client SDK to name it to. What a page ships is what an
+ * attacker gets to read, so it ships what it uses.
+ */
+const app = initializeApp({
+  apiKey: firebaseConfig.apiKey,
+  authDomain: firebaseConfig.authDomain,
+  projectId: firebaseConfig.projectId,
+  appId: firebaseConfig.appId,
+});
 const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();

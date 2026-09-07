@@ -1,5 +1,5 @@
-import { collection, getDocs } from 'firebase/firestore';
-import { firestore } from '../firebase';
+import { collection, getDocs } from '../store';
+import { store } from '../store';
 import { isValidOrgId } from './orgScope';
 
 /**
@@ -52,9 +52,9 @@ function fromEnvironment(): string[] | null {
 }
 
 async function fromDatastore(): Promise<string[]> {
-  if (!firestore) return [];
+  if (!store) return [];
   try {
-    const snap = await getDocs(collection(firestore, 'organizations'));
+    const snap = await getDocs(collection(store, 'organizations'));
     const ids: string[] = [];
     snap.forEach((d) => {
       if (isValidOrgId(d.id)) ids.push(d.id);

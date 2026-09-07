@@ -7,12 +7,12 @@ import { messages } from '../db/schema';
 
 import { conversations } from '../db/schema';
 import { eq, desc, and } from 'drizzle-orm';
-import { firestore } from '../firebase';
+import { store } from '../store';
 import { getCircuitBreakerState } from '../services/circuitBreaker.service';
 import { verifyDraftIntegrity } from '../services/draftIntegrity.service';
 import { orgPath } from '../tenancy/orgScope';
 import { listServiceableOrgIds } from '../tenancy/organizations';
-import { collection, addDoc, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc, getDocs, query, where } from '../store';
 import { v4 as uuidv4 } from 'uuid';
 import { circuitBreaker } from '../agents/salesDecisionEngine';
 import { readEnvelope, mayDispatch, deadLetterReason } from '../domain/outboxEnvelope';
@@ -63,7 +63,7 @@ export class OutboxWorker {
         return;
       }
 
-      if (!firestore) return;
+      if (!store) return;
 
       // P1.1 — The queue is per tenant, so the worker asks which tenants it serves rather
       // than assuming there is one. An empty list means this process does not know whose
@@ -127,7 +127,7 @@ export class OutboxWorker {
           // Note the ActionGateway performs this check too (checkHumanOwnershipLock); it is
           // repeated here so a lock set after queueing stops the job before dispatch.
           const convSnap = await getDoc(
-            doc(firestore!, orgPath(orgId, 'conversations'), job.conversationId)
+            doc(store!, orgPath(orgId, 'conversations'), job.conversationId)
           );
           const convData: any = convSnap.exists() ? convSnap.data() : null;
           if (convData?.autonomyPausedByHuman || convData?.status === 'AUTONOMY_PAUSED_BY_HUMAN') {
@@ -234,7 +234,7 @@ export class OutboxWorker {
 
              // Create message record
              await addDoc(
-               collection(firestore!, orgPath(orgId, 'conversations', job.conversationId, 'messages')),
+               collection(store!, orgPath(orgId, 'conversations', job.conversationId, 'messages')),
                {
                 id: uuidv4(),
                 conversationId: job.conversationId,

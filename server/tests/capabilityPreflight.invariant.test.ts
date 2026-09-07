@@ -21,14 +21,8 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // ---------------------------------------------------------------------------
 let oauthDocs: Record<string, unknown>[] = [];
 let queryShouldThrow = false;
-let firestoreAvailable = true;
+let storeAvailable = true;
 
-vi.mock('../firebase', () => ({
-  get firestore() {
-    return firestoreAvailable ? {} : null;
-  },
-  firebaseAuth: null,
-}));
 
 /**
  * Safe Mode is mocked rather than switched on via the environment.
@@ -58,7 +52,10 @@ vi.mock('../services/gmail.service', () => ({
   GmailService: class {},
 }));
 
-vi.mock('firebase/firestore', () => ({
+vi.mock('../store', () => ({
+  get store() {
+    return storeAvailable ? {} : null;
+  },
   collection: (_db: unknown, path: string) => ({ path }),
   query: (ref: any, ..._rest: unknown[]) => ref,
   where: (field: string, op: string, value: unknown) => ({ field, op, value }),
@@ -111,7 +108,7 @@ describe('P1.11 — the capability pre-flight actually runs and actually refuses
   beforeEach(() => {
     oauthDocs = [];
     queryShouldThrow = false;
-    firestoreAvailable = true;
+    storeAvailable = true;
     realActionsEnabled = false;
     gateway = new ActionGateway();
   });
@@ -167,7 +164,7 @@ describe('P1.11 — the capability pre-flight actually runs and actually refuses
   });
 
   it('an unavailable datastore refuses too, rather than assuming the best', async () => {
-    firestoreAvailable = false;
+    storeAvailable = false;
     const result = await preflight(gateway);
     expect(result.success).toBe(false);
     expect(result.errorCode).toBe('CAPABILITY_NOT_GRANTED');

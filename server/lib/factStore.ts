@@ -6,8 +6,8 @@ import {
   query as fsQuery,
   limit as fsLimit,
   runTransaction,
-} from 'firebase/firestore';
-import { firestore } from '../firebase';
+} from '../store';
+import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
 import {
   activeFacts,
@@ -129,12 +129,12 @@ export async function listFactPage(
   orgId: string,
   conversationId: string
 ): Promise<{ facts: StoredFact[]; truncated: boolean }> {
-  if (!firestore) return { facts: [], truncated: false };
+  if (!store) return { facts: [], truncated: false };
   // One more than the cap, so exceeding it is observable rather than inferred from a count
   // that happens to equal the limit.
   const snap = await getDocs(
     fsQuery(
-      collection(firestore, factsPath(orgId, conversationId)),
+      collection(store, factsPath(orgId, conversationId)),
       fsLimit(MAX_FACTS_PER_CONVERSATION + 1)
     )
   );
@@ -170,7 +170,7 @@ export async function recordFact(
   conversationId: string,
   observation: FactObservation
 ): Promise<FactWriteOutcome> {
-  if (!firestore) {
+  if (!store) {
     return { ok: false, code: 'STORE_UNAVAILABLE', message: 'Datastore unavailable.' };
   }
 
@@ -212,9 +212,9 @@ export async function recordFact(
 
   const path = factsPath(orgId, conversationId);
 
-  return await runTransaction(firestore, async (tx) => {
+  return await runTransaction(store, async (tx) => {
     if (plan.action === 'CONFIRM') {
-      const ref = doc(firestore, path, plan.factId);
+      const ref = doc(store, path, plan.factId);
       const snap = await tx.get(ref);
       if (!snap.exists()) {
         return { ok: false as const, code: 'CONFLICT' as const, message: 'The fact was removed while confirming it.' };
@@ -223,11 +223,14 @@ export async function recordFact(
       return { ok: true as const, action: 'CONFIRM' as const, factId: plan.factId };
     }
 
-    const newRef = doc(firestore, path, newId);
+    const newRef = doc(store, path, newId);
 
     if (plan.action === 'SUPERSEDE') {
-      const oldRef = doc(firestore, path, plan.supersededId);
-      const [oldSnap, newSnap] = await Promise.all([tx.get(oldRef), tx.get(newRef)]);
+      const oldRef = doc(store, path, plan.supersededId);
+      const [oldSnap, newSnap] = await Promise.all([
+        tx.get<StoredFact>(oldRef),
+        tx.get<StoredFact>(newRef),
+      ]);
 
       if (!oldSnap.exists()) {
         return { ok: false as const, code: 'CONFLICT' as const, message: 'The fact being superseded no longer exists.' };

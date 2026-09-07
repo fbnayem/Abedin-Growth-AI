@@ -1,7 +1,7 @@
 import crypto from 'crypto';
-import { firestore } from '../firebase';
+import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
-import { doc, getDoc, runTransaction } from 'firebase/firestore';
+import { doc, getDoc, runTransaction } from '../store';
 
 /**
  * P0.12 — Draft staleness and approval integrity.
@@ -39,10 +39,10 @@ export interface DraftIntegrityFields {
 }
 
 function conversationRef(organizationId: string, conversationId: string) {
-  if (!firestore) return null;
+  if (!store) return null;
   // orgPath validates the id before it becomes a path segment. The org id now travels with
   // the job rather than being a module constant, so it is no longer trusted by construction.
-  return doc(firestore, orgPath(organizationId, 'conversations'), conversationId);
+  return doc(store, orgPath(organizationId, 'conversations'), conversationId);
 }
 
 /**
@@ -56,11 +56,11 @@ export async function incrementInboundVersion(
   conversationId: string
 ): Promise<number> {
   const ref = conversationRef(organizationId, conversationId);
-  if (!ref || !firestore) {
+  if (!ref || !store) {
     throw new Error('Cannot increment inbound version: datastore unavailable.');
   }
 
-  return runTransaction(firestore, async (tx) => {
+  return runTransaction(store, async (tx) => {
     const snap = await tx.get(ref);
     const current = snap.exists() ? Number((snap.data() as any)?.inboundVersion ?? 0) : 0;
     const next = Number.isFinite(current) ? current + 1 : 1;

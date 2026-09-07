@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, varchar, integer, boolean, jsonb, unique, index } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, varchar, integer, boolean, jsonb, unique, index, primaryKey } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 /**
@@ -32,12 +32,18 @@ import { relations } from 'drizzle-orm';
  *
  * WHAT THIS DOES *NOT* PROVE
  * --------------------------
- * A constraint constrains nothing until something writes through it. This schema is Drizzle
- * over PostgreSQL, and `DATABASE_URL` is unset: the live datastore is Firestore, and the
- * Firestore write paths do not go through here. So these declarations are correct and
- * necessary, and they are not yet evidence that duplicates cannot occur in production. The
- * equivalent Firestore-side enforcement — deterministic document ids derived from the same
- * keys — is P1.5, and the store unification question is P1.13/P3.9.
+ * A constraint constrains nothing until something writes through it.
+ *
+ * When this was written the paragraph here said the live datastore was Firestore and these
+ * declarations had no writer. **That is no longer true (2026-09-08).** PostgreSQL is the only
+ * datastore; `documents` below holds the collections that used to live in Firestore.
+ *
+ * The caution survives the change, in a narrower form. These uniques still bind only the
+ * tables that something writes THROUGH — the relational path (`inboundPipeline` for
+ * conversations and messages, `privacy` and `suppression` for contacts). Records written as
+ * DOCUMENTS are constrained by their path and primary key, not by the composite uniques above,
+ * so the equivalent enforcement there is still the deterministic document id (P1.5). Folding
+ * the collections into these tables is outstanding and is not what the document store did.
  */
 
 export const organizations = pgTable('organizations', {
@@ -554,4 +560,44 @@ export const quoteSnapshots = pgTable(
     status: varchar('status', { length: 50 }).notNull(),
   },
   (t) => [index('quote_snapshots_org_contact_idx').on(t.organizationId, t.contactId)]
+);
+
+/**
+ * THE DOCUMENT COLLECTIONS — the other half of the store, now in the same database.
+ *
+ * Firestore held thirteen collections that no relational table above ever received: the outbox
+ * and its operator actions, the identity and fact stores, circuit-breaker state, action logs,
+ * members, settings and the company brain. The producer wrote PostgreSQL and the consumer read
+ * Firestore, so every guard in this repository enforced against a store the send path did not
+ * write. `server/store/index.ts` explains that split in full.
+ *
+ * This table ends it. One database, one transaction manager — a relational write and a
+ * document write can now commit or fail together, because they are the same transaction.
+ *
+ * IT IS A DOCUMENT STORE, NOT A NORMALISATION, and saying so is the point. The twenty tables
+ * above are unchanged and these collections are not folded into them; that per-entity
+ * migration is outstanding and recorded as outstanding. A shim described as a unified schema
+ * would be exactly the unchecked completion claim this codebase's audit exists to catch.
+ *
+ * `org_id` is DERIVED from the path (`organizations/{orgId}/...`) rather than passed, so it
+ * cannot disagree with the path stored beside it, and it is a column rather than a string
+ * prefix so that tenancy is a question SQL can answer. It carries no foreign key: top-level
+ * collections (`oauth_connections`, `system_settings`) legitimately have no tenant, and the
+ * `organizations` collection itself would be circular at bootstrap.
+ */
+export const documents = pgTable(
+  'documents',
+  {
+    path: text('path').notNull(),
+    id: text('id').notNull(),
+    organizationId: varchar('org_id', { length: 255 }),
+    data: jsonb('data').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.path, t.id] }),
+    index('documents_org_idx').on(t.organizationId),
+    index('documents_path_idx').on(t.path),
+  ]
 );

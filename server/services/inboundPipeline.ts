@@ -33,8 +33,8 @@ import { classifyAutomation, type AutomationVerdict } from '../domain/automatedM
 import { describeAbstention } from '../domain/abstention';
 import { auditReplyAgainstPlan } from '../agents/independentAuditor';
 import { dispositionFor } from '../domain/adjudication';
-import { firestore } from '../firebase';
-import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
+import { store } from '../store';
+import { collection, doc, getDocs, query, updateDoc, where } from '../store';
 import { orgPath } from '../tenancy/orgScope';
 
 const ledgerService = new LedgerService();
@@ -315,7 +315,7 @@ export class InboundPipeline {
     automation: AutomationVerdict
   ): Promise<void> {
     if (automation.permanentFailure !== true) return;
-    if (!firestore) {
+    if (!store) {
       console.error(
         '[InboundPipeline] PERMANENT BOUNCE but the datastore is unavailable, so the ' +
           `recipient could NOT be suppressed (contact ${contactId}, ` +
@@ -324,7 +324,7 @@ export class InboundPipeline {
       return;
     }
     try {
-      await updateDoc(doc(firestore, orgPath(organizationId, 'contacts'), contactId), {
+      await updateDoc(doc(store, orgPath(organizationId, 'contacts'), contactId), {
         hardBounced: true,
         emailStatus: 'BOUNCED',
         hardBouncedAt: new Date(),

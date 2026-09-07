@@ -1,7 +1,7 @@
-import { firestore } from '../firebase';
+import { store } from '../store';
 import { orgPath, isValidOrgId } from '../tenancy/orgScope';
 import { listServiceableOrgIds } from '../tenancy/organizations';
-import { collection, doc, getDoc, getDocs, setDoc, query, where, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, setDoc, query, where, updateDoc } from '../store';
 import { circuitBreaker } from '../agents/salesDecisionEngine';
 
 /**
@@ -82,8 +82,8 @@ function environmentPermitsAutonomy(): boolean {
 }
 
 function settingsRef() {
-  if (!firestore) return null;
-  return doc(firestore, SYSTEM_SETTINGS_COLLECTION, SETTINGS_DOC);
+  if (!store) return null;
+  return doc(store, SYSTEM_SETTINGS_COLLECTION, SETTINGS_DOC);
 }
 
 /**
@@ -101,9 +101,9 @@ function settingsRef() {
  */
 async function legacyPauseStands(): Promise<{ paused: boolean; reason?: string }> {
   const legacyOrgId = process.env.LEGACY_KILL_SWITCH_ORG_ID;
-  if (!firestore || !legacyOrgId || !isValidOrgId(legacyOrgId)) return { paused: false };
+  if (!store || !legacyOrgId || !isValidOrgId(legacyOrgId)) return { paused: false };
   try {
-    const snap = await getDoc(doc(firestore, orgPath(legacyOrgId, 'settings'), SETTINGS_DOC));
+    const snap = await getDoc(doc(store, orgPath(legacyOrgId, 'settings'), SETTINGS_DOC));
     if (!snap.exists()) return { paused: false };
     const data: any = snap.data() || {};
     if (data.paused === true) {
@@ -299,7 +299,7 @@ export async function setCircuitBreaker(
  * the pause itself from being recorded.
  */
 async function cancelPendingOutbox(actor: string, reason: string): Promise<number> {
-  if (!firestore) return 0;
+  if (!store) return 0;
 
   // P1.1 — A global stop must stop every tenant. Cancelling only one organisation's queue
   // would have left the switch looking engaged while other tenants' mail continued.
@@ -315,7 +315,7 @@ async function cancelPendingOutbox(actor: string, reason: string): Promise<numbe
   let cancelled = 0;
   for (const orgId of orgIds) {
     try {
-      const outboxRef = collection(firestore, orgPath(orgId, 'outbox'));
+      const outboxRef = collection(store, orgPath(orgId, 'outbox'));
       const pending = await getDocs(query(outboxRef, where('status', '==', 'PENDING')));
       for (const d of pending.docs) {
         try {

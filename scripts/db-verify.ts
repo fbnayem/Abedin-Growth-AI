@@ -31,10 +31,20 @@ import pg from 'pg';
 import { getTableConfig, PgTable } from 'drizzle-orm/pg-core';
 import * as schema from '../server/db/schema';
 import { verifiedPgOptions, describePlan, resolveTlsPlan } from '../server/db/tls';
+import { migrationFilesInOrder } from './lib/migration-tables';
 import 'dotenv/config';
 
 const APP_ROLE = process.env.APP_DB_ROLE ?? 'growth-ai-dat-user-747';
-const EXPECTED_MIGRATIONS = 6;
+/**
+ * DERIVED FROM THE JOURNAL, NOT WRITTEN DOWN.
+ *
+ * This was the literal `6`. It went stale the moment a seventh migration was added, and the
+ * verifier then reported a correctly-migrated database as a problem — a checker that fails on
+ * the truth teaches its reader to ignore it, which is worse than not having it. It is the same
+ * defect as the apply script's drop list: a record of the past, consulted as if it were a
+ * description of the present.
+ */
+const EXPECTED_MIGRATIONS = migrationFilesInOrder('drizzle').length;
 
 /** Cloud SQL creates these itself; they are not part of this application's schema. */
 const NOT_OURS = "c.relname NOT LIKE 'google_db_advisor%' AND c.relname NOT LIKE 'hypopg%'";

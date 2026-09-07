@@ -51,10 +51,6 @@ let beforeRead: (() => void) | null = null;
 let transactionCount = 0;
 let now = 1_700_000_000_000;
 
-vi.mock('../firebase', () => ({
-  firestore: {},
-  firebaseAuth: null,
-}));
 
 const pathOf = (ref: any): string => ref.path;
 
@@ -66,10 +62,11 @@ const pathOf = (ref: any): string => ref.path;
  * for the case where the status was still PENDING at read time and another worker committed
  * first.
  */
-vi.mock('firebase/firestore', () => {
+vi.mock('../store', () => {
   const collectionKey = (c: any) => c.path as string;
 
   return {
+    store: {},
     collection: (_db: unknown, path: string) => ({ path }),
     /**
      * The modular SDK's `doc` has three shapes and the service uses two of them:
@@ -215,7 +212,7 @@ describe('0. the datastore double aborts like the real one', () => {
   it('a transaction whose read changed before commit throws', async () => {
     // Cast: these call the DOUBLE, whose  takes a path string. The real signatures
     // describe a library this file has replaced.
-    const { runTransaction, doc } = (await import('firebase/firestore')) as any;
+    const { runTransaction, doc } = (await import('../store')) as any;
     store['a/b'] = { v: 1 };
 
     interleave = () => {
@@ -234,7 +231,7 @@ describe('0. the datastore double aborts like the real one', () => {
   });
 
   it('an uncontended transaction commits', async () => {
-    const { runTransaction, doc } = (await import('firebase/firestore')) as any;
+    const { runTransaction, doc } = (await import('../store')) as any;
     store['a/b'] = { v: 1 };
     await runTransaction({} as never, async (tx: any) => {
       await tx.get(doc('a/b'));
@@ -244,9 +241,7 @@ describe('0. the datastore double aborts like the real one', () => {
   });
 
   it('a query filters by field and respects its limit, or the claim loop sees the wrong rows', async () => {
-    const { getDocs, query, collection, where, limit } = (await import(
-      'firebase/firestore'
-    )) as any;
+    const { getDocs, query, collection, where, limit } = (await import('../store')) as any;
     seedJob('a');
     seedJob('b', { status: 'CANCELLED' });
     seedJob('c');

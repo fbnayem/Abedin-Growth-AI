@@ -24,32 +24,38 @@ rules_version = '2';
 // may. Anything narrower would be permitting access nobody uses, which is surface
 // with no corresponding function.
 //
-// ⚠️  DO NOT DEPLOY THESE RULES YET — READ THIS FIRST  ⚠️
-// -------------------------------------------------------
-// The server currently reaches Firestore with the *client* SDK and is
-// UNAUTHENTICATED. `server/firebase.ts` imports `signInAnonymously` and never
-// calls it; the comment there records that anonymous auth was removed precisely
-// because these rules were open. Rules apply to the client SDK, so deploying
-// this file before the server moves to firebase-admin would deny the server too
-// and stop the application completely.
+// THESE RULES ARE NOW DEPLOYABLE. THEY WERE NOT, AND THIS IS WHY THEY ARE.
+// ------------------------------------------------------------------------
+// This block used to read "DO NOT DEPLOY THESE RULES YET". The server reached
+// Firestore with the *client* SDK, unauthenticated, so deploying deny-all would
+// have denied the server too and stopped the application. That workaround and
+// this exposure were the same fact seen from two sides: rules could not be
+// closed because the server depended on them being open.
 //
-// The order that works:
-//   1. Provide the server with Google credentials — a service account JSON at
-//      GOOGLE_APPLICATION_CREDENTIALS, or `gcloud auth application-default login`.
-//      (As of 2026-09-06 no credential of any kind is available in the working
-//      environment, which is why the migration below is not yet done: it could be
-//      written but not verified, and an unverified rewrite of every datastore call
-//      site is the kind of change that must not ship on a clean compile alone.)
-//   2. Migrate `server/` from `firebase/firestore` to `firebase-admin/firestore`
-//      (roadmap P0.6, ~102 call sites across 14 files). The Admin SDK bypasses
-//      these rules as a privileged principal, which is what makes deny-all safe.
-//   3. Verify the app works end to end against the admin path.
-//   4. `firebase deploy --only firestore:rules`.
-//   5. Rotate the committed `apiKey` and OAuth client in
-//      firebase-applet-config.json, and purge them from git history. Closing the
-//      rules does not un-publish a credential that has been public.
+// The blocker is gone, and not by acquiring the credentials it was waiting on.
+// Nothing in this repository reads or writes Firestore any more. The document
+// collections moved to the PostgreSQL instance the system already runs — see
+// `server/store/index.ts` — which also ended the two-datastore split where the
+// producer wrote Postgres and the consumer read Firestore. `server/firebase.ts`
+// now initialises Firebase Auth and nothing else, and Auth is unaffected by
+// these rules.
 //
-// Steps 1 and 5 need console access. Steps 2-4 are code and are blocked on 1.
+// So deny-all is not merely safe here, it is exact: there is no reader left to
+// deny. The Admin-SDK migration this file used to prescribe is not needed and
+// is not happening.
+//
+// WHAT STILL NEEDS A CONSOLE, AND IS NOT MADE UNNECESSARY BY THE ABOVE
+// -------------------------------------------------------------------
+//   1. `firebase deploy --only firestore:rules`. Until this runs, the live
+//      database is still world-readable and world-writable regardless of what
+//      this file says. A rules file in a repository is a proposal.
+//   2. Rotate the `apiKey` and OAuth client id in firebase-applet-config.json
+//      and purge them from git history. Closing the rules does not un-publish a
+//      credential that has been public.
+//   3. Audit the live Firestore for documents an anonymous party may already
+//      have written, and treat what is there as untrusted. This system no longer
+//      reads any of it, which removes the ongoing risk but not the question of
+//      what was written while the door was open.
 // =============================================================================
 
 service cloud.firestore {
