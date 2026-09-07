@@ -33,7 +33,7 @@ import { join, relative } from 'node:path';
  *
  * Lower this when you convert one. Do not raise it.
  */
-const BASELINE = 11;
+const BASELINE = 10;
 
 const SCAN_ROOTS = ['server', 'src', 'shared'];
 const SCAN_FILES = ['server.ts'];

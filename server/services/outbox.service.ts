@@ -98,7 +98,23 @@ export class OutboxService {
     // P0.12 — Provenance travels WITH the job. Stamping at enqueue is what lets the worker
     // prove, immediately before dispatch, that the conversation has not moved since the
     // draft was written.
-    integrity?: { generatedForInboundVersion: number; approvalDigest?: string }
+    integrity?: { generatedForInboundVersion: number; approvalDigest?: string },
+    /**
+     * P0.11 — The status the row is CREATED with.
+     *
+     * It used to be `PENDING` unconditionally, and a caller that needed a hold called
+     * `holdForHumanReview` immediately afterwards. That is two writes, and between them the
+     * row is PENDING and therefore claimable: `claimPendingJobs` queries
+     * `where(status == PENDING)` and the worker runs that query on a continuous tick. A tick
+     * landing in the window claims and dispatches a draft that was never cleared to send.
+     *
+     * `holdForHumanReview` docstring asserted that "no worker will claim it", which was true
+     * of the steady state and not of the window the ordering created. Passing the status here
+     * removes the window rather than narrowing it: the row is never PENDING at any point.
+     */
+    initialStatus: 'PENDING' | 'HUMAN_REVIEW' = 'PENDING',
+    /** Why it is held. Required when `initialStatus` is HUMAN_REVIEW, for the operator queue. */
+    heldReason?: string
   ) {
     const outboxRef = outboxCollection(organizationId);
     if (!outboxRef || !firestore) return null;
@@ -125,7 +141,13 @@ export class OutboxService {
         conversationId,
         idempotencyKey,
         payload,
-        status: 'PENDING',
+        status: initialStatus,
+        ...(initialStatus === 'HUMAN_REVIEW'
+          ? {
+              heldReason: heldReason ?? 'Held at enqueue; no reason was supplied.',
+              heldAt: Date.now(),
+            }
+          : {}),
         attempts: 0,
         createdAt: Date.now(),
         nextAttemptAt: Date.now(),
@@ -321,19 +343,19 @@ export class OutboxService {
 
 
   /**
-   * P0.11 — Hold a queued message for human review. Used when the independent auditor could
-   * not be run faithfully: the message stays durable and visible, but no worker will claim it
-   * (claimPendingJobs only takes PENDING rows).
+   * P0.11 — `holdForHumanReview` was DELETED here.
+   *
+   * It had exactly one caller: the enqueue-at-PENDING-then-flip sequence in
+   * inboundPipeline.ts, which is the race this change removed by letting `queueMessage` take
+   * the status directly. With that gone it has none.
+   *
+   * Deleted rather than kept for a future operator console, for a reason beyond it being
+   * unused: it was a bare `updateDoc({ status: HUMAN_REVIEW })` with no state gate. Every
+   * other transition on this collection goes through `assertTransition(OUTBOX_JOB, ...)` —
+   * `approveForSending` does, transactionally — so this one method could move a PROCESSED or
+   * DEAD_LETTER job back into the review queue and nothing would refuse it. An operator hold
+   * (S38) needs to be written against the transition map, not resurrected from here.
    */
-  async holdForHumanReview(organizationId: string, id: string, reason: string) {
-    const ref = outboxDoc(organizationId, id);
-    if (!ref) return;
-    await updateDoc(ref, {
-      status: 'HUMAN_REVIEW',
-      heldReason: reason,
-      heldAt: Date.now(),
-    });
-  }
   /**
    * P1.2 — Fetch one job, scoped to a tenant.
    *

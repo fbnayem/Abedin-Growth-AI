@@ -2640,6 +2640,243 @@ measured across 211 such inputs, 0 disagreements. The guard stays for the diagno
 - **S1** is now STALE and says so below: the active-code-graph document lists modules this change
   deleted.
 
+## 1w. S24 / P0.11 — the auditor that never ran, and the second opinion that was a copy of the first (2026-09-07)
+
+### The audit step was a constant
+
+`inboundPipeline.processNewEmail` — the only path a real inbound customer email travels —
+called this:
+
+```ts
+function runIndependentAudit(): { decision: AuditDecision; reason: string } {
+  return { decision: 'HUMAN_REVIEW_REQUIRED', reason: 'Independent auditor not yet wired ...' };
+}
+```
+
+No arguments. No `await`. `draft`, `identity`, `understanding`, `nbaResult` and
+`conversationId` were all in scope at the call site and none was passed. The two branches
+reading its result (`=== 'BLOCK'`, `=== 'PASS'`) were both statically unreachable, and the
+return type was deliberately widened so the compiler could not say so.
+
+That was the honest choice when it was written: the pipeline was passing `{} as any` into the
+planner, so the auditor genuinely could not be invoked faithfully, and a constant
+HUMAN_REVIEW_REQUIRED beat asserting a PASS nobody had computed. **P1.8 removed the `as any`.**
+Every input has been correctly built and in scope ever since, so the reason had gone and the
+comment stating it had gone stale — which is the same failure S19 and S22 were corrected for in
+§1u, in the opposite direction.
+
+What that cost, until now: **no suppression check, no duplicate lock, no phone policy, no
+Meet/Calendar link semantics, no merge-tag normalisation, no CTA registry check and no pricing
+check ran on any drafted reply.** And `audit.sanitizedBody` did not exist on that path, so
+what was queued was `draft.body` — the model's output verbatim, with every rewrite the
+sanitisers would have made discarded.
+
+### The second opinion was the first opinion, run twice
+
+The auditor's checks 10 and 11 were presented as independent — a pricing audit and a claim
+grounding engine — and penalised separately, `-40` and `-30`:
+
+```ts
+const pricingFindings = auditPricingClaims(sanitizedBody, quotable, nonPrice);
+if (pricingFindings.length > 0) score -= 40;
+...
+const groundingResult = await engine.verifyClaims(sanitizedBody, quotable, nonPrice);
+if (!groundingResult.isGrounded) score -= 30;
+```
+
+`ClaimGroundingEngine.verifyClaims` **is** `auditPricingClaims` with those same three
+arguments. It returns `isGrounded: auditPricingClaims(...).length === 0` and nothing else.
+
+Measured, rather than read off: **1,350 drafts** — 15 amounts (£0 to £18,000, plus `$499`,
+`€499`, `£4,499` and `£49.99`) in 6 sentence frames, each frame filled two ways —
+**913 where both fired, 437 where neither did, 0 where they disagreed**, including the message
+text. So:
+
+- the `-40` and `-30` always applied together, taking 100 to 30. The scores **60 and 70,
+  which the thresholds were tuned to separate, were both unreachable**;
+- `checksPassed` collected two independent-sounding assurances from one computation;
+- and the second of them, *"All claims grounded in approved knowledge"*, was **false as
+  written**. The engine's own comment says non-price claims are not extracted or matched at
+  all. A draft could assert HIPAA compliance, a latency figure and an integration that does not
+  exist, and be told its claims were grounded.
+
+Two checks agreeing is only evidence when they are two checks.
+
+### Twenty-four literals for work that had not happened
+
+`deterministicSafetyResult` was six booleans, written on four return paths:
+
+| Return path | zeroPhone | semanticLink | mergeTags | suppression | duplicateLock | circuitBreaker |
+|---|---|---|---|---|---|---|
+| suppression BLOCK | `true` | `true` | `true` | **`false`** | `true` | `true` |
+| breaker ESCALATE | `true` | `true` | `true` | `true` | `true` | **`false`** |
+| duplicate BLOCK | `true` | `true` | `true` | `true` | **`false`** | `true` |
+| PASS / REWRITE / ESCALATE | `true` | `true` | `true` | `true` | `true` | `true` |
+
+All 24 values are compile-time literals. `zeroPhoneClean`, `semanticLinkClean` and
+`mergeTagsClean` are `true` in **all four rows — they could not be `false` in any
+execution, for any input, ever** — while `phoneRes.flagged`, `linkRes.flagged` and
+`tagRes.flagged` sat in scope, computed a hundred lines earlier and never read. The three
+that *can* be false are false only where the matching hard blocker fired, which `decision`
+already said.
+
+The root cause is that a `boolean` cannot express *"this check did not run"*, so on the
+early-return paths the unrun checks were written as the safe-looking value. The type is now
+`CheckOutcome = 'CLEAN' | 'VIOLATED' | 'NOT_RUN'`, which has no safe default, and every field
+is derived from what the check returned.
+
+### The circuit breaker was disabling the content checks
+
+Found by writing the tests, not by reading. The breaker check was an early return, and
+`globalAutonomousSendEnabled` defaults to `false` — correctly, per P0.2, because the master
+autonomy switch must fail closed — with nothing in the product to turn it on. So
+breaker-open is the steady state of this deployment, and under the early return **that meant
+no content control examined any draft on any path**, including the operator-triggered test
+matrix. Wiring the auditor into the pipeline would have reproduced the same nothing.
+
+The breaker is a permission to *send*. It is not evidence about the draft. It is a finding now,
+beside the others: it still escalates on its own, and it no longer decides whether anything is
+inspected.
+
+### A second reply gate, which turned a detected violation into a PASS
+
+`server/agents/qualityControlAgent.ts` — 127 lines, its own verdict vocabulary, its own 0-1
+score, its own phone and link checks, **zero callers**. Its combination rule:
+
+```ts
+decision: hasPhoneNumbers ? (data.decision === "BLOCK" ? "BLOCK" : "PASS")
+                          : (data.decision || fallbackData.decision),
+```
+
+Read it in the direction that matters. When the deterministic phone check **did** find a phone
+number, the verdict became `"PASS"` — unless the model happened to say BLOCK. A model answer
+of REWRITE or HUMAN_REVIEW was overwritten *by the fact that a violation had been detected*.
+Its own fallback said REWRITE for the same input, so the live path was less safe than the
+degraded one. And it returned `phonePolicyFlagged: true` in the same object.
+
+That is the S24 failure in its purest form: two assessments of one question, resolved silently,
+in favour of the less safe answer. Deleted rather than repaired — a second gate with a
+different vocabulary is the thing that has to disagree with the first one eventually, and
+nothing was calling it.
+
+### What landed
+
+**`server/domain/adjudication.ts`** — the vocabulary, and it contains no numbers.
+
+- `adjudicate(findings)` returns the severity of the **worst** finding. No accumulator, no
+  threshold. Two properties, both tested exhaustively: **monotone** (81 ordered subset pairs
+  over the four severities; adding a finding never lowers the verdict) and
+  **non-compensatory** (200 REWRITTEN findings are still a REWRITE; one BLOCKING among 500
+  lesser ones is still a BLOCK).
+- An unrankable severity **throws**. `SEVERITIES.indexOf` returns `-1`, which sorts below
+  everything, so the natural implementation would drop an unknown finding and return PASS —
+  S14 exactly.
+- `reconcile(question, opinions)` combines opinions or reports that it cannot. No majority,
+  no tie-break, no first-wins, no confidence-weighting: it is never given anything to prefer
+  one opinion by. `consulted: false` carries no value of `T` and cannot be compared with
+  one, so **an unasked specialist is not representable as an agreeing one**.
+- `dispositionFor(verdict)` maps a verdict to an outbox action. Extracted because mutation
+  testing found it: as two inline expressions in `processNewEmail` — which needs Firestore, a
+  Gmail client and a resolved tenant to run — forcing every draft to PENDING and deleting the
+  BLOCK branch outright **both left the entire gate green**.
+
+**The auditor**, rewritten around it. `score` is gone from `AuditResult`. A fired sanitizer
+is a `REWRITTEN` finding rather than an entry in `checksPassed` — all four of them used to
+report a rewrite as a pass and could not move the score at all. `ReplyPlan.specialistsRequired`,
+written at three sites and read at none, gets its **first reader**: a required specialist with
+no opinion is NOT_CONSULTED and the draft cannot pass. Unanimous *rejection* is agreement and
+`reconcile` reports it as such — reading only `agreed` would turn every specialist saying no
+into a pass, so that branch is handled explicitly and tested.
+
+**`quoteAvailability`.** `quote: null` used to mean both *"this customer has no quote"* and
+*"nobody looked"*, and `pricingContextFor(null, …)` treats it as the former and clears the
+draft against the **list** price book. The live pipeline is exactly the caller that had not
+looked — its own context bundle records `QUOTE` in `unavailable` — so it was authorising
+list pricing for customers who may hold a negotiated quote. It now says NOT_LOOKED_UP, and a
+draft that states an amount escalates. Only when it states one: a check that fires on every
+reply gets switched off within a week.
+
+**The outbox race.** `queueMessage` wrote `status: 'PENDING'` and the caller then flipped it
+with `holdForHumanReview`. Between those two awaits the row is PENDING, and
+`claimPendingJobs` selects exactly `status == PENDING` on a continuous worker tick — so a
+tick landing in the window claimed and dispatched a draft the auditor had refused. The hold's
+own docstring asserted *"no worker will claim it"*, which was true of the steady state and not
+of the window the ordering created. `queueMessage` takes the status now: one write, never
+PENDING at any point. `holdForHumanReview` is deleted — it was also a bare `updateDoc` with
+no state gate, the only transition on that collection not going through `assertTransition`,
+so it could move a PROCESSED or DEAD_LETTER job back into the review queue.
+
+And `queueMessage` returns `null` on an idempotency-key collision, in which case the old
+code skipped the hold entirely and the pre-existing row kept whatever status it had. That path
+now returns SUPPRESSED rather than reporting QUEUED for a row this audit did not write.
+
+**`ConversationDecisionLog` deleted** — 46 fields, zero constructions, zero readers. It
+declared a second copy of the auditor result (`score: number`, six-boolean safety record) that
+had already drifted from the real one, and a type nobody builds cannot be caught drifting by the
+compiler.
+
+### The thirteenth guardrail
+
+`scripts/check-no-verdict-arithmetic.mjs`. Three rules: a send verdict chosen by comparing a
+number to a threshold; a running total in a file that also decides a send verdict; a property
+whose name asserts a safety property assigned the literal `true`.
+
+The second rule is **file-gated**, and the gate is the honest part. `computePurchaseReadiness`
+and `computeMeetingReadiness` add and subtract from a 0-100 score and should — a readiness
+estimate genuinely is a quantity. The rule is about a number deciding whether an email is sent.
+The gate is asserted in both directions, because one stuck open fires on every scorer and one
+stuck shut fires on nothing.
+
+Its first run is what found `qualityControlAgent.ts`.
+
+One thing went wrong writing it, worth recording: the first version reused the comment-and-string
+stripper from `check-no-html-sink`, which blanks string literals. Its verdict rules match on
+quoted verdict values, so **the check could not have matched anything it was written for**. It
+strips comments only now, and the self-check exercises every rule through the same code path the
+real scan uses, including the file gate.
+
+### Evidence
+
+- `server/tests/adjudication.invariant.test.ts` — **47 invariants**. The headline: a draft
+  reading `Hi {{firstName}}, call us on 020 7946 0018` records
+  `zeroPhone: 'VIOLATED', mergeTags: 'VIOLATED'` and returns REWRITE. Before, the same draft
+  returned three literal `true`s and PASS.
+- Mutation testing, **36/36 caught** against the full gate (`tsc && vitest && guardrails`),
+  including: the verdict becoming the least severe finding; an unrankable severity silently
+  ignored; an unconsulted specialist counting as agreeing; a majority settling a disagreement;
+  the safety record going back to literals; the early-return record claiming the checks below it
+  were clean; the circuit breaker returning to an early return; an unread quote defaulting to
+  read; the pipeline queueing unsanitised model output; the auditor call becoming a constant;
+  and four mutations of the guardrail itself.
+- Two survivors on the first run, both the step that decides whether a customer receives an
+  unreviewed email, both because `processNewEmail` is not constructible without a datastore.
+  That is what `dispositionFor` was extracted for; the pipeline's own branch is still only
+  asserted through its source, and that gap is stated in the test rather than papered over.
+- `npx tsc --noEmit` exit 0; **1,074 tests across 36 files**; production build clean;
+  **13 guardrails**.
+- The abstention ratchet falls **11 → 10** and the prompt-authority ratchet **11 → 10**, both
+  because `qualityControlAgent.ts` was deleted.
+
+### Status
+
+- **S24: NOT_STARTED -> PARTIAL.** A disagreement primitive exists, cannot resolve a
+  disagreement silently, and has a real reader that fails closed on the actual current state.
+  PARTIAL, and the limit is the point: **no specialist agent is invoked on any live path**, so
+  what the check proves today is that the system knows it has not asked. `technical.agent.ts`
+  is the only specialist implementation and its one call site is inside `pipeline.service.ts`,
+  a second inbound pipeline nothing imports.
+- **P0.11: the real auditor is restored.** It runs on the live inbound path, with real inputs,
+  and what gets queued is what it produced. Remainder: never run against real inbound mail.
+- **S25 improves** — the auditor no longer penalises a reply for omitting the list price, and an
+  amount cannot be cleared against a quote nobody read.
+- **S23 improves**: two ratchets fall by one, and the auditor's `notAssessed` names the five
+  claim types the grounding engine does not examine, so a PASS stops implying coverage it never
+  had.
+- **S1** was already marked STALE and stays so: this change deletes another module the
+  active-code-graph lists (`qualityControlAgent.ts`).
+
+---
+
 ---
 
 ## 2. Executive Summary
@@ -2650,11 +2887,11 @@ measured across 211 such inputs, 0 disagreements. The guard stays for the diagno
 |---|---:|---|
 | `VERIFIED` | **0** | — |
 | `IMPLEMENTED_UNVERIFIED` | **1** | S1 |
-| `PARTIAL` | **38** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S25, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S39, S40, S41, S43, S46, S47 |
-| `NOT_STARTED` | **10** | S11, S24, S26, S27, S38, S42, S44, S45, S48, S49 |
+| `PARTIAL` | **39** | S2, S3, S4, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S25, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S39, S40, S41, S43, S46, S47 |
+| `NOT_STARTED` | **9** | S11, S26, S27, S38, S42, S44, S45, S48, S49 |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-0 + 1 + 38 + 10 + 0 = **49 rows**.
+0 + 1 + 39 + 9 + 0 = **49 rows**.
 
 | Severity | Count |
 |---|---:|
@@ -2732,7 +2969,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 
 | Section | Title | Status | Severity | Key evidence | Primary gap |
 |---|---|---|---|---|---|
-| S1 | Active code graph: dead modules, competing owners, untracked repo-mutation scripts | IMPLEMENTED_UNVERIFIED | CRITICAL | `docs/production/active-code-graph.md` (the deliverable, written); `server/services/pipeline.service.ts:5-11`; `server/gateway/actionGateway.ts:173`; `server.ts:344`; `server/routes/outbox.routes.ts:13` | The artifact exists and **is now STALE**: §1q, §1v and §1t deleted modules it lists (`executeMultiAgentReplyPipeline`, `inboxAgent.ts`, `generateMemoryAwareReply`, `generateMemoryAwareFollowUp`) and added several it does not. That staleness is itself the finding — **nothing verifies it** — no dependency-cruiser rule, no CI check, no lint boundary fails when it goes stale. (The 25 dead modules, the 6 ownerless capabilities and the 172 `.cjs` scripts are what the graph *documents*; they are graded in the sections that own them, not here.) |
+| S1 | Active code graph: dead modules, competing owners, untracked repo-mutation scripts | IMPLEMENTED_UNVERIFIED | CRITICAL | `docs/production/active-code-graph.md` (the deliverable, written); `server/services/pipeline.service.ts:5-11`; `server/gateway/actionGateway.ts:173`; `server.ts:344`; `server/routes/outbox.routes.ts:13` | The artifact exists and **is now STALE**: §1q, §1t, §1v and §1w deleted modules it lists (`executeMultiAgentReplyPipeline`, `inboxAgent.ts`, `generateMemoryAwareReply`, `generateMemoryAwareFollowUp`, `qualityControlAgent.ts`, `ConversationDecisionLog`) and added several it does not. That staleness is itself the finding — **nothing verifies it** — no dependency-cruiser rule, no CI check, no lint boundary fails when it goes stale. (The 25 dead modules, the 6 ownerless capabilities and the 172 `.cjs` scripts are what the graph *documents*; they are graded in the sections that own them, not here.) |
 | S2 | Proof-based status: test inventory, runner, CI | PARTIAL | CRITICAL | `package.json:12-13`; `server/tests/adversarial.test.ts:29-41`; `server/tests/pipeline.test.ts:16-19`; no `.github` | Zero assertions repo-wide; no test runner; no CI; the one runnable test reports 4/4 unconditionally |
 | S3 | A message cannot become SENT without a real provider result | PARTIAL | CRITICAL | `server/workers/outbox.worker.ts:99-100`; `actionGateway.ts:204-207`; `server.ts:511,519` | `|| 'sim_' + Date.now()` fabricates provider ids; two paths return success with no network call; no reconciliation; no retry; unlocked claim |
 | S4 | Tenant integrity at database level | PARTIAL | CRITICAL | `server/tenancy/orgScope.ts`; `server/middleware/tenant.ts`; `server/db/schema.ts`; `firestore.rules:5` | **P1.1/P1.2 landed.** Request-scoped tenant from a signed claim; all 13 tables carry `organization_id NOT NULL`; all 5 composite uniques declared; by-id access 404s on a foreign id; 86 executable invariants. Still PARTIAL: `firestore.rules` remains `allow read, write: if true`, so the *datastore* enforces nothing and every control is bypassable by going direct; the PostgreSQL constraints have no writer |
@@ -2754,9 +2991,9 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S20 | Fact provenance, temporal validity, supersession | PARTIAL | CRITICAL | `db/schema.ts:127-145`; `inboundPipeline.ts:88-101`; `models.ts:401-412` | **Nothing on a live path writes provenance.** The only fact write hard-deletes all prior facts, sets no provenance column, and hits the throwing Drizzle proxy; the live memory object is a flat key→value map; no Firestore fact collection exists. The declared bitemporal schema is aspirational, which the rubric grades NOT_STARTED |
 | S21 | Deterministic context selection and context-ID recording | PARTIAL | HIGH | `multiAgentReplySystem.ts:296`, `:319`; `salesDecisionEngine.ts:584`, `:604-607`; `db/schema.ts:221-228` | Live path concatenates the entire thread with no bound; `knownRelevantFacts` is a 2-item literal; the one ledger read passes an email as a contactId and is wrapped in `catch(e){}`; no context ids recorded |
 | S22 | AI run reproducibility (`ai_run_logs`) | PARTIAL | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | **This row was stale and is corrected 2026-09-07 (§1u):** `writeRunLog` has written a row per inbound run since §1p, carrying every model actually called, per-call prompt hashes, the context hash and manifest, token usage with an explicit partial flag, and the fallback disposition. **Remainder: no prompt VERSION, schema version or policy version** (the same residue S21 carries); cost is recorded as `null` and enforced nowhere; and the PostgreSQL `ai_run_logs` table still has no writer — the rows go to Firestore |
-| S23 | Agent abstention | PARTIAL | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | Landed 2026-09-07 (§1v). `ModelOutcome<T>` is a discriminated union a caller must branch on; `generateJsonOrAbstain` replaces the silent substitution on the live drafting and extraction paths; the 107-line canned reply template and the 82 lines of fact-inventing heuristics are deleted; an abstained extraction records ZERO facts; `ABSTAINED` is a disposition distinct from `SUPPRESSED`. Three dead agents whose fallbacks fabricated emails, a confidence of 0.88 and a `policyStatus: "ALLOW"` were removed. **Remainder: 11 legacy `safeGenerateJSON` call sites still substitute silently (held by a ratchet); no caller ever SETS a confidence, so `LOW_CONFIDENCE` and `CONFLICTING_EVIDENCE` are declared and unreachable, and the policy engine confidence gate still has nothing to read** |
-| S24 | Specialist disagreement detection and resolution | NOT_STARTED | CRITICAL | `salesDecisionEngine.ts:610-616`; `server.ts:46`; `independentAuditor.ts:206-213` | `specialistsRequired` is computed and read by nothing; no two opinions are ever produced; the auditor is never called in production and returns six hardcoded `true` safety flags |
-| S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts:180-183` | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`; the auditor penalises replies that omit the £499 list price |
+| S23 | Agent abstention | PARTIAL | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | Landed 2026-09-07 (§1v). `ModelOutcome<T>` is a discriminated union a caller must branch on; `generateJsonOrAbstain` replaces the silent substitution on the live drafting and extraction paths; the 107-line canned reply template and the 82 lines of fact-inventing heuristics are deleted; an abstained extraction records ZERO facts; `ABSTAINED` is a disposition distinct from `SUPPRESSED`. Three dead agents whose fallbacks fabricated emails, a confidence of 0.88 and a `policyStatus: "ALLOW"` were removed. **Remainder: 10 legacy `safeGenerateJSON` call sites still substitute silently (held by a ratchet; 11 -> 10 in §1w); no caller ever SETS a confidence, so `LOW_CONFIDENCE` and `CONFLICTING_EVIDENCE` are declared and unreachable, and the policy engine confidence gate still has nothing to read** |
+| S24 | Specialist disagreement detection and resolution | PARTIAL | CRITICAL | `server/domain/adjudication.ts`; `independentAuditor.ts`; `inboundPipeline.ts` (the audit step); `adjudication.invariant.test.ts` | Landed 2026-09-07 (§1w). `adjudicate` combines findings by worst-severity with no accumulator and no threshold — tested monotone over 81 ordered subset pairs and non-compensatory in both directions. `reconcile` has no majority, tie-break, first-wins or confidence rule, and `consulted: false` carries no value, so an unasked specialist cannot be represented as an agreeing one. `specialistsRequired`, written at three sites and read at none, has its first reader and fails closed. The auditor now runs on the live path; its safety record is tri-state and derived; its two "independent" price checks were **measured identical over 1,350 drafts (0 disagreements)** and collapsed to one. A dead second reply gate that forced a detected phone violation to `PASS` was deleted. **Remainder: no specialist agent is invoked on any live path, so no two opinions are yet produced — what the check proves today is that the system knows it has not asked** |
+| S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts` (`quoteAvailability`) | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`. The auditor no longer penalises a reply for OMITTING the list price (P1.7), and since §1w it refuses to clear a stated amount when quotes were not looked up: `quote: null` used to mean both "this customer has no quote" and "nobody looked", and the live pipeline — whose context bundle records `QUOTE` as unavailable — was the caller that had not looked, so list pricing was being authorised for customers who may hold a negotiated one |
 | S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | NOT_STARTED | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | No campaign execution engine exists; none of the 14 required guards is implemented; a reply does not stop the sequence because both stop mechanisms query an empty Postgres |
 
 | S27 | Deliverability: sender identity health and fabricated metrics | NOT_STARTED | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |

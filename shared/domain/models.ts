@@ -1085,52 +1085,26 @@ export interface MeetingReadinessResult {
   reasoning: string;
 }
 
-export interface ConversationDecisionLog {
-  id: string;
-  timestamp: string;
-  conversationId: string;
-  contactEmail: string;
-  contactName: string;
-  companyName: string;
-  inboundMessageSnippet: string;
-  identityResolution: ClientIdentityResolution;
-  emailUnderstanding: EmailUnderstanding;
-  buyingStage: {
-    previous: BuyingStage;
-    current: BuyingStage;
-  };
-  purchaseReadiness: PurchaseReadinessResult;
-  meetingReadiness: MeetingReadinessResult;
-  specialistsConsulted: {
-    technical?: { verifiedCapabilities: string[]; answerSummary: string };
-    pricing?: { packageOffered: string; pricingConfidence: number; customQuoteNeeded: boolean };
-    objection?: { handledObjection: string; strategy: string };
-    roi?: { metricEstimated: string; annualValueEstimated?: string };
-  };
-  nextBestAction: NextBestActionResult;
-  replyPlan: ReplyPlan;
-  generatedDraft: {
-    subject: string;
-    body: string;
-  };
-  auditorResult: {
-    decision: "PASS" | "REWRITE" | "ESCALATE" | "BLOCK";
-    score: number; // 0-100
-    checksPassed: string[];
-    issuesDetected: string[];
-  };
-  deterministicSafetyResult: {
-    zeroPhoneClean: boolean;
-    semanticLinkClean: boolean;
-    mergeTagsClean: boolean;
-    suppressionClean: boolean;
-    duplicateLockClean: boolean;
-    circuitBreakerClean: boolean;
-  };
-  finalDecision: "SEND_AUTONOMOUS" | "AWAITING_HUMAN_APPROVAL" | "SUPPRESSED_NO_ACTION" | "BLOCKED_BY_SAFETY";
-  finalEmailBody?: string;
-  whyExplanation: string;
-}
+/**
+ * S24 — `ConversationDecisionLog` was DELETED here, not left in place.
+ *
+ * It was a 46-field interface with zero constructions and zero readers repo-wide: nothing
+ * ever built one and nothing ever read one. Its only reference was a dead import in
+ * independentAuditor.ts.
+ *
+ * The reason to remove it rather than leave it is that it declared a SECOND copy of the
+ * auditor result — `auditorResult: { decision, score, checksPassed, issuesDetected }` plus
+ * its own six-boolean `deterministicSafetyResult` — and that copy had already drifted from
+ * the real one. The real `AuditResult` no longer has a `score` at all (severity is not
+ * summed; see server/domain/adjudication.ts) and its safety record is tri-state, because a
+ * boolean cannot say that a check did not run. A type nobody builds cannot be caught
+ * drifting by the compiler, so it would have gone on describing an auditor that no longer
+ * exists until someone believed it.
+ *
+ * `specialistsConsulted` went with it. It described four specialist agents; one exists
+ * (technical.agent.ts) and its only call site is inside pipeline.service.ts, a second
+ * inbound pipeline nothing imports.
+ */
 
 export interface CircuitBreakerState {
   globalAutonomousSendEnabled: boolean;

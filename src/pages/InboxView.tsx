@@ -2595,7 +2595,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
                         <div className="flex items-center justify-between">
                           <div className="font-extrabold text-emerald-400 flex items-center gap-2 uppercase tracking-wider text-[11px]">
                             <ShieldCheck className="w-4 h-4" />
-                            <span>8. INDEPENDENT EXECUTIVE AUDIT (Score: {inspectionResult.auditorResult.score}/100 — Verdict: {inspectionResult.auditorResult.decision})</span>
+                            <span>8. INDEPENDENT EXECUTIVE AUDIT (Verdict: {inspectionResult.auditorResult.decision} — {(inspectionResult.auditorResult.findings || []).length} finding(s))</span>
                           </div>
                           <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-400/40 text-[10px]">
                             {inspectionResult.finalDecision}

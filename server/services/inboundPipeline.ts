@@ -31,13 +31,13 @@ import { recordFacts, listActiveFacts } from '../lib/factStore';
 import { observationsFromMemory } from '../domain/memoryFacts';
 import { classifyAutomation, type AutomationVerdict } from '../domain/automatedMail';
 import { describeAbstention } from '../domain/abstention';
+import { auditReplyAgainstPlan } from '../agents/independentAuditor';
+import { dispositionFor } from '../domain/adjudication';
 import { firestore } from '../firebase';
 import { collection, doc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import { orgPath } from '../tenancy/orgScope';
 
 const ledgerService = new LedgerService();
-
-type AuditDecision = 'PASS' | 'BLOCK' | 'HUMAN_REVIEW_REQUIRED';
 
 /**
  * What processing one inbound message actually did.
@@ -78,28 +78,6 @@ export type InboundOutcome =
       contextHash?: string | null;
       contextIds?: string[];
     };
-
-/**
- * P0.11 — Placeholder for the independent audit, returning a SAFE decision rather than a
- * fabricated one.
- *
- * When auditReplyAgainstPlan() is wired to real ReplyPlan / ClientIdentityResolution /
- * EmailUnderstanding inputs, this becomes a call to it and the branching at the call site
- * starts doing real work. Until then it returns HUMAN_REVIEW_REQUIRED, so drafts are held
- * rather than sent on the strength of a verdict nobody computed.
- *
- * The explicit return type matters: it stops TypeScript narrowing the result to a single
- * literal and reporting the caller's PASS/BLOCK branches as unreachable, which would invite
- * someone to delete them.
- */
-function runIndependentAudit(): { decision: AuditDecision; reason: string } {
-  return {
-    decision: 'HUMAN_REVIEW_REQUIRED',
-    reason:
-      'Independent auditor not yet wired to real ReplyPlan/identity inputs; routing to human ' +
-      'review rather than asserting a PASS that was never computed.',
-  };
-}
 
 export class InboundPipeline {
   /**
@@ -801,30 +779,62 @@ export class InboundPipeline {
         return { ok: true, disposition: 'SUPPRESSED', detail: `${draft.replyPlan.nextBestAction}: ${draft.replyPlan.reason}`, modelCalls, conversationId, messageId, contextHash: contextBundle.contextHash, contextIds: contextBundle.contextIds };
       }
 
-      // 8. Independent Audit
+      // 8. Independent Audit — P0.11, now actually run.
       //
-      // P0.11 — This line was `const auditResult = { decision: 'PASS', reason: '' };`. That
-      // single hardcoded value disabled THREE controls at once, because suppression checking,
-      // claim grounding and the circuit breaker all sit behind auditReplyAgainstPlan(): every
-      // draft passed, unconditionally, no matter what it contained.
+      // What stood here was a call to a local `runIndependentAudit()` that took no arguments,
+      // awaited nothing, ignored the draft and returned a frozen literal. It was the honest
+      // choice at the time: the pipeline was passing `{} as any` into the planner, so the
+      // auditor genuinely could not be invoked faithfully, and a constant HUMAN_REVIEW_REQUIRED
+      // beat asserting a PASS nobody computed.
       //
-      // The real auditor needs a ReplyPlan, a resolved ClientIdentityResolution and the full
-      // EmailUnderstanding. This pipeline does not build them yet — note the `{} as any`
-      // arguments passed to determineNextBestAction above — so the auditor cannot be invoked
-      // faithfully here without that plumbing.
+      // P1.8 removed the `as any`. Every input the auditor needs has been correctly built and
+      // in scope ever since — `draft`, `identity`, `understanding`, `nbaResult`,
+      // `conversationId` — so the reason the constant existed had already gone, and the
+      // comment stating that reason had gone stale with it.
       //
-      // Given that, the choice is between inventing a verdict and admitting we do not have
-      // one. Addendum §14 and §23 are explicit: when required information is absent, apply a
-      // safe policy rather than fabricating it. So an un-runnable audit now routes the draft
-      // to HUMAN_REVIEW instead of asserting PASS. The effect is that autonomous replies stop
-      // until the auditor is properly wired — which is the correct failure direction, and
-      // visible, rather than a silent bypass that looks like a working control.
-      const { decision: auditDecision, reason: auditReason } = runIndependentAudit();
-      console.warn(`[InboundPipeline] audit -> ${auditDecision}: ${auditReason}`);
+      // Consequences of leaving it, all of which held until this change:
+      //   - `auditDecision === BLOCK` and `=== PASS` were both statically unreachable, and the
+      //     deliberately widened return type was what stopped the compiler saying so.
+      //   - No suppression check, duplicate lock, phone/link/merge-tag sanitisation, CTA
+      //     registry check or pricing check ran on ANY drafted reply.
+      //   - `audit.sanitizedBody` did not exist on this path, so what was queued was
+      //     `draft.body` verbatim, straight from the model.
+      //
+      // `quoteAvailability` is passed as NOT_LOOKED_UP rather than omitted, because the
+      // context bundle above already records QUOTE in `unavailable`. Saying so lets the
+      // auditor refuse to clear a stated amount against a price book that may not apply to
+      // this customer, instead of reading "we did not look" as "they have no quote".
+      const audit = await auditReplyAgainstPlan({
+        draftBody: draft.body,
+        replyPlan: draft.replyPlan,
+        identity,
+        emailUnderstanding: understanding,
+        nextBestAction: nbaResult,
+        conversationId,
+        quoteAvailability: 'NOT_LOOKED_UP',
+      });
 
-      if (auditDecision === 'BLOCK') {
-         console.error("Draft blocked by auditor:", auditReason);
-         return { ok: true, disposition: 'BLOCKED', detail: auditReason, modelCalls, conversationId, messageId, contextHash: contextBundle.contextHash, contextIds: contextBundle.contextIds };
+      const auditReason =
+        audit.findings.length > 0
+          ? audit.findings.map((f) => `[${f.severity}] ${f.check}: ${f.detail}`).join(' | ')
+          : 'No finding; every control that ran found nothing.';
+
+      console.warn(
+        `[InboundPipeline] audit -> ${audit.decision}: ${audit.findings.length} finding(s)` +
+          (audit.findings.length > 0
+            ? ': ' + audit.findings.map((f) => `${f.severity} ${f.check}`).join(', ')
+            : '')
+      );
+
+      // One mapping from verdict to outbox action, in server/domain/adjudication.ts, so both
+      // halves of it move together. Inline, they could drift: a fifth verdict added to the
+      // type would compile here as neither BLOCK nor PASS and be queued for review by
+      // accident rather than by decision.
+      const sendDisposition = dispositionFor(audit.decision);
+
+      if (sendDisposition.queue === false) {
+        console.error('Draft blocked by auditor:', auditReason);
+        return { ok: true, disposition: 'BLOCKED', detail: auditReason, modelCalls, conversationId, messageId, contextHash: contextBundle.contextHash, contextIds: contextBundle.contextIds };
       }
 
       // 9. Transactional Outbox Insert
@@ -834,7 +844,11 @@ export class InboundPipeline {
       // had no reachable producer and always returned empty. Both sides now use the same
       // store, through outboxService, which is also where the idempotency key and the
       // claim/lease fields live.
-      const outboxStatus = auditDecision === 'PASS' ? 'PENDING' : 'HUMAN_REVIEW';
+      //
+      // S24 — from the verdict, via the shared mapping. REWRITE and ESCALATE both mean a
+      // control fired; the difference between them is what an operator needs in order to
+      // triage, not whether to hold.
+      const outboxStatus = sendDisposition.status;
 
       // P0.12 — Stamp the draft with the conversation version it was generated from, plus a
       // digest of exactly what would be sent. The worker re-checks both immediately before
@@ -846,7 +860,12 @@ export class InboundPipeline {
       const outboundPayload = {
         to: email.from,
         subject: draft.subject,
-        htmlBody: draft.body,
+        // P0.11 — `draft.body` was queued here, so even on the paths where the auditor did
+        // run its rewrites were discarded: the phone-number redaction, the Meet/Calendar URL
+        // correction, the merge-tag resolution and the CTA-registry alignment all wrote to
+        // `sanitizedBody`, and nothing read it. What a human approves is now what the
+        // auditor produced.
+        htmlBody: audit.sanitizedBody,
         inReplyTo: email.id,
         references: email.references ? `${email.references} ${email.id}` : email.id,
         threadId: email.threadId,
@@ -861,18 +880,43 @@ export class InboundPipeline {
         inboundVersion,
       });
 
+      // P0.11 — ONE write, at the status the audit reached.
+      //
+      // This was an enqueue at PENDING followed by `holdForHumanReview` flipping it to
+      // HUMAN_REVIEW. Between those two awaits the row was PENDING, and `claimPendingJobs`
+      // selects exactly `status == PENDING` on a continuous worker tick — so a tick landing
+      // in that window claimed and dispatched a draft the auditor had refused. The hold was
+      // also skipped entirely when `queueMessage` returned null on an idempotency-key
+      // collision, leaving whatever status the pre-existing row already carried.
       const queued = await outboxService.queueMessage(
         organizationId,
         conversationId,
         outboundPayload,
         `reply_${email.id}`,
-        { generatedForInboundVersion: inboundVersion, approvalDigest }
+        { generatedForInboundVersion: inboundVersion, approvalDigest },
+        outboxStatus,
+        auditReason
       );
 
-      // queueMessage defaults new rows to PENDING; anything not cleared by the auditor must
-      // be held for a human instead.
-      if (queued && outboxStatus !== 'PENDING') {
-        await outboxService.holdForHumanReview(organizationId, queued.id, auditReason);
+      if (queued === null) {
+        // The idempotency key already exists, so this draft was NOT stored, and the row that
+        // holds the key was written by an earlier run whose status this call did not set.
+        // Reporting QUEUED here would claim an outbox row reflects this audit when it does
+        // not.
+        console.warn(
+          `[InboundPipeline] outbox key reply_${email.id} already exists; this draft was not ` +
+            'stored, and the existing row keeps its own status.'
+        );
+        return {
+          ok: true,
+          disposition: 'SUPPRESSED',
+          detail: `Duplicate outbox key reply_${email.id}; existing row retained. This audit reached ${audit.decision}.`,
+          modelCalls,
+          conversationId,
+          messageId,
+          contextHash: contextBundle.contextHash,
+          contextIds: contextBundle.contextIds,
+        };
       }
 
       console.log(`--- Pipeline Completed. Outbox job created: ${outboxStatus} ---`);

@@ -9,7 +9,8 @@ import {
   composeAutonomousSalesReply,
   sanitizeUntrustedProspectInput,
 } from "./salesDecisionEngine";
-import { auditReplyAgainstPlan } from "./independentAuditor";
+import { auditReplyAgainstPlan, type SafetyRecord } from "./independentAuditor";
+import type { Finding, Verdict } from "../domain/adjudication";
 import { CALENDAR_BOOKING_URL, GOOGLE_MEET_URL } from "./trustedCtaRegistry";
 
 export interface TestCaseResult {
@@ -22,8 +23,12 @@ export interface TestCaseResult {
   nextBestAction: string;
   meetingReadinessScore: number;
   purchaseReadinessScore: number;
-  auditVerdict: "PASS" | "REWRITE" | "ESCALATE" | "BLOCK";
-  auditScore: number;
+  auditVerdict: Verdict;
+  // S24 — `auditScore: number` was here. The auditor no longer computes one: a verdict
+  // reached by subtracting penalties from 100 made severities tradeable against each other.
+  auditFindings: readonly Finding[];
+  auditNotAssessed: readonly string[];
+  auditSafety: SafetyRecord;
   checksSummary: string[];
   sanitizedReplySnippet: string;
   passed: boolean;
@@ -289,7 +294,13 @@ export async function runCompleteSalesEngineTestMatrix(): Promise<TestMatrixRepo
       meetingReadinessScore: meetingReadiness.score,
       purchaseReadinessScore: purchaseReadiness.score,
       auditVerdict: audit.decision,
-      auditScore: audit.score,
+      // S24 — `auditScore: audit.score` was here. There is no score any more: the verdict
+      // is the severity of the worst finding, not a threshold on a running total. The
+      // findings themselves are reported instead, which is strictly more than the number
+      // said — a 60 could not tell you which check produced it.
+      auditFindings: audit.findings,
+      auditNotAssessed: audit.notAssessed,
+      auditSafety: audit.safety,
       checksSummary: audit.checksPassed,
       sanitizedReplySnippet: audit.sanitizedBody.substring(0, 120) + "...",
       passed,

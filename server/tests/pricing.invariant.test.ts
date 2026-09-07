@@ -272,13 +272,31 @@ describe('§25 — the auditor detects a price we never agreed to', () => {
 describe('P1.7 — every surface reads the module rather than a literal', () => {
   const read = (p: string) => readFileSync(p, 'utf8');
 
-  it('the auditor no longer substring-matches a price', () => {
+  it('the auditor no longer substring-matches a price, and reaches the module through one check', () => {
     const source = read('server/agents/independentAuditor.ts')
       .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+      .replace(/(^|[^\/:])\/\/[^\n]*/g, '$1');
     expect(source).not.toContain('sanitizedBody.includes("£499")');
-    expect(source).toContain('auditPricingClaims(');
     expect(source).toContain('pricingContextFor(');
+
+    // S24 — this asserted `auditPricingClaims(` appeared in the auditor. It did, twice: once
+    // directly and once through ClaimGroundingEngine.verifyClaims, which is that same
+    // function with the same three arguments and nothing else. Measured over 1,350 drafts the
+    // two never disagreed, so the auditor was scoring one computation as if it were two
+    // independent opinions.
+    //
+    // The property this test is for is that the check comes from the shared module rather
+    // than a literal, so it now follows the single remaining call through the delegation
+    // instead of pinning which of the two names appears. Asserting the direct call is ABSENT
+    // is what stops the duplicate being reintroduced.
+    expect(source).toContain('verifyClaims(');
+    expect(source).toContain('pricingContext.quotableAmounts');
+    expect(source).not.toContain('auditPricingClaims(');
+
+    const engine = read('server/policies/claimGrounding.ts')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^\/:])\/\/[^\n]*/g, '$1');
+    expect(engine).toContain('auditPricingClaims(');
   });
 
   it('the contract UI renders from the price book', () => {
