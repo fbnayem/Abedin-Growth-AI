@@ -46,9 +46,11 @@ readiness must verify **capability**, not object existence.
   `PENDING_CALENDAR_SYNC`.
 - **Suppression / Unsubscribe — "`suppression.service.ts` implemented to halt outbound."**
   Implemented and unreachable: its only importer is `pipeline.service.ts`, which has none. The
-  suppression check that *is* reachable reads the in-memory seed store, which the live inbound
-  path never writes to — so it returns CLEAN for every recipient including one who has just
-  unsubscribed. See `docs/audit-report.md` §3.
+  suppression check that *is* reachable used to read the in-memory seed store, which the live
+  inbound path never writes to, so it recorded CLEAN for every recipient including one who had
+  just unsubscribed. No send was unguarded — the action gateway enforces suppression against the
+  live contact record at dispatch — but the safety record was false, and is fixed as of
+  2026-09-08. See `docs/audit-report.md` §3.
 - **Idempotency — "UUID-based idempotency keys on outbox records."** The keys exist. The unique
   constraint enforcing them is on a Postgres table the live worker does not read.
 - **Circuit Breaker / Kill Switches.** Now real, persisted, attributed, and refusing to report

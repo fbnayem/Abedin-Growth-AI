@@ -18,7 +18,7 @@ import {
   normalizeMergeTags,
 } from "./multiAgentReplySystem";
 import {
-  isSuppressed,
+  checkSuppression,
   circuitBreaker,
   isDuplicateSend,
 } from "./salesDecisionEngine";
@@ -157,9 +157,20 @@ export async function auditReplyAgainstPlan(input: {
    */
   const notAssessed: string[] = [...ClaimGroundingEngine.UNCHECKED_CLAIM_TYPES];
 
-  // 1. Hard Blocker: Suppression Check
-  const suppressionCheck = isSuppressed(input.identity.email);
-  if (suppressionCheck.suppressed) {
+  // 1. Hard blocker: what the ADDRESS ITSELF settles.
+  //
+  // This used to read the in-memory seed store and, finding nothing for a live recipient,
+  // record `suppression: 'CLEAN'` on every draft — including one to somebody who had just
+  // unsubscribed. Nothing was sent that should not have been, because the Production Action
+  // Gateway checks the live contact record at dispatch and refuses on any suppression flag,
+  // a missing contact, or consent that is not explicitly true. But the auditor was writing a
+  // clean bill of health for a check it had not performed, and that record is what an incident
+  // review reads.
+  //
+  // `checkSuppression` now returns only what an address can settle. There is no
+  // NOT_SUPPRESSED: no property of an address proves its owner has not opted out.
+  const suppressionCheck = checkSuppression(input.identity.email);
+  if (suppressionCheck.state === 'SUPPRESSED') {
     return {
       decision: 'BLOCK',
       findings: [
@@ -175,7 +186,9 @@ export async function auditReplyAgainstPlan(input: {
       notAssessed: [...notAssessed, 'Every content control below the suppression blocker'],
     };
   }
-  checksPassed.push("Suppression verification clean");
+  // No `checksPassed.push` here. "Suppression verification clean" was the sentence that made
+  // the record wrong, and the check is named in `notAssessed` below instead.
+  notAssessed.push(`Recipient suppression — ${suppressionCheck.why}`);
 
   // 2. Circuit Breaker — a FINDING, not an early return.
   //
@@ -220,7 +233,6 @@ export async function auditReplyAgainstPlan(input: {
       sanitizedBody: "",
       safety: {
         ...NOT_RUN_BELOW,
-        suppression: 'CLEAN',
         circuitBreaker: circuitBreakerOutcome,
         duplicateLock: 'VIOLATED',
       },
@@ -446,7 +458,10 @@ export async function auditReplyAgainstPlan(input: {
     checksPassed,
     sanitizedBody,
     safety: {
-      suppression: 'CLEAN',
+      // NOT_RUN, not CLEAN. Nothing reachable from here can establish that a recipient has
+      // not opted out; the live record is read by the Production Action Gateway at dispatch.
+      // Reporting CLEAN was the auditor certifying a check it had not performed.
+      suppression: 'NOT_RUN',
       circuitBreaker: circuitBreakerOutcome,
       duplicateLock: 'CLEAN',
       // Derived from the values the checks produced, in the same function, rather than

@@ -126,26 +126,58 @@ export function sanitizeUntrustedProspectInput(rawText: string): {
 // ==========================================
 // PART 24: SUPPRESSION ENGINE
 // ==========================================
-export function isSuppressed(email: string): { suppressed: boolean; reason?: string } {
+/**
+ * What can be established about a recipient's suppression state FROM THE ADDRESS ALONE.
+ *
+ * There is deliberately no `NOT_SUPPRESSED`. An address can prove that it must not be mailed —
+ * `mailer-daemon@` is never a person — but no property of an address can prove that its owner
+ * has not unsubscribed. Offering a third state would invite a caller to read "not suppressed"
+ * as "clear to send", which is the failure this shape exists to remove.
+ */
+export type SuppressionOutcome =
+  | { readonly state: 'SUPPRESSED'; readonly reason: string }
+  | { readonly state: 'CANNOT_DETERMINE'; readonly why: string };
+
+/**
+ * S26/S49 — this used to be `isSuppressed`, returning `{ suppressed: false }`, and the two
+ * lookups it made before saying so read `globalStore`: the IN-MEMORY SEED STORE.
+ *
+ * The live inbound path, `inboundPipeline.processNewEmail`, never touches `globalStore` — a
+ * grep for it in that file returns nothing. So a real customer's unsubscribe was written to the
+ * datastore, and this function then searched an in-memory fixture the unsubscribe had never
+ * reached, found nothing, and returned "not suppressed". Its one live caller, the independent
+ * auditor, recorded that as `suppression: 'CLEAN'` against the draft.
+ *
+ * Nothing was sent that should not have been: the Production Action Gateway independently
+ * refuses every EMAIL_SEND without a `contactId`, without a contact record, with any of
+ * `suppressed`/`unsubscribed`/`hardBounced`/`complained`/`emailStatus === 'BOUNCED'` set, or
+ * with `consentGiven !== true` — reading the live record, per recipient, at dispatch. The
+ * defect was a false safety RECORD rather than an unguarded send path, and saying otherwise
+ * would inflate it.
+ *
+ * A false safety record is still worth removing. It is the artefact an incident review reads,
+ * and "the auditor recorded suppression CLEAN" is a sentence someone would reasonably rely on.
+ *
+ * The store lookups are deleted rather than repointed. Against a live address they could only
+ * ever produce a false CLEAN or a coincidental match on a seed fixture, and neither is a
+ * suppression check. The authority is the gateway, and this says so instead of guessing.
+ */
+export function checkSuppression(email: string): SuppressionOutcome {
   const clean = email.toLowerCase().trim();
 
-  // Check global store unsubscribes
-  const lead = globalStore.leads.find((l) => l.email.toLowerCase().trim() === clean);
-  if (lead && lead.status === BuyingStage.UNSUBSCRIBED) {
-    return { suppressed: true, reason: "Lead opted out / unsubscribed" };
+  // Determinable from the address itself. A bounce or system mailbox is not a person who could
+  // have consented, whatever any record says.
+  if (clean.includes('no-reply') || clean.includes('mailer-daemon') || clean.includes('postmaster')) {
+    return { state: 'SUPPRESSED', reason: 'Automated / system bounce address' };
   }
 
-  const conv = globalStore.conversations.find((c) => c.contactEmail.toLowerCase().trim() === clean);
-  if (conv && conv.lastReplyIntent === "UNSUBSCRIBE") {
-    return { suppressed: true, reason: "Contact requested unsubscribe in conversation" };
-  }
-
-  // Hardcoded suppression domain/patterns
-  if (clean.includes("no-reply") || clean.includes("mailer-daemon") || clean.includes("postmaster")) {
-    return { suppressed: true, reason: "Automated / system bounce address" };
-  }
-
-  return { suppressed: false };
+  return {
+    state: 'CANNOT_DETERMINE',
+    why:
+      'suppression state is held on the contact record and is enforced by the Production ' +
+      'Action Gateway against the live record at dispatch. Nothing reachable from here can ' +
+      'establish it, so it is reported as not assessed rather than as clean.',
+  };
 }
 
 // ==========================================

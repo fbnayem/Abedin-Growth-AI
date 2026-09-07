@@ -78,14 +78,31 @@ The suppression check that *is* reachable is `isSuppressed` in
 `inboundPipeline.processNewEmail`, does not touch `globalStore` at all; a grep for it in that
 file returns nothing.
 
-So the sequence for a real customer is: the unsubscribe arrives, is processed, and is written to
-the datastore; the suppression check then runs and queries an in-memory fixture that the
-unsubscribe never reached. The check executes and cannot fire. That is a different and quieter
-failure than "the service is unreachable" — this one produces a `CLEAN` suppression outcome on
-every draft, for every recipient, including one who has just asked to be removed.
+So the sequence for a real customer was: the unsubscribe arrives, is processed, and is written to
+the datastore; the suppression check then queries an in-memory fixture the unsubscribe never
+reached, finds nothing, and records a `CLEAN` suppression outcome against the draft — for every
+recipient, always, by construction.
 
-No `List-Unsubscribe` header is emitted anywhere. Idempotency keys are not a suppression
-mechanism and never were: they deduplicate a send, they do not decide whether it may happen.
+**No send was unguarded, and saying otherwise would inflate this.** The Production Action Gateway
+independently refuses every `EMAIL_SEND` that arrives without a `contactId`, without a contact
+record, with any of `suppressed` / `unsubscribed` / `hardBounced` / `complained` /
+`emailStatus === 'BOUNCED'` set, or with `consentGiven !== true` — reading the **live** record,
+per recipient, at dispatch (`server/gateway/actionGateway.ts`). A permanent delivery failure
+writes `hardBounced` onto that record, so the flag has a writer. This was a false safety
+**record**, not an open door.
+
+A false safety record is still worth removing, because it is the artefact an incident review
+reads and "the auditor recorded suppression CLEAN" is a sentence someone would reasonably rely
+on. **Fixed 2026-09-08.** The check now returns only what an address can settle: a bounce or
+system mailbox is `SUPPRESSED`, everything else is `CANNOT_DETERMINE`. There is deliberately no
+state meaning "clear to send", because no property of an address can prove its owner has not
+opted out — a mutation attempting to return one does not type-check. The auditor records
+`suppression: NOT_RUN` and names the gap in `notAssessed` rather than certifying a check it did
+not perform.
+
+The claim was right that a suppression mechanism exists. It was wrong about where, and about what
+it is worth: no `List-Unsubscribe` header is emitted anywhere, and idempotency keys are not a
+suppression mechanism — they deduplicate a send, they do not decide whether it may happen.
 
 ### 4. Idempotent Outbox Queue — claimed PASS
 

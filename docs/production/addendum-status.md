@@ -3493,19 +3493,44 @@ So for a real customer the sequence is: the unsubscribe arrives, is classified, 
 to the datastore; the suppression check then queries an in-memory fixture the unsubscribe never
 reached, finds nothing, and the draft proceeds with `suppression: CLEAN` recorded against it.
 
-This is worse than the unreachable service, because it produces a **positive safety signal**.
-An unreachable check is absent and eventually noticed. This one runs, returns the permissive
-answer for every recipient, and writes CLEAN into the safety record — which is exactly the
-shape §14 forbids: an unknown permission state resolving to permission. The correct outcome
-for a check that cannot see the data it needs is `NOT_RUN`, and a NOT_RUN suppression must not
-permit an autonomous send.
+**No send was unguarded, and the first write-up of this finding said less than it should have
+about that.** The Production Action Gateway independently refuses every `EMAIL_SEND` without a
+`contactId`, without a contact record, with any of
+`suppressed`/`unsubscribed`/`hardBounced`/`complained`/`emailStatus === 'BOUNCED'` set, or with
+`consentGiven !== true` — reading the LIVE record, per recipient, at dispatch
+(`actionGateway.ts:569-612`). `applyBounceSuppression` writes `hardBounced` onto that record
+after a permanent delivery failure, so the flag has a writer. This was a false safety RECORD,
+not an open door, and the correction is recorded here rather than quietly applied because
+overstating a risk is the same class of error as understating one.
 
-Note this was made *reachable* by a fix. Before P0.11 the auditor returned a hardcoded
-`{ decision: 'PASS' }`, so the check never ran at all and the store it read was irrelevant.
-Wiring the auditor turned a dead check into a live one that answers wrongly — which is a real
-improvement and a new defect at the same time, and is why the sequencing matters here.
+A false safety record is still worth removing: it is the artefact an incident review reads.
 
-**Not fixed in that commit.** The retraction records it; the repair is the next item.
+**Fixed 2026-09-08.** `isSuppressed` is replaced by `checkSuppression`, which returns only what
+an address can settle — `SUPPRESSED` for a bounce or system mailbox, `CANNOT_DETERMINE` for
+everything else. There is deliberately no `NOT_SUPPRESSED`: no property of an address proves
+its owner has not opted out, and a third state would invite a caller to read it as clearance.
+The two seed-store lookups are deleted rather than repointed, because against a live address
+they could only produce a false clear or a coincidental match on a fixture. The auditor now
+records `suppression: NOT_RUN`, drops the "Suppression verification clean" line it used to push
+into `checksPassed`, and names the gap in `notAssessed` with the gateway as the authority.
+
+15 invariants. 11 of 12 mutants killed against the real gate. The twelfth could not be written:
+`SuppressionOutcome` has no state meaning "clear to send", so a mutant returning one does not
+type-check — the permissive answer is unavailable by construction rather than guarded against,
+which is a stronger result than a killed mutant.
+
+**Why the tests found this and 1,169 existing assertions had not.** The suite passed unchanged
+when `CLEAN` became `NOT_RUN`. Not one test had ever asserted anything about the suppression
+outcome — `grep "safety.suppression" server/tests` returned nothing. The check was wired, its
+result was recorded, and no test looked at the record.
+
+Note also that the defect was made REACHABLE by a fix. Before P0.11 the auditor returned a
+hardcoded `{ decision: 'PASS' }`, so the check never ran and the store it read did not matter.
+Wiring the auditor turned a dead check into a live one that answered wrongly.
+
+**Still NOT_STARTED as a section.** This closes one false record. None of the fourteen campaign
+guards exists, there is no enrolment state or scheduler, no `List-Unsubscribe` header, and an
+inbound reply still does not durably suppress the sequence — only the reply it arrived on.
 
 
 **What exists.** Campaign documents with a `steps` array carrying `delayDays`, and nothing that executes them. Grep for `delayDays` across `server/` and `src/` returns two hits, both render-time labels in the UI. There is no enrolment record, no per-contact sequence state, and no scheduler — so all fourteen required guards are moot for want of a send loop.
