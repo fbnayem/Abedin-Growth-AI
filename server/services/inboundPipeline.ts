@@ -30,6 +30,7 @@ import { extractAndSynthesizeMemory } from '../agents/conversationMemoryAgent';
 import { recordFacts, listActiveFacts } from '../lib/factStore';
 import { observationsFromMemory } from '../domain/memoryFacts';
 import { classifyAutomation, type AutomationVerdict } from '../domain/automatedMail';
+import { attachmentVerdict, attachmentsPermitAutonomy } from '../domain/attachmentPolicy';
 import { describeAbstention } from '../domain/abstention';
 import { auditReplyAgainstPlan } from '../agents/independentAuditor';
 import { dispositionFor } from '../domain/adjudication';
@@ -381,6 +382,22 @@ export class InboundPipeline {
       // available to the message record. The REFUSAL happens after the message is stored:
       // a bounce is evidence and must be kept, it just must not be replied to.
       const automation = classifyAutomation({ headers: email.headers, body: email.parsed });
+
+      // S17 — WHAT IS ATTACHED DECIDES WHETHER THIS MAY BE ANSWERED WITHOUT A PERSON.
+      //
+      // The walk records attachments (§1t) and nothing read them. An executable on an inbound
+      // sales email is not a document to compose a reply about, and a filename carrying a
+      // direction override is one chosen to be misread.
+      //
+      // This does NOT drop the message and does not stop the pipeline: the message is stored
+      // either way, because it is evidence. It forces the resulting draft to HUMAN_REVIEW.
+      const attachments = attachmentVerdict(
+        email.parsed.attachments,
+        email.parsed.attachmentCount
+      );
+      if (attachmentsPermitAutonomy(attachments.disposition) === false) {
+        console.warn(`[InboundPipeline] ${email.id}: ${attachments.reason}`);
+      }
 
       const budgetTracker = new BudgetTracker();
       budgetTracker.recordStep();
@@ -852,7 +869,18 @@ export class InboundPipeline {
       // S24 — from the verdict, via the shared mapping. REWRITE and ESCALATE both mean a
       // control fired; the difference between them is what an operator needs in order to
       // triage, not whether to hold.
-      const outboxStatus = sendDisposition.status;
+      // S17 — an attachment finding forces human review regardless of what the audit decided.
+      //
+      // Written as an override of the audit rather than as a branch inside it, because the two
+      // are answering different questions: the auditor grades the DRAFT, and this grades what
+      // arrived. A clean draft in reply to a message carrying `invoice.pdf.exe` is exactly the
+      // case where the auditor has nothing to object to.
+      //
+      // It can only ever tighten. `HUMAN_REVIEW` is the held status, so an attachment finding
+      // cannot release a draft the auditor held.
+      const outboxStatus = attachmentsPermitAutonomy(attachments.disposition)
+        ? sendDisposition.status
+        : 'HUMAN_REVIEW';
 
       // P0.12 — Stamp the draft with the conversation version it was generated from, plus a
       // digest of exactly what would be sent. The worker re-checks both immediately before
@@ -899,7 +927,9 @@ export class InboundPipeline {
         `reply_${email.id}`,
         { generatedForInboundVersion: inboundVersion, approvalDigest },
         outboxStatus,
-        auditReason
+        // The operator is told which control held this. An attachment finding and an audit
+        // objection lead to different actions, and a single "held for review" says neither.
+        attachments.reason === null ? auditReason : `${attachments.reason} | ${auditReason}`
       );
 
       if (queued === null) {
