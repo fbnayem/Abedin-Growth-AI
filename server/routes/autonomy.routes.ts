@@ -3,7 +3,7 @@ import { orgScope } from '../tenancy/orgScope';
 import { sendError, sendCaught } from '../lib/errors';
 import { operatorGate, type Attribution } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
-import { readLock, changeLock } from '../services/autonomyLock.service';
+import { readLock, readLocksFor, changeLock } from '../services/autonomyLock.service';
 
 /**
  * THE WRITER THE AUTONOMY LOCK NEVER HAD.
@@ -41,6 +41,30 @@ function attributedOrRefused(req: any, res: any): Attribution | null {
   }
   return gate.attribution;
 }
+
+/**
+ * The locks for a named set of conversations — what the outbox console draws its badges from.
+ *
+ * `GET /api/autonomy?conversationIds=a,b,c`
+ *
+ * Registered before `/:conversationId` for reading order only; Express cannot confuse them,
+ * because `/:conversationId` requires a path segment and this route is the bare root.
+ *
+ * A CONVERSATION MISSING FROM THE RESPONSE IS NOT AN ERROR AND IS NOT PERMISSION. The console
+ * reads an absent conversation as UNKNOWN and refuses on it, so a datastore that answers for
+ * four of five rows still shows the operator four real states and one honest gap.
+ */
+autonomyRouter.get('/', async (req, res) => {
+  try {
+    const result = await readLocksFor(orgScope(req), req.query.conversationIds);
+    if (result.ok === false) {
+      return sendError(req, res, result.code, result.message);
+    }
+    return res.json({ locks: result.locks });
+  } catch (e) {
+    return sendCaught(req, res, e);
+  }
+});
 
 /**
  * The current lock, as one of three states rather than a boolean, because the caller needs to

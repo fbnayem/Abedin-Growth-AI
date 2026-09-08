@@ -45,8 +45,25 @@ import type { Attribution } from './operatorAction';
  * human has taken this conversation" cannot resolve to "no human has".
  */
 
-export const LOCK_STATES = ['PAUSED', 'RUNNING', 'UNKNOWN'] as const;
-export type LockState = (typeof LOCK_STATES)[number];
+/**
+ * The three states, and the display decisions the operator console makes from them, live in
+ * `shared/domain/autonomyDisplay.ts` and are re-exported here.
+ *
+ * They moved there when the outbox console started reading the lock. The console has to name
+ * the same three states this module enforces, and `src/` importing from `server/` is the
+ * dependency inversion S40 is about — so the union has one definition in `shared/`, which both
+ * sides already import, rather than two that agree until someone adds a state to one of them.
+ *
+ * Re-exported rather than relocated at the call sites. `LockState` is imported from here by
+ * `services/autonomyLock.service.ts` and `tests/autonomyLock.invariant.test.ts`, and the
+ * module itself by `gateway/actionGateway.ts` and `workers/outbox.worker.ts`; rewriting four
+ * import lines to say `shared/` would put churn in the diff around the one line that matters,
+ * and this module is still where the ENFORCEMENT lives — `mayProceed` and `refusalFor` are
+ * here, and a reader following the guard should land on them rather than on a display module.
+ */
+export { LOCK_STATES } from '../../shared/domain/autonomyDisplay';
+export type { LockState } from '../../shared/domain/autonomyDisplay';
+import type { LockState } from '../../shared/domain/autonomyDisplay';
 
 /** The field a pause writes, and the legacy status the worker already honoured. */
 export const LOCK_FIELD = 'autonomyPausedByHuman';
@@ -217,4 +234,106 @@ export function lockRecord(input: {
     autonomyLockUnattributedReason: attribution.kind === 'IDENTIFIED' ? null : attribution.why,
     autonomyLockAt: at,
   };
+}
+
+/**
+ * THE IDS THE OPERATOR CONSOLE MAY ASK ABOUT IN ONE REQUEST.
+ *
+ * The console shows a queue of messages and needs the lock state for each one's conversation.
+ * Asking per row is one request per message from a browser that has just rendered them all;
+ * asking for everything is an endpoint whose cost is set by the caller, which is exactly what
+ * P0.5 was about.
+ *
+ * So the caller names the conversations, and this decides whether that list is answerable.
+ *
+ * IT REFUSES RATHER THAN TRUNCATES. A cap that silently drops the tail returns a map missing
+ * the conversations it dropped, and `lockStateAt` reads an absent conversation as UNKNOWN —
+ * so the console would show "lock unreadable" on rows that were simply never asked about, and
+ * the operator would go looking for a datastore fault that does not exist. Refusing names the
+ * problem at the caller, which is where the fix is.
+ */
+export const MAX_BATCH_IDS = 100;
+
+/** The longest a conversation id may be before this is a payload rather than an identifier. */
+export const MAX_ID_LENGTH = 200;
+
+export type ConversationIdsParse =
+  | { readonly ok: true; readonly ids: string[] }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Parse `?conversationIds=a,b,c`.
+ *
+ * An ABSENT parameter and an EMPTY one both mean "no conversations", which is a legitimate
+ * request that returns an empty map — the console renders an empty queue and asks about
+ * nothing. That is not the same as a malformed list, which is refused.
+ *
+ * An EMPTY SEGMENT — `a,,b` — is refused rather than skipped. Skipping it means the caller
+ * asked about three conversations, got two, and is told nothing; the third then renders as
+ * UNKNOWN for a reason that is a typo in a query string.
+ *
+ * The segment rules mirror `assertDocumentId` in `server/store/index.ts` deliberately. Without
+ * them a `/` in an id reaches the store, throws `StorePathError`, and `sendCaught` answers 500
+ * — an input error reported as a server fault, with the operator told to check the logs.
+ */
+export function conversationIdsFrom(
+  raw: unknown,
+  max: number = MAX_BATCH_IDS
+): ConversationIdsParse {
+  if (raw === undefined || raw === null) return { ok: true, ids: [] };
+
+  if (typeof raw !== 'string') {
+    // Express turns a repeated query parameter into an array. Refusing rather than joining:
+    // `?conversationIds=a&conversationIds=b` and `?conversationIds=a,b` should not be two
+    // spellings of one request, because only one of them is bounded by this parser.
+    return {
+      ok: false,
+      message:
+        '`conversationIds` must be a single comma-separated string. Repeat the parameter and ' +
+        'the request means two different things depending on which one is read.',
+    };
+  }
+
+  if (raw.trim().length === 0) return { ok: true, ids: [] };
+
+  const seen = new Set<string>();
+  const ids: string[] = [];
+  for (const segment of raw.split(',')) {
+    const id = segment.trim();
+    if (id.length === 0) {
+      return {
+        ok: false,
+        message:
+          '`conversationIds` contains an empty entry. Refusing rather than skipping it: a ' +
+          'dropped id comes back as an unreadable lock, which reads as a datastore fault.',
+      };
+    }
+    if (id.length > MAX_ID_LENGTH) {
+      return {
+        ok: false,
+        message: `A conversation id may be at most ${MAX_ID_LENGTH} characters.`,
+      };
+    }
+    if (id.includes('/') || id === '.' || id === '..') {
+      return {
+        ok: false,
+        message: `Conversation id ${JSON.stringify(id)} would change the shape of a store path.`,
+      };
+    }
+    if (seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+
+  if (ids.length > max) {
+    return {
+      ok: false,
+      message:
+        `At most ${max} conversations may be read at once; ${ids.length} were requested. ` +
+        'The list is refused rather than truncated, because a dropped conversation is ' +
+        'indistinguishable from one whose lock could not be read.',
+    };
+  }
+
+  return { ok: true, ids };
 }
