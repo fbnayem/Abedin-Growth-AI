@@ -32,6 +32,11 @@ export const UNAUTHENTICATED_API_PATHS = new Set([
   '/health',
   '/signature/webhook',
   '/webhooks/gmail',
+  // S35 — CSP violation reports. The caller is a browser enforcing our own policy, and it will
+  // not hold a credential. Nothing stands in for authentication here because nothing needs to:
+  // the endpoint writes nothing, logs a bounded and neutralised summary, and answers 204 to
+  // every body. See server/routes/cspReport.routes.ts.
+  '/csp-report',
 ]);
 
 /**

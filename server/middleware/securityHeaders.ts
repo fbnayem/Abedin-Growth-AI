@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { usableAppUrl } from '../domain/unsubscribe';
 
 /**
  * S35 — THE CONTENT SECURITY POLICY THIS APPLICATION DID NOT HAVE.
@@ -65,7 +66,22 @@ import type { Request, Response, NextFunction } from 'express';
 export interface CspOptions {
   /** Development permits what Vite needs; production permits none of it. */
   readonly development: boolean;
+  /**
+   * Whether to add `report-to csp` alongside `report-uri`.
+   *
+   * Only true when `APP_URL` gives an absolute origin, because `report-to` is inert without a
+   * `Reporting-Endpoints` header naming one — and a directive that names a group nothing
+   * defines is a control that looks present and does nothing.
+   */
+  readonly reportTo?: boolean;
 }
+
+/**
+ * Where violation reports go. One constant, because it appears in three places — the directive,
+ * the `Reporting-Endpoints` header and the route mount — and three copies of a path is three
+ * chances for reporting to be silently off.
+ */
+export const CSP_REPORT_PATH = '/api/csp-report';
 
 const GOOGLE_SCRIPTS = ['https://accounts.google.com', 'https://apis.google.com'];
 
@@ -113,13 +129,28 @@ export function contentSecurityPolicy(options: CspOptions): string {
     ['frame-src', GOOGLE_FRAMES],
   ];
 
-  const policy = directives.map(([name, values]) => `${name} ${values.join(' ')}`);
+  // S35 — WHERE VIOLATIONS GO.
+  //
+  // The policy landed without these, and a CSP with no reporting is a control whose only
+  // feedback channel is a customer saying the page looks wrong. It matters in both directions:
+  // a directive that is too tight breaks a feature silently, and one that is too loose lets a
+  // real injection into this origin — which renders inbound email from strangers — produce no
+  // signal at all.
+  //
+  // BOTH SPELLINGS, because browsers disagree about which they support. `report-uri` is
+  // deprecated and universally implemented; `report-to` is the replacement and needs a
+  // `Reporting-Endpoints` response header naming an ABSOLUTE url, which is why it is emitted
+  // only when APP_URL gives us one (see `securityHeaders`). A relative `report-uri` works
+  // without any configuration at all, so reporting is never silently off.
+  const directiveStrings = directives.map(([name, values]) => `${name} ${values.join(' ')}`);
+  directiveStrings.push(`report-uri ${CSP_REPORT_PATH}`);
+  if (options.reportTo === true) directiveStrings.push('report-to csp');
 
   // Only in production: in development the dev server is plain http on localhost, and
   // upgrade-insecure-requests would rewrite every asset request to https and break the page.
-  if (!development) policy.push('upgrade-insecure-requests');
+  if (!development) directiveStrings.push('upgrade-insecure-requests');
 
-  return policy.join('; ');
+  return directiveStrings.join('; ');
 }
 
 /**
@@ -142,10 +173,31 @@ export function securityHeaders(
   // Moving the decision inside removes the argument there is to get wrong, and puts it where a
   // test can set NODE_ENV and assert which policy comes out. The parameter remains so tests can
   // drive both branches without touching the environment.
-  const csp = contentSecurityPolicy({ development });
+  // S35 — the modern reporting form needs an ABSOLUTE url, and only `APP_URL` has one.
+  //
+  // Read here rather than at module scope: `config` in `server/config/environment.ts` is
+  // evaluated on import, and S46 is the finding that imports are hoisted above
+  // `dotenv.config()`, so a module-level read gets the value from before `.env` was loaded.
+  //
+  // `usableAppUrl` is the same character-restricted check the unsubscribe links use. It has to
+  // be, because this value is concatenated into a response header, and a value carrying a
+  // newline would end that header and begin one of its own.
+  const appUrl = (process.env.APP_URL ?? '').trim().replace(/\/+$/, '');
+  const reportTo = usableAppUrl(appUrl);
+  const csp = contentSecurityPolicy({ development, reportTo });
 
   return function applySecurityHeaders(_req: Request, res: Response, next: NextFunction): void {
     res.setHeader('Content-Security-Policy', csp);
+
+    // The endpoint group `report-to csp` refers to. Emitted only when there is an absolute url
+    // to name; without it the directive is inert, and `report-uri` — which takes a relative
+    // path and is emitted unconditionally — is what keeps reporting working anyway.
+    if (reportTo) {
+      res.setHeader(
+        'Reporting-Endpoints',
+        `csp="${appUrl}${CSP_REPORT_PATH}"`
+      );
+    }
 
     // A response whose type is guessed is a response that can be executed. This matters for
     // the JSON API: without it, a browser may sniff a JSON body containing attacker text as

@@ -50,6 +50,8 @@ import { outboxRouter } from "./server/routes/outbox.routes";
 import { autonomyRouter } from "./server/routes/autonomy.routes";
 import { unsubscribeRouter } from "./server/routes/unsubscribe.routes";
 import { isUnauthenticatedApiPath } from "./server/middleware/authAllowlist";
+import { cspReportRouter } from "./server/routes/cspReport.routes";
+import { CSP_REPORT_PATH } from "./server/middleware/securityHeaders";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
 import { simulatePitchBattle } from './server/agents/pitchBattleAgent';
@@ -120,6 +122,21 @@ async function startServer() {
   app.use(securityHeaders());
 
   app.use('/api/signature/webhook', express.raw({ type: '*/*' }));
+
+  // S35 — the CSP report body, parsed BEFORE the global JSON parser.
+  //
+  // Browsers send `application/csp-report` (legacy) or `application/reports+json` (Reporting
+  // API), and `express.json()` matches neither — so in principle a route-level parser would
+  // work. It is mounted here anyway, because S33 is the finding that `express.json()` sets
+  // `req._body = true` and silently defeats a route-level parser mounted after it. Relying on
+  // "the content types happen not to overlap" is how that bug came back the first time.
+  //
+  // 16kb: a violation report is a few hundred bytes, and the body is unauthenticated.
+  app.use(
+    CSP_REPORT_PATH,
+    express.json({ limit: '16kb', type: ['application/csp-report', 'application/reports+json', 'application/json'] })
+  );
+
   app.use(express.json());
 
 // P0.4 / S26 — the allowlist of unauthenticated paths moved to
@@ -183,6 +200,7 @@ for (const aiPath of [
   // writer was a service with no callers. See server/routes/autonomy.routes.ts.
   app.use("/api/autonomy", autonomyRouter);
   app.use("/api/unsubscribe", unsubscribeRouter);
+  app.use(CSP_REPORT_PATH, cspReportRouter);
 
 
   // EXECUTABLE READINESS CHECK (Requirement X)
