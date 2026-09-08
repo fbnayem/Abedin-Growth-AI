@@ -188,6 +188,30 @@ export function classifyAutomation(input: ClassifyInput): AutomationVerdict {
     };
   }
 
+  // ---- read receipts --------------------------------------------------------
+  // A message disposition notification (RFC 8098) is `multipart/report` with
+  // `report-type=disposition-notification`. It reports that somebody OPENED a message; there is
+  // nothing in it to answer, and replying to one puts a generated reply in front of a person
+  // whose mail client sent it without their involvement.
+  //
+  // It is not a bounce, so it does not reach the block above: `body.deliveryStatus` is empty
+  // and `report-type` is not `delivery-status`. Before this it fell through every branch and
+  // was answered as though the recipient had written something.
+  if (/report-type\s*=\s*"?disposition-notification"?/i.test(contentType)) {
+    signals.push('report-type=disposition-notification');
+    return {
+      classification: 'AUTO_GENERATED',
+      replyPermitted: false,
+      signals,
+      reason:
+        'Message disposition notification (a read receipt). It reports that a message was ' +
+        'opened; there is nothing in it a reply could answer.',
+      permanentFailure: false,
+      failedRecipient: null,
+      dsnStatus: null,
+    };
+  }
+
   // ---- mailing lists --------------------------------------------------------
   if (headers.has('list-id') || headers.has('list-unsubscribe') || headers.has('list-post')) {
     signals.push('List-* headers');
@@ -244,6 +268,28 @@ export function classifyAutomation(input: ClassifyInput): AutomationVerdict {
       replyPermitted: false,
       signals,
       reason: 'Message declares itself an automatic response.',
+      permanentFailure: false,
+      failedRecipient: null,
+      dsnStatus: null,
+    };
+  }
+
+  // `X-Loop` is the oldest loop-prevention convention there is: a responder stamps it so that
+  // it can recognise its own output coming back. Seeing one on an INBOUND message means the
+  // sender is a responder that expects the recipient not to answer.
+  //
+  // `X-Auto-Response-Suppress` is Microsoft's request that the recipient not auto-respond to
+  // this message. Honouring it is the whole content of the header, and it is set by the
+  // automated systems that send the mail this check exists for.
+  if (headers.has('x-loop') || headers.has('x-auto-response-suppress')) {
+    signals.push(headers.has('x-loop') ? 'X-Loop' : 'X-Auto-Response-Suppress');
+    return {
+      classification: 'AUTO_GENERATED',
+      replyPermitted: false,
+      signals,
+      reason:
+        'The sender asked not to be auto-responded to, or stamped a loop-prevention header. ' +
+        'Answering anyway is how two systems end up mailing each other indefinitely.',
       permanentFailure: false,
       failedRecipient: null,
       dsnStatus: null,

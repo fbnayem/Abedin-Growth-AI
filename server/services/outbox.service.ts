@@ -655,6 +655,74 @@ export class OutboxService {
   }
 
   /** Operator/inspection helper: list jobs by status. */
+  /**
+   * S28 — when this conversation last received an autonomous reply, and how many.
+   *
+   * RETURNS NULL RATHER THAN AN EMPTY ARRAY WHEN IT CANNOT ANSWER, and that distinction is the
+   * whole reason this is a separate method rather than a call to `listByStatus`.
+   *
+   * `listByStatus` catches its own errors and returns `[]`. That is right for drawing the
+   * operator console — a queue it cannot read displays as empty, and the operator sees an empty
+   * console rather than a crash. It would be an inversion here: a failed query would become
+   * "no replies have been sent on this conversation", and the loop check would permit the send
+   * it exists to stop. Three of the autonomy lock's original defects were exactly that shape.
+   *
+   * PROCESSED only. A job that is PENDING has not gone anywhere, and one that DEAD_LETTERED
+   * never will; counting either would refuse sends on the strength of mail nobody received.
+   *
+   * The cap is a refusal, not a truncation. Rows come back ordered by id, so taking the first
+   * `HISTORY_CAP` of a longer set could return only old ones and under-count the window —
+   * which permits. Hitting the cap therefore answers "cannot determine" and the caller refuses.
+   */
+  async replyTimesForConversation(
+    organizationId: string,
+    conversationId: string
+  ): Promise<number[] | null> {
+    const outboxRef = outboxCollection(organizationId);
+    if (!outboxRef) return null;
+    const HISTORY_CAP = 200;
+    try {
+      const q = query(
+        outboxRef,
+        where('conversationId', '==', conversationId),
+        where('status', '==', 'PROCESSED'),
+        limit(HISTORY_CAP)
+      );
+      const snap = await getDocs(q);
+      const times: number[] = [];
+      let unreadable = false;
+      snap.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const at = data.processedAt;
+        // A PROCESSED row with no usable timestamp cannot be placed inside or outside the
+        // window. Dropping it would shrink the count, and shrinking the count permits.
+        if (typeof at !== 'number' || !Number.isFinite(at)) {
+          unreadable = true;
+          return;
+        }
+        times.push(at);
+      });
+      if (unreadable) {
+        console.warn(
+          `[Outbox] A PROCESSED job for conversation ${conversationId} carries no usable ` +
+            'processedAt; the reply history cannot be counted and the send will be refused.'
+        );
+        return null;
+      }
+      if (times.length >= HISTORY_CAP) {
+        console.warn(
+          `[Outbox] Reply history for conversation ${conversationId} hit the ${HISTORY_CAP}-row ` +
+            'cap; refusing rather than counting a truncated list.'
+        );
+        return null;
+      }
+      return times;
+    } catch (e: any) {
+      console.error('[Outbox] replyTimesForConversation failed:', e?.message);
+      return null;
+    }
+  }
+
   async listByStatus(organizationId: string, status: string, limitCount = 50): Promise<any[]> {
     const outboxRef = outboxCollection(organizationId);
     if (!outboxRef) return [];

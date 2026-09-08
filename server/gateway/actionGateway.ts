@@ -21,6 +21,8 @@ import {
 } from '../domain/campaignSafety';
 import { lockStateOf, mayProceed, refusalFor } from '../domain/autonomyLock';
 import { unsubscribeUrlFor } from '../domain/unsubscribe';
+import { replyLoopVerdict } from '../domain/replyLoop';
+import { outboxService } from '../services/outbox.service';
 import {
   schemaCompatibility,
   schemaPermitsIrreversibleActions,
@@ -800,6 +802,46 @@ export class ActionGateway {
             const reason = String(e?.message ?? e);
             console.warn(`[ActionGateway] EMAIL_SEND refused: ${reason}`);
             return { success: false, error: reason, errorCode: 'UNRECONCILABLE_SEND' };
+        }
+
+        // S28 — THE REPLY LOOP THAT NO HEADER WOULD HAVE REVEALED.
+        //
+        // `automatedMail.classifyAutomation` refuses to reply to anything carrying an
+        // automation marker, and deliberately never reads subject prose — matching "Out of
+        // Office" is the substring classification this repository has a guardrail against, and
+        // it does not survive an autoresponder writing in another language.
+        //
+        // Which leaves the case the status document names: an out-of-office that sets no
+        // `Auto-Submitted`, no `X-Autoreply` and no `Precedence`, sent from a personal address,
+        // is indistinguishable from a person. There is no header to add; the evidence is not in
+        // the message.
+        //
+        // RFC 3834 §2.1 answers this with a rate limit rather than a better classifier, for
+        // the same reason. Two machines answering each other is the harm, and a counter stops
+        // it whatever either message looked like.
+        //
+        // The history is NULL when it could not be read, and null refuses. `listByStatus`
+        // returns `[]` on failure — correct for drawing a console, an inversion here.
+        //
+        // A send with no conversation cannot be loop-checked at all, so it is refused rather
+        // than exempted. Every EMAIL_SEND this system produces carries one — `outbox.worker`
+        // sets it from `job.conversationId` — so this refuses a caller that does not, rather
+        // than a path that exists.
+        if (!request.conversationId) {
+            const reason =
+                'EMAIL_SEND requires a conversationId so the reply-loop budget can be checked. ' +
+                'Refusing rather than sending a reply that could not be counted.';
+            console.warn(`[ActionGateway] ${reason}`);
+            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+        }
+        const replyHistory = await outboxService.replyTimesForConversation(
+            request.organizationId,
+            request.conversationId
+        );
+        const loop = replyLoopVerdict({ history: replyHistory, now: Date.now() });
+        if (loop.allowed === false) {
+            console.warn(`[ActionGateway] EMAIL_SEND refused (${loop.code}): ${loop.reason}`);
+            return { success: false, blockedReason: loop.reason, errorCode: 'POLICY_BLOCKED' };
         }
 
         // S26 — NO UNSUBSCRIBE URL, NO SEND.
