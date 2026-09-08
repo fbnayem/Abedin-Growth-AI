@@ -115,6 +115,26 @@ function sep() {
 /** A currency symbol followed by a digit. */
 const PRICE_LITERAL = /£\s?\d/g;
 
+/**
+ * S25 — MONEY IN MINOR UNITS, WHICH THE `£` DETECTOR ABOVE COULD NOT SEE.
+ *
+ * `PRICE_LITERAL` caught every prose price and was blind to the only figure in this system that
+ * can actually move money: `unit_amount: 500000` in `stripe.routes.ts` — a hardcoded USD $5,000
+ * for a product priced everywhere else at £499/mo, in a currency `pricing.ts` does not even
+ * model, since `CURRENCIES` is `['GBP']`.
+ *
+ * A control that catches the documentation and misses the live path is the shape this audit
+ * keeps finding, and it was in the guardrail itself.
+ *
+ * So this looks for the field names a payment provider charges on, carrying a numeric LITERAL.
+ * `unit_amount: priced.price.minorUnits` does not match, because that is the amount arriving
+ * from configuration — which is the fix, not the defect.
+ *
+ * Three digits or more: `quantity: 1` and `attempts: 2` are not money, and a rule that fired on
+ * them would be turned off within a week.
+ */
+const MINOR_UNIT_LITERAL = /\b(unit_amount|unitAmount|minorUnits|amount_?[a-z]*)\s*:\s*\d{3,}/gi;
+
 function stripComments(source) {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -148,10 +168,41 @@ for (const file of files) {
   if (ALLOWED_FILES.has(rel)) continue;
 
   const source = stripComments(readFileSync(file, 'utf8'));
-  for (const match of source.matchAll(PRICE_LITERAL)) {
-    const line = source.slice(0, match.index).split('\n').length;
-    const text = source.split('\n')[line - 1] ?? '';
-    violations.push({ file: rel, line, snippet: text.trim().slice(0, 100) });
+  for (const pattern of [PRICE_LITERAL, MINOR_UNIT_LITERAL]) {
+    pattern.lastIndex = 0;
+    for (const match of source.matchAll(pattern)) {
+      const line = source.slice(0, match.index).split('\n').length;
+      const text = source.split('\n')[line - 1] ?? '';
+      violations.push({ file: rel, line, snippet: text.trim().slice(0, 100) });
+    }
+  }
+}
+
+/**
+ * A SELF-CHECK THAT RUNS THE REAL PATTERNS.
+ *
+ * The minor-unit rule was added because the existing one could not see the live path. A rule
+ * that matches nothing would reproduce that exactly, and would do it silently on a clean tree.
+ */
+for (const sample of ["unit_amount: 500000, // $5,000.00", 'unitAmount: 49900', 'minorUnits: 49900']) {
+  MINOR_UNIT_LITERAL.lastIndex = 0;
+  if (!MINOR_UNIT_LITERAL.test(sample)) {
+    console.error(`check-single-price-source: SELF-CHECK FAILED — not detected: ${sample}`);
+    process.exit(1);
+  }
+}
+for (const sample of [
+  'unit_amount: priced.price.minorUnits,',
+  'quantity: 1,',
+  'attempts: 2,',
+  'const minorUnits = Number(rawAmount);',
+]) {
+  MINOR_UNIT_LITERAL.lastIndex = 0;
+  if (MINOR_UNIT_LITERAL.test(sample)) {
+    console.error(
+      `check-single-price-source: SELF-CHECK FAILED — flagged legitimate code: ${sample}`
+    );
+    process.exit(1);
   }
 }
 
@@ -170,6 +221,7 @@ if (violations.length > 0) {
 }
 
 console.log(
-  `check-single-price-source: ok — no price literal outside ${PRICE_BOOK} ` +
-    `(${ALLOWED.length} files carry documented non-price figures).`
+  `check-single-price-source: ok — no price literal outside ${PRICE_BOOK}, and no money ` +
+    `amount as a numeric literal in minor units (${ALLOWED.length} files carry documented ` +
+    'non-price figures).'
 );

@@ -105,6 +105,15 @@ export const ErrorCodes = {
   NOT_IMPLEMENTED: 501,
   STORE_UNAVAILABLE: 503,
   PROVIDER_UNAVAILABLE: 503,
+  /**
+   * The deployment is missing a value that has no safe default, so the route refuses.
+   *
+   * 503 and not 500: nothing is broken and a retry will not help, but the condition is the
+   * deployment's rather than the caller's — and 400 would tell a customer they sent something
+   * wrong when they did not. Added for S25, where the Stripe checkout amount became
+   * configuration precisely so that it could be absent rather than wrong.
+   */
+  CONFIGURATION_ERROR: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ErrorCodes;

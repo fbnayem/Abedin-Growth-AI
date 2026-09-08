@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { db } from '../db/index';
 import { isRealActionEnabled } from '../config/safeMode';
 import { getCircuitBreakerState } from '../services/circuitBreaker.service';
+import { checkoutPriceFrom } from '../domain/checkoutPrice';
 import { sendCaught, sendError } from '../lib/errors';
 
 const stripeRouter = express.Router();
@@ -56,17 +57,41 @@ stripeRouter.post('/create-checkout-session', async (req: Request, res: Response
       });
     }
 
+    // S25 — THE AMOUNT IS CONFIGURATION, AND THERE IS NO DEFAULT.
+    //
+    // This was `currency: 'usd', unit_amount: 500000` — a hardcoded USD $5,000 for a product
+    // the rest of this system prices at £499/mo, in a currency `shared/domain/pricing.ts` does
+    // not even model (`CURRENCIES` is `['GBP']`). `check-single-price-source` could not see it,
+    // because its detector is `/£\s?\d/` — so the guardrail caught every prose price and was
+    // blind to the only figure that can move money.
+    //
+    // It is not simply corrected here because the right number is not mine to choose:
+    // "Enterprise Onboarding" at $5,000 may be a legitimate one-off unrelated to the
+    // subscription tier, or a leftover from a template. Inventing one would be the exact
+    // failure the price book exists to prevent — a figure that looks authoritative because it
+    // is in code.
+    //
+    // This refusal is INDEPENDENT of `REAL_PAYMENT_ENABLED`, checked above. The failure being
+    // prevented is somebody enabling payments — the one deliberate act that turns this on — and
+    // thereby charging a stranger an amount nobody chose. A flag flip must not be able to do
+    // that by itself.
+    const priced = checkoutPriceFrom();
+    if (priced.ok === false) {
+      console.warn(`[stripe] Checkout refused: ${priced.reason}`);
+      return sendError(req, res, 'CONFIGURATION_ERROR', priced.reason, { status: 503 });
+    }
+
     const { email, leadId } = req.body;
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
-            currency: 'usd',
+            currency: priced.price.currency,
             product_data: {
               name: 'Enterprise Onboarding',
             },
-            unit_amount: 500000, // $5,000.00
+            unit_amount: priced.price.minorUnits,
           },
           quantity: 1,
         },
