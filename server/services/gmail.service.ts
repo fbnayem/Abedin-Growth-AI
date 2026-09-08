@@ -6,6 +6,7 @@ import type { SentMessageLookup } from '../lib/reconciliation';
 import { bareMessageId, headerLine, isWellFormedMessageId } from '../lib/messageIdentity';
 import { HeaderBag, walkGmailPayload, type ParsedBody } from '../lib/mime';
 import type { Capability } from '../lib/capabilities';
+import { listUnsubscribeHeaders, unsubscribeFooterHtml } from '../domain/unsubscribe';
 
 export interface SendEmailOptions {
   to: string;
@@ -23,6 +24,19 @@ export interface SendEmailOptions {
    * requires it.
    */
   rfc822MessageId?: string;
+  /**
+   * S26 — where this message's `List-Unsubscribe` header points.
+   *
+   * Passed in rather than derived here, because minting it needs the tenant and the contact id
+   * and this service knows neither: it is handed a recipient address. The gateway holds both,
+   * has already refused the send if it could not produce one, and is the single place where
+   * "may this go out" is decided.
+   *
+   * When absent, no header and no footer are emitted. That is reachable only through the demo
+   * path and through `EMAIL_SEND` requests the gateway has already refused — a live send with
+   * no unsubscribe URL is a state the gateway does not produce.
+   */
+  unsubscribeUrl?: string;
 }
 
 /**
@@ -370,7 +384,30 @@ export class GmailService implements EmailProvider, RefreshableCredential, SentM
     }
     if (opts.inReplyTo) messageParts.push(headerLine('In-Reply-To', opts.inReplyTo));
     if (opts.references) messageParts.push(headerLine('References', opts.references));
-    messageParts.push('', opts.bodyHtml || opts.bodyText || '');
+
+    // S26 — THE OPT-OUT THIS SYSTEM COULD RECOGNISE AND NEVER OFFERED.
+    //
+    // `automatedMail.ts` treats an inbound `List-Unsubscribe` as evidence that a message is
+    // bulk and must not be replied to. Nothing here ever emitted one, so the gateway's
+    // `unsubscribed === true` refusal was a check no recipient could ever satisfy.
+    //
+    // Through `headerLine` like every other header, not by interpolation. That is what S16
+    // established after the reply subject — derived from the INBOUND subject — let a customer
+    // end the header with a CR-LF and write their own `Bcc:`. The URL is built from a
+    // character-restricted origin and an HMAC token, so it cannot contain a CR; running it
+    // through the same check anyway means the guarantee does not depend on that staying true.
+    let body = opts.bodyHtml || opts.bodyText || '';
+    if (opts.unsubscribeUrl) {
+      const headers = listUnsubscribeHeaders(opts.unsubscribeUrl);
+      messageParts.push(headerLine('List-Unsubscribe', headers['List-Unsubscribe']));
+      messageParts.push(headerLine('List-Unsubscribe-Post', headers['List-Unsubscribe-Post']));
+      // And in the body as well, for the clients that do not render the header. Same URL: two
+      // opt-out routes recording different things is a way for them to disagree about whether
+      // somebody unsubscribed.
+      body += unsubscribeFooterHtml(opts.unsubscribeUrl);
+    }
+
+    messageParts.push('', body);
 
     const rawMessage = Buffer.from(messageParts.join('\r\n'))
       .toString('base64')

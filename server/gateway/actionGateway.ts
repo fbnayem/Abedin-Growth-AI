@@ -20,6 +20,7 @@ import {
   refusalReason,
 } from '../domain/campaignSafety';
 import { lockStateOf, mayProceed, refusalFor } from '../domain/autonomyLock';
+import { unsubscribeUrlFor } from '../domain/unsubscribe';
 import {
   schemaCompatibility,
   schemaPermitsIrreversibleActions,
@@ -801,6 +802,27 @@ export class ActionGateway {
             return { success: false, error: reason, errorCode: 'UNRECONCILABLE_SEND' };
         }
 
+        // S26 — NO UNSUBSCRIBE URL, NO SEND.
+        //
+        // `checkOutreachPolicy` already refuses when `contactData.unsubscribed === true`. Until
+        // now there was no way for a recipient to make that true: `List-Unsubscribe` appeared
+        // in this repository only on the INBOUND side, where `automatedMail.ts` reads it to
+        // decide that somebody ELSE'S mail is bulk. The suppression check was real and the
+        // control feeding it did not exist.
+        //
+        // Refusing here rather than sending without the header is the same shape as every
+        // other §14 decision in this file: the permissive reading of "we could not build an
+        // opt-out" is to mail somebody who then has no way to stop us, and that is the reading
+        // that fails silently — the send succeeds and nothing reports the absence.
+        const unsubscribe = unsubscribeUrlFor({
+            orgId: request.organizationId,
+            contactId: request.payload.contactId,
+        });
+        if (unsubscribe.ok === false) {
+            console.warn(`[ActionGateway] EMAIL_SEND refused: ${unsubscribe.reason}`);
+            return { success: false, blockedReason: unsubscribe.reason, errorCode: 'POLICY_BLOCKED' };
+        }
+
         gmailService.setCredentials({ access_token: accessToken });
         const result = await gmailService.sendEmail({
             to: request.payload.to,
@@ -811,6 +833,7 @@ export class ActionGateway {
             references: request.payload.references,
             threadId: request.payload.threadId,
             rfc822MessageId,
+            unsubscribeUrl: unsubscribe.url,
         });
 
         return { success: true, providerResult: result };

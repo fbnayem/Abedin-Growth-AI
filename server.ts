@@ -48,6 +48,8 @@ import { outboxWorker } from "./server/workers/outbox.worker";
 import { stripeRouter } from "./server/routes/stripe.routes";
 import { outboxRouter } from "./server/routes/outbox.routes";
 import { autonomyRouter } from "./server/routes/autonomy.routes";
+import { unsubscribeRouter } from "./server/routes/unsubscribe.routes";
+import { isUnauthenticatedApiPath } from "./server/middleware/authAllowlist";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
 import { simulatePitchBattle } from './server/agents/pitchBattleAgent';
@@ -122,28 +124,19 @@ async function startServer() {
   app.use('/api/signature/webhook', express.raw({ type: '*/*' }));
   app.use(express.json());
 
-// P0.4 — Explicit allowlist of unauthenticated paths.
+// P0.4 / S26 — the allowlist of unauthenticated paths moved to
+// `server/middleware/authAllowlist.ts` when it stopped being a list of literal strings.
 //
-// This was `req.path.includes('/webhook')` — a SUBSTRING test. Any route whose path merely
-// contained the word anywhere was unauthenticated, including paths never intended to be
-// public (e.g. /api/settings/webhooks, /api/campaigns/webhook-preview). An allowlist of exact
-// paths cannot be widened by accident when someone adds a route.
-//
-// These endpoints are unauthenticated because the caller is a machine that cannot hold a user
-// credential. That makes SIGNATURE VERIFICATION the only thing standing between them and an
-// anonymous caller — see P0.14. Do not add an entry here without one.
-const UNAUTHENTICATED_API_PATHS = new Set([
-  '/readiness',
-  '/health',
-  '/signature/webhook',
-  '/webhooks/gmail',
-]);
-
+// It was `req.path.includes('/webhook')`, a SUBSTRING test that made every path merely
+// CONTAINING the word public, including `/api/settings/webhooks`. P0.4 replaced that with an
+// exact-match Set. S26's unsubscribe route carries its token in the path, so the allowlist now
+// holds a PATTERN as well — and a pattern is precisely what went wrong the first time, so it
+// lives in a module a test can interrogate rather than inline here where nothing could.
 app.use("/api", (req, res, next) => {
   // req.path is relative to the mount point, but normalise defensively in case this
   // middleware is ever remounted elsewhere.
   const p = req.path.replace(/^\/api/, '') || '/';
-  if (UNAUTHENTICATED_API_PATHS.has(p)) {
+  if (isUnauthenticatedApiPath(p)) {
     // P0.5 — Unauthenticated machine endpoints are rate limited by IP. They are the only
     // surfaces reachable without a credential, so they get their own budget.
     return webhookLimiter(req, res, next);
@@ -160,7 +153,10 @@ app.use("/api", (req, res, next) => {
 // payload data (see /api/signature/webhook) or refusing to act.
 app.use("/api", (req, res, next) => {
   const p = req.path.replace(/^\/api/, '') || '/';
-  if (UNAUTHENTICATED_API_PATHS.has(p)) return next();
+  // The unsubscribe route establishes its own scope from the SIGNED token rather than from a
+  // session — the same rule the signature webhook follows: no user, so no tenant to resolve,
+  // so it must derive one from verified data or refuse.
+  if (isUnauthenticatedApiPath(p)) return next();
   return resolveTenant(req, res, next);
 });
 
@@ -188,6 +184,7 @@ for (const aiPath of [
   // set; until this router existed, nothing in the running system could set it — the only
   // writer was a service with no callers. See server/routes/autonomy.routes.ts.
   app.use("/api/autonomy", autonomyRouter);
+  app.use("/api/unsubscribe", unsubscribeRouter);
 
 
   // EXECUTABLE READINESS CHECK (Requirement X)
