@@ -17,9 +17,12 @@ import { circuitBreaker } from '../agents/salesDecisionEngine';
  * so the panel broke on load too. Pressing stop during an incident either showed a false
  * paused state or white-screened the console.
  *
- * The previous "real" implementation (controllers/killSwitch.controller.ts, unreachable) only
- * flipped a process-local boolean in salesDecisionEngine. A second replica could not see it,
- * and it did not survive a restart — so it was not a kill switch, it was a local variable.
+ * The previous "real" implementation only flipped a process-local boolean in
+ * salesDecisionEngine. A second replica could not see it, and it did not survive a restart —
+ * so it was not a kill switch, it was a local variable. It lived in
+ * `controllers/killSwitch.controller.ts`, which had no callers and has now been DELETED: a
+ * module that reads as the kill switch, mutates process memory and answers `success: true` is
+ * the thing an operator finds when they go looking during an incident.
  *
  * THE DESIGN, AND WHY IT IS ASYMMETRIC
  * ------------------------------------

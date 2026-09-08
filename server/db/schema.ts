@@ -262,6 +262,33 @@ export const conversationFacts = pgTable(
   (t) => [index('conversation_facts_org_conversation_idx').on(t.organizationId, t.conversationId)]
 );
 
+/**
+ * RETIRED. THE LIVE QUEUE IS `server/services/outbox.service.ts`, IN THE DOCUMENT STORE.
+ *
+ * This table is kept, not dropped, and neither is a neutral choice — so here is the reasoning.
+ *
+ * WHY IT IS DEAD
+ * --------------
+ * P0.7 found the producer writing THIS table while `outbox.worker` polled a different store
+ * entirely, so nothing enqueued here was ever consumed. Both sides were moved onto one store,
+ * and that store is the document store (§1x). Since then this table has had no writer, no
+ * reader, and — after the two shadow services were deleted — no importer.
+ *
+ * WHY IT IS STILL HERE
+ * --------------------
+ * P0.7 established that the producer DID write it for some period, so a deployed database may
+ * hold rows. Dropping a table that might contain a record of real mail, to tidy a schema, is
+ * not a trade worth making; the rows cost nothing and are evidence.
+ *
+ * WHY THAT IS DANGEROUS, AND WHAT GUARDS IT
+ * -----------------------------------------
+ * A table with a tenant index and an idempotency constraint READS as the live outbox. Someone
+ * will write to it, the worker will not see it, and the message will silently never send —
+ * which is P0.7 returning, in a form that looks like working code.
+ *
+ * `deadSchema.invariant.test.ts` fails if anything inserts into or updates it. Reviving it is
+ * then a deliberate act with an argument attached, rather than an afternoon's misunderstanding.
+ */
 export const outboxMessages = pgTable(
   'outbox_messages',
   {

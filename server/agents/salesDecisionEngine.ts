@@ -43,20 +43,26 @@ export const circuitBreaker: CircuitBreakerState = {
   lastSafetyTripTimestamp: undefined,
 };
 
-export function tripCircuitBreaker(reason: string) {
-  circuitBreaker.globalAutonomousSendEnabled = false;
-  circuitBreaker.pausedReason = reason;
-  circuitBreaker.lastSafetyTripTimestamp = new Date().toISOString();
-  console.warn(`[CIRCUIT BREAKER TRIPPED]: ${reason}`);
-}
-
-export function resetCircuitBreaker() {
-  circuitBreaker.globalAutonomousSendEnabled = true;
-  circuitBreaker.pausedReason = undefined;
-  circuitBreaker.consecutiveErrorCount = 0;
-  circuitBreaker.duplicateSendAlertTriggered = false;
-  circuitBreaker.bounceRateSpikeDetected = false;
-}
+/**
+ * `tripCircuitBreaker` and `resetCircuitBreaker` WERE HERE, AND ARE DELETED.
+ *
+ * Both had zero callers anywhere in the repository, and one of them was actively dangerous.
+ *
+ * `resetCircuitBreaker()` set `globalAutonomousSendEnabled = true` and cleared every safety
+ * counter, WITHOUT consulting the durable state or `AUTONOMY_ENABLED`. The kill switch in
+ * `services/circuitBreaker.service.ts` is deliberately asymmetric — pausing may come from the
+ * datastore, but ENABLING additionally requires an environment variable the application cannot
+ * write, so a hostile write can only ever stop sending. A single call to that function would
+ * have turned autonomy on in-process in defiance of both, and it read like the obvious thing to
+ * call after fixing whatever tripped the breaker.
+ *
+ * `tripCircuitBreaker` moved in the safe direction and was equally unreachable. Pausing is
+ * durable now, and a process-local pause that a second replica cannot see is not a pause.
+ *
+ * The `circuitBreaker` object above stays: it is the in-process cache that synchronous code
+ * paths read, and `circuitBreaker.service.ts` is the ONE writer that derives it from the
+ * durable decision. `deadSchema.invariant.test.ts` asserts that writer count.
+ */
 
 // ==========================================
 // PART 27: IDEMPOTENCY & SEND LOCKS

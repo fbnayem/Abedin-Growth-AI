@@ -3,7 +3,7 @@ import { isValidOrgId } from './tenancy/orgScope';
 import { normalizeEmailKey } from './lib/emailKey';
 import { db } from './db/index';
 import { eq } from 'drizzle-orm';
-import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, outboxMessages, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
+import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
 
 import fs from "fs";
 import path from "path";

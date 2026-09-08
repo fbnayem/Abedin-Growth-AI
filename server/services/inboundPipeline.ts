@@ -8,7 +8,7 @@ import { metricsService } from './metrics.service';
 import { LedgerService } from './ledgers.service';
 import { BuyingStage, suppressesReply } from "../../shared/domain/models";
 import { db } from '../db/index';
-import { messages, conversations, contacts, accounts, conversationFacts, outboxMessages } from '../db/schema';
+import { messages, conversations, contacts, accounts, conversationFacts } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { GmailMessage } from './gmail.service';

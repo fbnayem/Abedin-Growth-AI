@@ -75,8 +75,6 @@ import {
 } from "./server/agents/trustedCtaRegistry";
 import {
   circuitBreaker,
-  resetCircuitBreaker,
-  tripCircuitBreaker,
   evaluateEmailUnderstandingRuleBased,
   computePurchaseReadiness,
   computeMeetingReadiness,
