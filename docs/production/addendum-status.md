@@ -3571,7 +3571,7 @@ was not written.
 | **S6** | Eight state machines are declared and `assertTransition` guards the outbox and three `server.ts` transitions. Other lifecycles still change status by direct assignment — the map is real and is not yet the only way through. |
 | **S11** | Runtime validation landed (zod in four modules, `apiContracts.invariant`). **There is no OpenAPI document and no contract test against one**, which is half of what this row asks for. |
 | **S22** | `lib/runLog.ts` writes `ai_run_logs` **in the document store**, with reproducibility fields, and `runLog.invariant` covers it. The RELATIONAL `ai_run_logs` table has no writer — the same dead-schema shape as `outbox_messages`, and not yet guarded the way that one now is. Lower stakes: a missing log is not a missing send. |
-| **S25** | No quote is ever written. `shared/domain/quote.ts` exists and four suites exercise it; nothing on a live path creates one, so quote-versus-list-price cannot arise. |
+| **S25** | No quote is ever written. `shared/domain/quote.ts` exists and four suites exercise it; nothing on a live path creates one, so quote-versus-list-price cannot arise. **Updated after this row was re-graded:** the checkout amount was a hardcoded `unit_amount: 500000` in USD, invisible to `check-single-price-source` because that guardrail only detected `£` literals. It is configuration with no default now and the route refuses without it, but `PAYMENT_CREATE` still falls through the gateway's execution switch to "Unsupported action type", so payments bypass the ownership lock, the action log and reconciliation. |
 | **S26** | Suppression is now enforceable end to end — S26's own opt-out landed this pass, and the gateway refuses on the field it writes. **There is still no campaign execution engine**: no enrolment record, no per-contact sequence state, no scheduler. Fourteen guards exist for sequences that cannot run. |
 | **S27** | The fabricated figures are gone and a guardrail keeps them gone. **No SPF/DKIM/DMARC checking, no bounce webhook, no complaint feedback loop** — deliverability is unmeasured rather than misreported. |
 | **S37** | `BudgetTracker` is real, enforced, and reports partial totals honestly. **No per-tenant, daily or monthly budget exists**, so spend is bounded per pipeline run and unbounded per tenant. |
@@ -3586,6 +3586,28 @@ is `providerResult.invariant.test.ts`, and it asserts the provider-result invari
 the audit-log one. Implemented on a live path, with no test asserting the business invariant —
 which is precisely what this state is for, and the reason it exists as a state rather than being
 rounded to VERIFIED.
+
+### What the re-grade found that the roadmap had not
+
+Two, and both were invisible to every list in this document.
+
+**The only amount this system can charge anybody was a hardcoded literal, and the guardrail
+built to prevent exactly that could not see it.** `check-single-price-source` has been green
+since P1.7; its detector is `/£\s?\d/`, so it caught every prose price in every prompt and
+fixture and was blind to `unit_amount: 500000` in `stripe.routes.ts` — USD $5,000, in a currency
+`pricing.ts` does not model. A control that catches the documentation and misses the live path,
+inside a guardrail. Fixed in the commit that also carried this section; the amount is
+configuration with no default, and the rule now sees money written in minor units.
+
+**My own note on P0.15 was wrong when I wrote it**, three paragraphs before this one. It said the
+row had "no work in any remediation section"; §1b landed work on it, and I missed that by
+grepping only the sections that come after it. Corrected in place. Recorded here because a
+re-grade whose errors are silently fixed is a re-grade nobody can check, which is the fault it
+exists to repair.
+
+*(Process note: the matrix rewrite, the recomputed tally and this section were committed
+alongside the S25 code change rather than on their own. The commit message describes the code
+and not the document.)*
 
 ### What a `VERIFIED` grade rests on here
 

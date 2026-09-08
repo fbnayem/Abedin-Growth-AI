@@ -1,5 +1,17 @@
 # RETRACTED — "116-Phase Security & Policy Audit"
 
+> **Finding closed 2026-09-08.** `server/services/suppression.service.ts` and its only
+> importer `server/services/pipeline.service.ts` have been DELETED, so the file this
+> report analyses no longer exists. The finding was correct: the reachable suppression
+> check read an in-memory array no real contact was ever in, and therefore answered "not
+> suppressed" for every recipient. Suppression is now enforced at the Production Action
+> Gateway against the contact record, and S26's `List-Unsubscribe` endpoint is the writer
+> that record never had. See §1ab and §1ac of `docs/production/addendum-status.md`.
+>
+> This report is left otherwise unedited. It is a record of what was true when it was
+> written, and rewriting findings after they are fixed is how a document stops being
+> evidence.
+
 **Retracted 2026-09-08.** This document certified six controls as PASS. Measured against the
 code, one was true, one has since become true, and four were not true when signed. It carried
 the line **"Signed by AI Architect Agent"**, which gave a set of unverified assertions the
