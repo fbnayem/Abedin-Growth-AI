@@ -2,15 +2,19 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
   CAMPAIGN,
+  KNOWLEDGE_ITEM,
+  MEETING,
   OUTBOX_JOB,
   assertTransition,
   isInitialState,
+  type EntityStateMachine,
 } from '../domain/stateMachines';
 import { killSwitchGate } from '../domain/operatorAction';
 import { orgPath } from '../tenancy/orgScope';
+import { memory } from './helpers/memoryDocumentStore';
 
 /**
- * INVARIANTS FOR THE TWO LIFECYCLE WRITES THAT DID NOT ASK THE MAP (S6).
+ * INVARIANTS FOR THE LIFECYCLE WRITES THAT DID NOT ASK THE MAP (S6).
  *
  * Eight machines are declared and `assertTransition` guards the outbox service and three handlers
  * in `server.ts`. Two writes did not go through it, and they failed in different ways.
@@ -29,101 +33,12 @@ import { orgPath } from '../tenancy/orgScope';
  * which is the point of a behavioural suite. Cancellation now goes through the outbox service's
  * transactional `cancelJob`, which re-reads, asks the machine about what it just read, and leaves
  * an operator-action record in the same transaction.
+ *
+ * The outbox service's OWN internal transitions are the subject of `outboxTransitions.invariant`.
  */
 
-// ---------------------------------------------------------------------------------------------
-// A document store with the transactional semantics that matter here, trimmed from the chaos
-// suite. `betweenQueryAndReread` is the competing writer: it fires once, inside the next
-// transaction, after the PENDING query has returned and before the transaction's own re-read.
-// ---------------------------------------------------------------------------------------------
-let store: Record<string, Record<string, unknown>> = {};
-let betweenQueryAndReread: (() => void) | null = null;
-
-const pathOf = (ref: any): string => ref.path;
-
-vi.mock('../store', () => {
-  class StoreError extends Error {}
-  const has = (path: string) => Object.prototype.hasOwnProperty.call(store, path);
-  return {
-    store: {},
-    getStore: () => ({}),
-    resetStoreForTests: () => undefined,
-    tenantOf: () => null,
-    assertNoUndefined: () => undefined,
-    compileQuery: () => ({ text: '', values: [] }),
-    StorePathError: StoreError,
-    StoreValueError: StoreError,
-    collection: (_db: unknown, path: string) => ({ path }),
-    doc: (first: any, ...rest: any[]) => {
-      if (typeof first === 'string') return { path: [first, ...rest].join('/') };
-      if (first && typeof first.path === 'string') return { path: [first.path, ...rest].join('/') };
-      // `first` is the database handle; the path is whatever follows it.
-      return { path: rest.join('/') };
-    },
-    getDoc: async (ref: any) => {
-      const path = pathOf(ref);
-      return { id: path.split('/').pop(), ref, exists: () => has(path), data: () => (has(path) ? { ...store[path] } : undefined) };
-    },
-    getDocs: async (q: any) => {
-      const prefix = q.collectionPath + '/';
-      const docs = Object.entries(store)
-        .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
-        .filter(([, data]) => q.filters.every((f: any) => (data as any)[f.field] === f.value))
-        .map(([path, data]) => ({ id: path.slice(prefix.length), ref: { path }, data: () => ({ ...data }) }));
-      return { docs, size: docs.length, empty: docs.length === 0, forEach: (fn: any) => docs.forEach(fn) };
-    },
-    query: (c: any, ...clauses: any[]) => ({
-      collectionPath: c.path,
-      filters: clauses.filter((x) => x.kind === 'where'),
-    }),
-    where: (field: string, _op: string, value: unknown) => ({ kind: 'where', field, value }),
-    limit: (value: number) => ({ kind: 'limit', value }),
-    orderBy: () => ({ kind: 'orderBy' }),
-    setDoc: async (ref: any, value: any) => {
-      store[pathOf(ref)] = { ...value };
-    },
-    updateDoc: async (ref: any, value: any) => {
-      store[pathOf(ref)] = { ...(store[pathOf(ref)] ?? {}), ...value };
-    },
-    deleteDoc: async (ref: any) => {
-      delete store[pathOf(ref)];
-    },
-    addDoc: async (c: any, value: any) => {
-      const path = `${c.path}/added-${Object.keys(store).length}`;
-      store[path] = { ...value };
-      return { path };
-    },
-    runTransaction: async (_db: unknown, fn: any) => {
-      const pendingSet: Record<string, Record<string, unknown>> = {};
-      const pendingUpdate: Record<string, Record<string, unknown>> = {};
-      const result = await fn({
-        get: async (ref: any) => {
-          if (betweenQueryAndReread) {
-            const fire = betweenQueryAndReread;
-            betweenQueryAndReread = null;
-            fire();
-          }
-          const path = pathOf(ref);
-          return { id: path.split('/').pop(), ref, exists: () => has(path), data: () => (has(path) ? { ...store[path] } : undefined) };
-        },
-        set: (ref: any, value: any) => {
-          pendingSet[pathOf(ref)] = { ...value };
-        },
-        update: (ref: any, value: any) => {
-          pendingUpdate[pathOf(ref)] = { ...(pendingUpdate[pathOf(ref)] ?? {}), ...value };
-        },
-        delete: () => undefined,
-      });
-      for (const [path, value] of Object.entries(pendingSet)) store[path] = value;
-      for (const [path, value] of Object.entries(pendingUpdate)) {
-        store[path] = { ...(store[path] ?? {}), ...value };
-      }
-      return result;
-    },
-  };
-});
-
-vi.mock('uuid', () => ({ v4: () => `uuid-${Object.keys(store).length}` }));
+vi.mock('../store', async () => (await import('./helpers/memoryDocumentStore')).memory.module);
+vi.mock('uuid', () => ({ v4: () => `uuid-${Object.keys(memory.docs).length}` }));
 vi.mock('../tenancy/organizations', () => ({ listServiceableOrgIds: async () => ['org-a'] }));
 
 const { setCircuitBreaker } = await import('../services/circuitBreaker.service');
@@ -134,13 +49,10 @@ const SETTINGS = 'system_settings/circuitBreaker';
 const OPS = { kind: 'IDENTIFIED', actor: 'ops@acme.com' } as const;
 
 const seed = (id: string, status: string) => {
-  store[`${OUTBOX}/${id}`] = { status, to: 'someone@example.com' };
+  memory.docs[`${OUTBOX}/${id}`] = { status, to: 'someone@example.com' };
 };
-const job = (id: string) => store[`${OUTBOX}/${id}`];
-const trail = () =>
-  Object.entries(store)
-    .filter(([path]) => path.startsWith(ACTIONS + '/'))
-    .map(([, data]) => data);
+const job = (id: string) => memory.docs[`${OUTBOX}/${id}`];
+const trail = () => Object.values(memory.collection(ACTIONS));
 
 const strip = (path: string) =>
   readFileSync(path, 'utf8')
@@ -148,8 +60,7 @@ const strip = (path: string) =>
     .replace(/(^|[^:])\/\/.*/g, '$1 ');
 
 beforeEach(() => {
-  store = {};
-  betweenQueryAndReread = null;
+  memory.reset();
   delete process.env.LEGACY_KILL_SWITCH_ORG_ID;
 });
 
@@ -179,18 +90,30 @@ describe('1. creation asks a question transitions cannot answer', () => {
     }
   });
 
-  it('THE INVARIANT — the status the create handler writes is an initial state', () => {
-    // Read out of the handler rather than hardcoded here: a copy in the test is exactly how the
-    // machine and the creation path drifted apart in the first place.
-    const source = readFileSync('server.ts', 'utf8');
-    const literal = source.slice(source.indexOf('const newCampaign = {'));
-    const status = literal.slice(0, literal.indexOf('\n      };')).match(/status:\s*"([A-Z_]+)"/);
+  /**
+   * Read out of each handler rather than hardcoded here: a copy in the test is exactly how the
+   * machine and the creation path drifted apart in the first place. The anchor is a line unique
+   * to the creation object; the first status literal after it is the one being asserted.
+   */
+  const creations: { what: string; machine: EntityStateMachine; file: string; anchor: string }[] = [
+    { what: 'POST /api/campaigns', machine: CAMPAIGN, file: 'server.ts', anchor: 'const newCampaign = {' },
+    { what: 'POST /api/meetings', machine: MEETING, file: 'server.ts', anchor: 'id: "meet_" + Date.now(),' },
+    { what: 'POST /api/knowledge', machine: KNOWLEDGE_ITEM, file: 'server.ts', anchor: 'id: `kno_${Date.now()}`,' },
+    { what: 'campaignAgent', machine: CAMPAIGN, file: 'server/agents/campaignAgent.ts', anchor: 'agentName: "campaignAgent",' },
+  ];
 
-    expect(status, 'no status literal found in the campaign create handler').toBeTruthy();
-    expect(isInitialState(CAMPAIGN, status![1]), `campaigns are created as ${status![1]}`).toBe(true);
-  });
+  for (const { what, machine, file, anchor } of creations) {
+    it(`THE INVARIANT — ${what} creates its record in an initial state of ${machine.name}`, () => {
+      const source = strip(file);
+      const start = source.indexOf(anchor);
+      expect(start, `anchor not found in ${file}: ${anchor}`).toBeGreaterThan(-1);
+      const status = source.slice(start, start + 1500).match(/status:\s*['"]([A-Z_]+)['"]/);
+      expect(status, `no status literal follows the anchor in ${file}`).toBeTruthy();
+      expect(isInitialState(machine, status![1]), `${what} creates as ${status![1]}`).toBe(true);
+    });
+  }
 
-  it('and the console can still activate it in one step', () => {
+  it('and the console can still activate a campaign in one step', () => {
     // The behaviour change is deliberate and this is its cost: a new campaign is no longer born
     // ACTIVE. It must remain one click away, or the change breaks the surface it was meant to make
     // honest.
@@ -239,8 +162,8 @@ describe('2. engaging the kill switch cancels the queue through the one owner of
 
   it('a job the worker claims between the query and the write is refused, not forced', async () => {
     seed('j1', 'PENDING');
-    betweenQueryAndReread = () => {
-      store[`${OUTBOX}/j1`] = { ...job('j1'), status: 'CLAIMED', claimedBy: 'worker-1' };
+    memory.beforeTransactionRead = () => {
+      memory.docs[`${OUTBOX}/j1`] = { ...job('j1'), status: 'CLAIMED', claimedBy: 'worker-1' };
     };
 
     const result = await setCircuitBreaker(false, 'incident', OPS);
@@ -255,8 +178,8 @@ describe('2. engaging the kill switch cancels the queue through the one owner of
 
   it('a job somebody else cancelled in that window is not counted as this cancellation', async () => {
     seed('j1', 'PENDING');
-    betweenQueryAndReread = () => {
-      store[`${OUTBOX}/j1`] = { ...job('j1'), status: 'CANCELLED', cancelledBy: 'someone-else' };
+    memory.beforeTransactionRead = () => {
+      memory.docs[`${OUTBOX}/j1`] = { ...job('j1'), status: 'CANCELLED', cancelledBy: 'someone-else' };
     };
 
     const result = await setCircuitBreaker(false, 'incident', OPS);
@@ -286,7 +209,7 @@ describe('2. engaging the kill switch cancels the queue through the one owner of
     expect(action.actor).toBeNull();
 
     // The durable record carries the reason, and no placeholder that reads like an account name.
-    const record = store[SETTINGS];
+    const record = memory.docs[SETTINGS];
     expect(record.paused).toBe(true);
     expect('actor' in record).toBe(false);
     expect(record.unattributedBecause).toBe('the request carried no identity');
@@ -295,7 +218,7 @@ describe('2. engaging the kill switch cancels the queue through the one owner of
 
   it('a named pause records the name, once, in the durable state', async () => {
     await setCircuitBreaker(false, 'incident', OPS);
-    const record = store[SETTINGS];
+    const record = memory.docs[SETTINGS];
     expect(record.actor).toBe('ops@acme.com');
     expect('unattributedBecause' in record).toBe(false);
   });
@@ -308,7 +231,7 @@ describe('2. engaging the kill switch cancels the queue through the one owner of
     expect(result.accepted).toBe(true);
     expect(result.queue).toBeUndefined();
     expect(job('j1').status).toBe('PENDING');
-    expect(store[SETTINGS].paused).toBe(false);
+    expect(memory.docs[SETTINGS].paused).toBe(false);
     expect(trail()).toHaveLength(0);
   });
 });

@@ -148,7 +148,10 @@ export function assertTransition(
 
 /**
  * Outbound job lifecycle. Mirrors the states outbox.service.ts already writes, so the service's
- * hand-rolled gates can defer to this instead of restating it.
+ * hand-rolled gates can defer to this instead of restating it. Since S6's third pass they do:
+ * `claimPendingJobs`, `reapExpiredLeases`, `markProcessed` and `markFailed` each ask this map
+ * inside a transaction. The first three restated it by hand before, and the reaper did so on a
+ * query snapshot with no transaction at all.
  *
  * PROCESSED is terminal because the message reached a provider: nothing later may claim it did
  * not. DEAD_LETTER is deliberately NOT terminal — an operator resolving a dead letter is the
@@ -158,7 +161,14 @@ export const OUTBOX_JOB: EntityStateMachine = {
   name: 'outbox job',
   initial: ['PENDING', 'HUMAN_REVIEW'],
   transitions: {
-    PENDING: ['CLAIMED', 'HUMAN_REVIEW', 'CANCELLED', 'FAILED', 'DEAD_LETTER'],
+    // PROCESSED from PENDING exists for one case (S6): a worker whose lease expired can still
+    // finish. The reaper returned the row to PENDING because it presumed that worker dead; the
+    // provider then confirmed the send. What is true is that the message was delivered, and a
+    // map that forbade recording it would leave a PENDING row carrying a provider id — the
+    // duplicate-send shape, written into the schema. This edge is how a late completion tells
+    // the truth. It is not licence to skip CLAIMED: `markProcessed` requires a provider message
+    // id, and nothing else writes PROCESSED.
+    PENDING: ['CLAIMED', 'HUMAN_REVIEW', 'CANCELLED', 'FAILED', 'DEAD_LETTER', 'PROCESSED'],
     HUMAN_REVIEW: ['PENDING', 'CANCELLED'],
     CLAIMED: ['PROCESSED', 'FAILED', 'DEAD_LETTER', 'PENDING'],
     FAILED: ['PENDING', 'DEAD_LETTER', 'CANCELLED'],

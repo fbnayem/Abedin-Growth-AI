@@ -1,6 +1,6 @@
 import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
-import { assertTransition, OUTBOX_JOB } from '../domain/stateMachines';
+import { assertTransition, isInitialState, OUTBOX_JOB } from '../domain/stateMachines';
 import { OUTBOX_PAYLOAD_VERSION } from '../domain/outboxEnvelope';
 import {
   requeueTargetFor,
@@ -18,7 +18,6 @@ import {
   query,
   where,
   limit,
-  updateDoc,
   runTransaction,
   orderBy,
 } from '../store';
@@ -147,6 +146,13 @@ export class OutboxService {
   ) {
     const outboxRef = outboxCollection(organizationId);
     if (!outboxRef || !store) return null;
+    // S6 — creation asks the map too. The parameter type restates `OUTBOX_JOB.initial` by hand;
+    // this is the check that holds when the two drift, or when the caller is not TypeScript.
+    if (!isInitialState(OUTBOX_JOB, initialStatus)) {
+      throw new Error(
+        `[Outbox] ${String(initialStatus)} is not a state an outbox job may be created in.`
+      );
+    }
     try {
       // Idempotency check. NOTE: this is a read-then-write and is therefore racy under
       // concurrency; the durable guarantee comes from using the idempotency key as the
@@ -243,8 +249,10 @@ export class OutboxService {
           const data: any = fresh.data();
 
           // The decisive check: another claimant may have taken this row between our read
-          // above and this transaction.
-          if (data.status !== 'PENDING') return null;
+          // above and this transaction. Asked of the map rather than restated (S6): PENDING is
+          // the only state a claim may come from, and the map is where that is written down.
+          const claimable = assertTransition(OUTBOX_JOB, data.status, 'CLAIMED');
+          if (claimable.ok === false || claimable.changed === false) return null;
           if (data.nextAttemptAt && data.nextAttemptAt > Date.now()) return null;
 
           const attempts = (data.attempts || 0) + 1;
@@ -300,26 +308,56 @@ export class OutboxService {
       const now = Date.now();
 
       for (const d of snap.docs) {
-        const data: any = d.data();
-        if (!data.leaseUntil || data.leaseUntil > now) continue;
+        const seen: any = d.data();
+        if (!seen.leaseUntil || seen.leaseUntil > now) continue;
 
-        const attempts = data.attempts || 0;
-        if (attempts >= MAX_ATTEMPTS) {
-          await updateDoc(d.ref, {
-            status: 'DEAD_LETTER',
-            lastError: `Lease expired after ${attempts} attempts; exceeded MAX_ATTEMPTS.`,
-            deadLetteredAt: now,
-          });
-          console.error(`[Outbox] Job ${data.id} dead-lettered after ${attempts} attempts.`);
+        // S6 — RE-READ, IN A TRANSACTION, AND ASK THE MAP.
+        //
+        // The query above is a snapshot. The worker holding this lease is presumed dead because
+        // the lease expired — but presumed is the word. It may merely be slow, and it may have
+        // finished between the query and this write. This used to `updateDoc` straight from the
+        // snapshot, so a job the slow worker had just marked PROCESSED went back to PENDING and
+        // was sent again. PROCESSED is terminal in the map for exactly that reason, and the map
+        // is asked here about what the transaction just read, not about what the query saw.
+        const applied = await runTransaction(store, async (tx) => {
+          const fresh = await tx.get(d.ref);
+          if (!fresh.exists()) return null;
+          const data: any = fresh.data();
+          if (!data.leaseUntil || data.leaseUntil > Date.now()) return null;
+
+          const attempts = data.attempts || 0;
+          const target = attempts >= MAX_ATTEMPTS ? 'DEAD_LETTER' : 'PENDING';
+          const verdict = assertTransition(OUTBOX_JOB, data.status, target);
+          if (verdict.ok === false) {
+            console.warn(`[Outbox] Not reaping job ${d.id}: ${verdict.message}`);
+            return null;
+          }
+          if (verdict.changed === false) return null;
+
+          if (target === 'DEAD_LETTER') {
+            tx.update(d.ref, {
+              status: 'DEAD_LETTER',
+              lastError: `Lease expired after ${attempts} attempts; exceeded MAX_ATTEMPTS.`,
+              deadLetteredAt: Date.now(),
+              leaseUntil: null,
+            });
+          } else {
+            tx.update(d.ref, {
+              status: 'PENDING',
+              claimedBy: null,
+              leaseUntil: null,
+              nextAttemptAt: Date.now() + backoffMs(attempts),
+              lastError: 'Lease expired; worker presumed dead. Returned to queue.',
+            });
+          }
+          return { target, attempts };
+        });
+
+        if (applied === null) continue;
+        if (applied.target === 'DEAD_LETTER') {
+          console.error(`[Outbox] Job ${d.id} dead-lettered after ${applied.attempts} attempts.`);
         } else {
-          await updateDoc(d.ref, {
-            status: 'PENDING',
-            claimedBy: null,
-            leaseUntil: null,
-            nextAttemptAt: now + backoffMs(attempts),
-            lastError: 'Lease expired; worker presumed dead. Returned to queue.',
-          });
-          console.warn(`[Outbox] Reclaimed job ${data.id} after lease expiry.`);
+          console.warn(`[Outbox] Reclaimed job ${d.id} after lease expiry.`);
         }
         reaped++;
       }
@@ -329,17 +367,65 @@ export class OutboxService {
     return reaped;
   }
 
-  async markProcessed(organizationId: string, id: string, providerMessageId: string) {
+  /**
+   * S6 — Transactional, and asks the map. This was a bare `updateDoc` that wrote PROCESSED over
+   * whatever the row said. Mostly the row said CLAIMED and the write was right. But the send this
+   * records has HAPPENED — it is the one fact here that cannot be taken back — so the cases where
+   * the row said something else are the ones that matter:
+   *
+   *   PENDING    the lease expired and the reaper returned the row while this worker was still
+   *              sending. Delivered is delivered: the map allows PENDING -> PROCESSED for this
+   *              case alone, so the row tells the truth and is not sent again.
+   *   CLAIMED    by ANOTHER worker, after such a reap. Legal too — and their send, if it also
+   *              completes, arrives at the next case.
+   *   PROCESSED  already. A second provider id for one job is evidence of a duplicate send. It
+   *              is recorded on the row as `lateProviderMessageId` and the status is left alone.
+   *   CANCELLED  by an operator after a reap returned the row. The message went; the status
+   *              stays CANCELLED because that is what was decided and the map forbids undeciding
+   *              it — but the provider id is recorded, so the row does not read as "never sent".
+   */
+  async markProcessed(
+    organizationId: string,
+    id: string,
+    providerMessageId: string
+  ): Promise<{ ok: true } | { ok: false; from: string; message: string }> {
     const ref = outboxDoc(organizationId, id);
-    if (!ref) return;
-    // P0.8 — providerMessageId is recorded so a PROCESSED row can be traced to a real
-    // provider artefact. A row without one is not evidence that anything was sent.
-    await updateDoc(ref, {
-      status: 'PROCESSED',
-      providerMessageId,
-      processedAt: Date.now(),
-      leaseUntil: null,
-    });
+    if (!ref || !store) return { ok: false, from: 'UNKNOWN', message: 'Datastore unavailable.' };
+    try {
+      return await runTransaction(store, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) {
+          return { ok: false as const, from: 'MISSING', message: 'No such outbox job.' };
+        }
+        const data: any = snap.data();
+        const verdict = assertTransition(OUTBOX_JOB, data.status, 'PROCESSED');
+        if (verdict.ok === false || verdict.changed === false) {
+          tx.update(ref, {
+            lateProviderMessageId: providerMessageId,
+            lateProcessedAt: Date.now(),
+            lateProcessedFrom: data.status,
+          });
+          const message = verdict.ok === false ? verdict.message : 'Job is already PROCESSED.';
+          console.error(
+            `[Outbox] markProcessed could not record ${id} as PROCESSED: ${message} ` +
+              'The provider id is recorded on the row as lateProviderMessageId.'
+          );
+          return { ok: false as const, from: String(data.status), message };
+        }
+        // P0.8 — providerMessageId is recorded so a PROCESSED row can be traced to a real
+        // provider artefact. A row without one is not evidence that anything was sent.
+        tx.update(ref, {
+          status: 'PROCESSED',
+          providerMessageId,
+          processedAt: Date.now(),
+          leaseUntil: null,
+        });
+        return { ok: true as const };
+      });
+    } catch (e: any) {
+      console.error(`[Outbox] markProcessed transaction failed for ${id}:`, e?.message);
+      return { ok: false, from: 'UNKNOWN', message: 'The processed state could not be recorded.' };
+    }
   }
 
   /**
@@ -357,6 +443,17 @@ export class OutboxService {
         if (!fresh.exists()) return;
         const data: any = fresh.data();
         const attempts = data.attempts || 0;
+
+        // S6 — ask the map before writing. A CANCELLED job whose in-flight send then failed
+        // must not come back as PENDING: the operator's decision stands. A PROCESSED one must
+        // not be dead-lettered: it was delivered. Both branches below wrote over either.
+        const wantsDeadLetter = terminal || attempts >= MAX_ATTEMPTS;
+        const verdict = assertTransition(OUTBOX_JOB, data.status, wantsDeadLetter ? 'DEAD_LETTER' : 'PENDING');
+        if (verdict.ok === false) {
+          console.error(`[Outbox] markFailed refused for ${id}: ${verdict.message}`);
+          return;
+        }
+        if (verdict.changed === false) return;
 
         if (terminal || attempts >= MAX_ATTEMPTS) {
           tx.update(ref, {
@@ -391,7 +488,9 @@ export class OutboxService {
    * Deleted rather than kept for a future operator console, for a reason beyond it being
    * unused: it was a bare `updateDoc({ status: HUMAN_REVIEW })` with no state gate. Every
    * other transition on this collection goes through `assertTransition(OUTBOX_JOB, ...)` —
-   * `approveForSending` does, transactionally — so this one method could move a PROCESSED or
+   * `approveForSending` did when this was written; the claim, the reaper, `markProcessed` and
+   * `markFailed` did not, whatever "every" said here, and were brought through in S6's third
+   * pass — so this one method could move a PROCESSED or
    * DEAD_LETTER job back into the review queue and nothing would refuse it. An operator hold
    * (S38) needs to be written against the transition map, not resurrected from here.
    */
