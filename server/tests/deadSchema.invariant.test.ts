@@ -142,6 +142,14 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
     // suppressed replies and a DEAD sanitiser that would have defeated five of the evasions
     // the detector missed. Both are now one normaliser in server/domain/promptInjection.ts.
     'server/services/aiSecurity.service.ts',
+    // And three repository stubs. `server/repositories/` held contact, conversation and message
+    // repositories with ZERO importers: a decomposition layer begun and never wired. The status
+    // document has been describing this as "an empty directory", which is worse than the truth —
+    // it was three files nothing called, the same shape as everything else in this list, and a
+    // reader looking for where contacts are fetched would have found them.
+    'server/repositories/contact.repository.ts',
+    'server/repositories/conversation.repository.ts',
+    'server/repositories/message.repository.ts',
   ]) {
     it(`${gone} does not exist`, () => {
       expect(existsSync(gone), `${gone} is back`).toBe(false);
@@ -179,6 +187,24 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
         expect(code, `${path} imports the deleted ${name}.service`).not.toMatch(importOf(name));
       }
     }
+  });
+
+  it('nothing imports the repository stubs either', () => {
+    const importOfRepository = (name: string) =>
+      new RegExp(`from\\s+['"][^'"]*/${name}\\.repository['"]`);
+
+    for (const { path, code } of SOURCES) {
+      for (const name of ['contact', 'conversation', 'message']) {
+        expect(code, `${path} imports the deleted ${name}.repository`).not.toMatch(
+          importOfRepository(name)
+        );
+      }
+    }
+
+    // And the rule itself catches what it is about.
+    expect("import { contactRepository } from '../repositories/contact.repository';").toMatch(
+      importOfRepository('contact')
+    );
   });
 
   it('that import check would catch one of them coming back', () => {
