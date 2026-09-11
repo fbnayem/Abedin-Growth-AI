@@ -28,6 +28,7 @@ const call = (over: Partial<ModelCallRecord> = {}): ModelCallRecord => ({
   durationMs: 12,
   failures: [],
   promptHash: null,
+  promptVersion: null,
   ...over,
 });
 

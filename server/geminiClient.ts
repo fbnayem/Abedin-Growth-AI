@@ -127,6 +127,12 @@ export interface GenerateJsonOptions {
   category?: ModelCategory;
   temperature?: number;
   agentName?: string;
+  /**
+   * S22 — the version of the template this call was rendered from, declared beside the
+   * template. `promptHash` says which rendering ran; this says which template. Optional because
+   * legacy call sites declare none, and a record then says `null` rather than inventing a 1.
+   */
+  promptVersion?: number;
 }
 
 /**
@@ -168,6 +174,7 @@ export async function generateJsonOrAbstain<T = any>(
   );
 
   const agent = options.agentName ?? 'unnamed-agent';
+  const promptVersion = typeof options.promptVersion === 'number' ? options.promptVersion : null;
   const failures: string[] = [];
   // §21 — which model answered is the difference between a reproducible reply and an anecdote.
   // Failover across five ids with different prices and capabilities was previously invisible:
@@ -224,6 +231,7 @@ export async function generateJsonOrAbstain<T = any>(
           durationMs: Date.now() - startedAt,
           failures: [...failures],
           promptHash,
+          promptVersion,
         });
         return answered(parsed);
       }
@@ -259,6 +267,7 @@ export async function generateJsonOrAbstain<T = any>(
     durationMs: Date.now() - startedAt,
     failures: [...failures],
     promptHash,
+    promptVersion,
   });
 
   return abstain(

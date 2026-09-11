@@ -728,6 +728,16 @@ export interface AIRunLog {
   /** sha256 of what was sent to each model. The prompt itself is never stored. */
   promptHashes?: (string | null)[];
   /**
+   * S22 — the version of the template each call was rendered from, in call order, declared
+   * beside the template and pinned to its text by `promptVersions.invariant.test.ts`.
+   * `promptHashes` says which rendering ran; this says which template. One version covers the
+   * instruction text AND the output shape it demands, because the shape is declared in the
+   * text. `null` for a call site that declares no version.
+   */
+  promptVersions?: (number | null)[];
+  /** S22 — the version of the policy set that governed the run. See server/policies/version.ts. */
+  policyVersion?: number;
+  /**
    * The identity of the selected context (§21). `contextIds` is the manifest — every record
    * the model was shown, addressable — so the exact input can be reconstructed afterwards.
    * Null means no bundle was built, which is not the same as an empty one.

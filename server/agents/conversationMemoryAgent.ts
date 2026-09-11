@@ -19,6 +19,12 @@ import { Conversation, ConversationMemory, CompanyBrain, EmailMessage } from "..
  * Synthesizes the FULL conversation thread so all replies and follow-ups
  * maintain context, remember commitments, avoid repeating answers, and reference earlier topics.
  */
+/**
+ * S22 — the version of the extraction template inside the function below. Pinned to the
+ * template's text by `promptVersions.invariant.test.ts`; bump it with the change.
+ */
+export const MEMORY_PROMPT_VERSION = 1;
+
 export async function extractAndSynthesizeMemory(
   conversation: Conversation,
   companyBrain?: CompanyBrain
@@ -162,6 +168,7 @@ Return strictly JSON matching this structure:
     category: 'SMART',
     temperature: 0.2,
     agentName: 'conversationMemoryAgent',
+    promptVersion: MEMORY_PROMPT_VERSION,
   });
 
   if (outcome.abstained === true) {

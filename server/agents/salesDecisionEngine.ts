@@ -703,6 +703,13 @@ function abstainedReply(replyPlan: ReplyPlan, abstention: Abstention) {
   };
 }
 
+/**
+ * S22 — the version of the reply template below. `promptVersions.invariant.test.ts` fingerprints
+ * the template's text and fails when it changes while this number does not, so a version names
+ * exactly one template. Bump it with the change, and re-record the fingerprint the test prints.
+ */
+export const REPLY_PROMPT_VERSION = 1;
+
 export async function composeAutonomousSalesReply(input: {
   /**
    * Whose data this reply may read.
@@ -1069,6 +1076,7 @@ Return JSON ONLY:
        contents: assembled.contents,
        category: "SMART",
        agentName: "composeAutonomousSalesReply",
+       promptVersion: REPLY_PROMPT_VERSION,
      });
 
      if (outcome.abstained === true) {

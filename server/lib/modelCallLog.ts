@@ -65,6 +65,13 @@ export interface ModelCallRecord {
    * actually asked — without keeping the text.
    */
   promptHash: string | null;
+  /**
+   * S22 — which TEMPLATE the prompt was rendered from, as declared at the call site. Two
+   * renderings of one template have different hashes and the same version; the version is
+   * pinned to the template's text by `promptVersions.invariant.test.ts`. `null` when the call
+   * site declares none.
+   */
+  promptVersion: number | null;
 }
 
 /** Hash what was sent. The instruction and the untrusted content are hashed as distinct fields

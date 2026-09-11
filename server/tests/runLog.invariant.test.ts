@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { buildRunLog, runLogFieldsFor, type RunLogInput } from '../lib/runLog';
 import { hashPrompt, type ModelCallRecord } from '../lib/modelCallLog';
 import { BudgetTracker } from '../policies/workflowBudgets';
+import { POLICY_VERSION } from '../policies/version';
 
 /**
  * The run-log writer (§21, §46, §2, §18).
@@ -29,6 +30,7 @@ const modelCall = (over: Partial<ModelCallRecord> = {}): ModelCallRecord => ({
   durationMs: 40,
   failures: [],
   promptHash: 'a'.repeat(64),
+  promptVersion: 1,
   ...over,
 });
 
@@ -102,6 +104,26 @@ describe('the row records what happened', () => {
 });
 
 // ===========================================================================
+describe('the row says which template and which policy, not only which rendering (S22)', () => {
+  it('records the declared version of every call, in call order, beside its hash', () => {
+    const row = buildRunLog(
+      input({ modelCalls: [modelCall({ promptVersion: 3 }), modelCall({ promptVersion: 1, model: null })] })
+    );
+    expect(row.promptVersions).toEqual([3, 1]);
+    expect(row.promptHashes).toHaveLength(2);
+  });
+
+  it('a call site that declares no version is recorded as null, never as a plausible 1', () => {
+    const row = buildRunLog(input({ modelCalls: [modelCall({ promptVersion: null })] }));
+    expect(row.promptVersions).toEqual([null]);
+  });
+
+  it('carries the policy version the process is running under', () => {
+    expect(buildRunLog(input()).policyVersion).toBe(POLICY_VERSION);
+    expect(Number.isInteger(POLICY_VERSION) && POLICY_VERSION >= 1).toBe(true);
+  });
+});
+
 describe('nothing is invented', () => {
   it('confidence is null, not a placeholder number', () => {
     // Nothing in this pipeline computes a confidence. A number here would be read by an

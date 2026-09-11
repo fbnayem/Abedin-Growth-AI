@@ -5,6 +5,7 @@ import { orgPath } from '../tenancy/orgScope';
 import type { AIRunLog } from '../../shared/domain/models';
 import type { ModelCallRecord } from './modelCallLog';
 import type { BudgetSnapshot } from '../policies/workflowBudgets';
+import { POLICY_VERSION } from '../policies/version';
 
 /**
  * The run-log writer (addendum §21, §46, §2, §18).
@@ -166,6 +167,7 @@ export function buildRunLog(input: RunLogInput): AIRunLog {
     // of successes.
     models: calls.map((c) => c.model),
     promptHashes: calls.map((c) => c.promptHash),
+    promptVersions: calls.map((c) => c.promptVersion),
     contextHash: input.contextHash ?? null,
     contextIds: input.contextIds ?? null,
     modelCalls: input.budget.modelCalls,
@@ -177,6 +179,10 @@ export function buildRunLog(input: RunLogInput): AIRunLog {
     costMinor: null,
     currency: null,
     costEnforcement: input.budget.costEnforcement,
+    // S22 — the rules this run was decided under. A constant, not an input: every run in a
+    // process is governed by the same policy, and the test that pins the constant to the policy
+    // sources is what makes the number mean something.
+    policyVersion: POLICY_VERSION,
   };
 }
 
