@@ -5,6 +5,8 @@
 // Keeping this first guarantees .env is loaded before any other module body executes.
 import { safeModeSnapshot, isFullySafeMode } from './server/config/safeMode';
 import { getCircuitBreakerState, setCircuitBreaker } from './server/services/circuitBreaker.service';
+import { killSwitchGate } from './server/domain/operatorAction';
+import { isProduction } from './server/config/environment';
 import { isFabricatedProviderId, actionGateway, ActionType } from './server/gateway/actionGateway';
 import { verifyDocuSignSignature, verifyPubSubToken } from './server/services/webhookVerification.service';
 import { standardApiLimiter, aiOperationLimiter, webhookLimiter } from './server/middleware/rateLimit';
@@ -1108,11 +1110,20 @@ app.get("/api/health", async (req: Request, res: Response) => {
       if (typeof enabled !== 'boolean') {
         return sendError(req, res, 'VALIDATION_ERROR', '`enabled` must be a boolean.');
       }
-      // Actor attribution. requireAuth currently admits anonymous callers (fixed in P0.4), so
-      // record what we actually know rather than inventing an operator identity.
-      const actor = req.user?.email || req.user?.uid || 'unattributed';
-      const { state, accepted, message } = await setCircuitBreaker(enabled, reason, actor);
-      res.json({ success: accepted, message, circuitBreaker: state });
+      // S6 — Attribution is a state, not a string. This wrote the literal `'unattributed'` into
+      // the actor field, which sits in a log looking like an account name. The gate is
+      // asymmetric on purpose: a pause is never refused for want of an identity; a resume in
+      // production is. See killSwitchGate.
+      const gate = killSwitchGate(enabled ? 'RESUME' : 'PAUSE', req.user, isProduction);
+      if (gate.allowed === false) {
+        return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+      }
+      const { state, accepted, message, queue } = await setCircuitBreaker(
+        enabled,
+        reason,
+        gate.attribution
+      );
+      res.json({ success: accepted, message, circuitBreaker: state, queue });
     } catch (e: any) {
       // The kill switch failing to record a decision is the failure mode P0.3 exists to
       // remove, so it is logged in full — but e.message is the datastore's text and stays
@@ -1556,11 +1567,17 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       // reporting it to an investor. A number with no source is worse than a blank, because a
       // blank prompts the question and a number answers it.
 
+      // S6 — DRAFT, because that is the only state `CAMPAIGN.initial` declares, and the machine
+      // says ACTIVE is reachable only FROM draft. This is a deliberate behaviour change: a new
+      // campaign is no longer born in the state that means "sending". The console already renders
+      // DRAFT — it has a filter chip for it — and its toggle sends DRAFT -> ACTIVE, which the map
+      // permits, so activating is one click and is now a decision somebody makes rather than a
+      // default nobody chose.
       const newCampaign = {
         id: "camp_" + Date.now(),
         name: name || "Untitled Campaign",
         engineType: engineType || "CUSTOMER",
-        status: "ACTIVE",
+        status: "DRAFT",
         targetAudience: targetAudience || "",
         targetLocations: targetLocations || [],
         targetIndustries: targetIndustries || [],

@@ -172,6 +172,28 @@ export function operatorGate(
 }
 
 /**
+ * S6 — The kill switch is asymmetric, and its attribution rule follows the asymmetry.
+ *
+ * PAUSING is the safe direction. It is never refused for want of an identity: an operator who
+ * cannot be named during an incident must still be able to stop sending, and the record says
+ * UNATTRIBUTED and why rather than inventing a name. (The route used to write the literal string
+ * `'unattributed'` into the actor field, which sits in a log looking like an account.)
+ *
+ * RESUMING clears an operator's pause. That moves toward permission, so it is gated exactly as
+ * every other queue mutation is: in production it needs a named operator.
+ */
+export type KillSwitchDirection = 'PAUSE' | 'RESUME';
+
+export function killSwitchGate(
+  direction: KillSwitchDirection,
+  claims: ActorClaims | null | undefined,
+  isProduction: boolean
+): OperatorGate {
+  if (direction === 'PAUSE') return { allowed: true, attribution: attributionFor(claims) };
+  return operatorGate(claims, isProduction);
+}
+
+/**
  * The reason an operator gave for a requeue.
  *
  * Required. A requeue is a decision to try again with something that already failed, and

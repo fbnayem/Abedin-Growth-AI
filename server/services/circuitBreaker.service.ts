@@ -1,8 +1,10 @@
+import { type Attribution } from '../domain/operatorAction';
 import { store } from '../store';
 import { orgPath, isValidOrgId } from '../tenancy/orgScope';
 import { listServiceableOrgIds } from '../tenancy/organizations';
-import { collection, doc, getDoc, getDocs, setDoc, query, where, updateDoc } from '../store';
+import { collection, doc, getDoc, getDocs, setDoc, query, where } from '../store';
 import { circuitBreaker } from '../agents/salesDecisionEngine';
+import { outboxService } from './outbox.service';
 
 /**
  * P0.3 — Durable, shared, fail-closed kill switch.
@@ -75,8 +77,27 @@ export interface CircuitBreakerView {
 interface DurableState {
   paused: boolean;
   reason?: string;
+  /** Present only when the operator could be named. Never a placeholder string. */
   actor?: string;
+  /** Present instead of `actor` when they could not be, and says why (S6). */
+  unattributedBecause?: string;
   at?: string;
+}
+
+/** What engaging the switch did to the queue. Reported to the operator, not only logged (S6). */
+export interface QueueCancellation {
+  organisations: number;
+  cancelled: number;
+  /** Jobs the machine refused to cancel because they had moved on since the query: claimed, done. */
+  refused: number;
+  /** Jobs whose cancellation could not be recorded at all. */
+  failed: number;
+}
+
+function whoIs(attribution: Attribution): string {
+  return attribution.kind === 'IDENTIFIED'
+    ? attribution.actor
+    : `an unattributed caller (${attribution.why})`;
 }
 
 /** Environment gate. Not writable through the application, so it is the only way to ENABLE. */
@@ -231,8 +252,14 @@ function buildReason(envPermits: boolean, state: DurableState, degraded: boolean
 export async function setCircuitBreaker(
   enabled: boolean,
   reason: string | undefined,
-  actor: string
-): Promise<{ state: CircuitBreakerView; accepted: boolean; message?: string }> {
+  attribution: Attribution
+): Promise<{
+  state: CircuitBreakerView;
+  accepted: boolean;
+  message?: string;
+  /** Present when the switch was engaged: what happened to the queue. */
+  queue?: QueueCancellation;
+}> {
   const ref = settingsRef();
 
   if (!ref) {
@@ -252,10 +279,14 @@ export async function setCircuitBreaker(
   // is still broken. Found by runtime testing; it type-checked and built cleanly.
   const record: DurableState = {
     paused: !enabled,
-    actor,
     // Timestamp is generated here rather than trusted from the client.
     at: new Date().toISOString(),
   };
+  if (attribution.kind === 'IDENTIFIED') {
+    record.actor = attribution.actor;
+  } else {
+    record.unattributedBecause = attribution.why;
+  }
   if (!enabled) {
     record.reason = reason || 'MANUAL_KILL_SWITCH_ENGAGED';
   }
@@ -272,11 +303,12 @@ export async function setCircuitBreaker(
     };
   }
 
+  let queue: QueueCancellation | undefined;
   if (!enabled) {
-    console.warn(`[KILL SWITCH] Global outbound halted by ${actor}. Reason: ${record.reason}`);
-    await cancelPendingOutbox(actor, record.reason || 'Kill switch engaged');
+    console.warn(`[KILL SWITCH] Global outbound halted by ${whoIs(attribution)}. Reason: ${record.reason}`);
+    queue = await cancelPendingOutbox(attribution, record.reason || 'Kill switch engaged');
   } else {
-    console.log(`[KILL SWITCH] Resume requested by ${actor}.`);
+    console.log(`[KILL SWITCH] Resume requested by ${whoIs(attribution)}.`);
   }
 
   const state = await getCircuitBreakerState();
@@ -293,45 +325,64 @@ export async function setCircuitBreaker(
     };
   }
 
-  return { state, accepted: true };
+  return { state, accepted: true, queue };
 }
 
 /**
  * Cancel queued work so that engaging the switch stops what is already in flight, not merely
  * what has yet to be enqueued. Best-effort and non-throwing: a failure here must never prevent
  * the pause itself from being recorded.
+ *
+ * S6 — THE QUERY IS A SNAPSHOT, SO THIS PATH DOES NOT WRITE.
+ *
+ * This used to `updateDoc` each row the PENDING query returned. The write was legal — PENDING ->
+ * CANCELLED is in the map — but it was a second owner of the cancel rule, and it decided on data
+ * read BEFORE the write: by the time the update ran the worker may have claimed the row, and the
+ * update would have forced a CLAIMED job to CANCELLED, which the machine forbids. A first attempt
+ * at closing S6 asked `assertTransition` here and claimed that caught the race. It did not; it
+ * asked about the same snapshot.
+ *
+ * `outboxService.cancelJob` re-reads inside a serializable transaction, asks the machine about
+ * what it just read, and records an operator action in the same transaction. So the cancel rule
+ * has one owner, and a row that moved between the query and the write is REFUSED rather than
+ * forced — which is what `refused` counts.
  */
-async function cancelPendingOutbox(actor: string, reason: string): Promise<number> {
-  if (!store) return 0;
+async function cancelPendingOutbox(
+  attribution: Attribution,
+  reason: string
+): Promise<QueueCancellation> {
+  const outcome: QueueCancellation = { organisations: 0, cancelled: 0, refused: 0, failed: 0 };
+  if (!store) return outcome;
 
   // P1.1 — A global stop must stop every tenant. Cancelling only one organisation's queue
   // would have left the switch looking engaged while other tenants' mail continued.
   const orgIds = await listServiceableOrgIds();
+  outcome.organisations = orgIds.length;
   if (orgIds.length === 0) {
     console.warn(
       '[KILL SWITCH] No serviceable organisations resolved, so no queued jobs were cancelled. ' +
         'The pause itself still stands: the worker resolves the same empty list and dispatches nothing.'
     );
-    return 0;
+    return outcome;
   }
 
-  let cancelled = 0;
   for (const orgId of orgIds) {
     try {
       const outboxRef = collection(store, orgPath(orgId, 'outbox'));
       const pending = await getDocs(query(outboxRef, where('status', '==', 'PENDING')));
       for (const d of pending.docs) {
-        try {
-          await updateDoc(d.ref, {
-            status: 'CANCELLED',
-            cancelledBy: actor,
-            cancelledReason: reason,
-            cancelledAt: new Date().toISOString(),
-          });
-          cancelled++;
-        } catch (inner: any) {
-          console.error(`[CircuitBreaker] Could not cancel outbox job ${d.id}:`, inner?.message);
+        const result = await outboxService.cancelJob(orgId, d.id, attribution, reason);
+        if (result.ok) {
+          outcome.cancelled++;
+          continue;
         }
+        if (result.code === 'ILLEGAL_TRANSITION') {
+          console.warn(`[KILL SWITCH] Not cancelling outbox job ${d.id}: ${result.message}`);
+          outcome.refused++;
+          continue;
+        }
+        console.error(`[CircuitBreaker] Could not cancel outbox job ${d.id}: ${result.message}`);
+        outcome.failed++;
       }
     } catch (e: any) {
       // One tenant failing must not stop the others being cancelled.
@@ -339,8 +390,11 @@ async function cancelPendingOutbox(actor: string, reason: string): Promise<numbe
     }
   }
 
-  if (cancelled > 0) {
-    console.warn(`[KILL SWITCH] Cancelled ${cancelled} pending outbox job(s) across ${orgIds.length} organisation(s).`);
+  if (outcome.cancelled + outcome.refused + outcome.failed > 0) {
+    console.warn(
+      `[KILL SWITCH] Outbox: ${outcome.cancelled} cancelled, ${outcome.refused} refused ` +
+        `(moved on since the query), ${outcome.failed} failed, across ${orgIds.length} organisation(s).`
+    );
   }
-  return cancelled;
+  return outcome;
 }

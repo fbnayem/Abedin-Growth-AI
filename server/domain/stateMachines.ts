@@ -58,6 +58,19 @@ export function legalStates(machine: EntityStateMachine): string[] {
   return [...states].sort();
 }
 
+/**
+ * Whether a record may be CREATED in this state.
+ *
+ * `assertTransition` answers "may this record move from A to B", and creation is neither — there is
+ * no prior state to move from — so nothing asked this. `POST /api/campaigns` wrote
+ * `status: "ACTIVE"` while `CAMPAIGN.initial` is `['DRAFT']`, and this machine says ACTIVE is
+ * reachable only FROM draft. The machine and the creation path disagreed about where a record
+ * starts, and only the machine was written down.
+ */
+export function isInitialState(machine: EntityStateMachine, state: unknown): boolean {
+  return typeof state === 'string' && machine.initial.includes(state);
+}
+
 export function isTerminal(machine: EntityStateMachine, state: string): boolean {
   const outgoing = machine.transitions[state];
   return Array.isArray(outgoing) && outgoing.length === 0;
