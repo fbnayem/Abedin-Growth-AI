@@ -98,7 +98,7 @@ export function creationState(machine: EntityStateMachine, requested: unknown): 
   return {
     ok: false,
     message: known
-      ? `A ${machine.name} cannot be created as ${requested}. It starts at ` +
+      ? `This ${machine.name} cannot be created as ${requested}. It starts at ` +
         `${machine.initial.join(' or ')} and is moved from there through its transitions.`
       : `${JSON.stringify(requested)} is not a ${machine.name} state.`,
   };
