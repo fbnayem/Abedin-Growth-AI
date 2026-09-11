@@ -639,7 +639,7 @@ export class InboundPipeline {
         console.error(
           `[InboundPipeline] ${what} could not be read for conversation ${conversationId}; ` +
             'recorded as UNAVAILABLE rather than as empty:',
-          (e as any)?.message ?? e
+          e instanceof Error ? e.message : e
         );
       };
 

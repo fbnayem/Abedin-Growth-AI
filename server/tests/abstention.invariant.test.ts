@@ -449,7 +449,8 @@ describe('the memory extractor stops inventing what a customer agreed to', () =>
   });
 
   it('an unrecognised sentiment is UNASSESSED, not the most optimistic member', () => {
-    expect(memory).toContain('SENTIMENTS.includes(aiMemory.prospectSentiment as any)');
+    // The `as any` this pinned is gone: membership is tested on a string, not asserted.
+    expect(memory).toContain('SENTIMENTS.includes(String(aiMemory.prospectSentiment))');
     expect(memory).toContain(": 'UNASSESSED',");
   });
 

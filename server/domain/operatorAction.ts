@@ -211,9 +211,13 @@ export interface AuditWriter {
  * @throws when there is nowhere to record the action. A queue change that succeeded while its
  *         record failed is a customer-facing change with nothing saying who made it.
  */
-export function writeOperatorAction(
+export function writeOperatorAction<TCollection>(
   tx: AuditWriter,
-  target: { collection: unknown; newDocRef: (collection: unknown) => unknown } | null,
+  // Generic rather than `unknown`: this module must not import the store (S40 — the dependency
+  // direction), and `unknown` forced the CALLER to cast its own collection back at the boundary.
+  // A type parameter keeps this module ignorant of what a collection is while letting the caller
+  // stay typed.
+  target: { collection: TCollection; newDocRef: (collection: TCollection) => unknown } | null,
   input: {
     action: OperatorAction;
     organizationId: string;

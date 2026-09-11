@@ -619,9 +619,12 @@ export function App() {
   const handleExecuteWorkflowPlan = async (plan: AICommandResult) => {
     try {
       const targetTab = plan.actionRecommendation?.targetTab || (plan.structuredIntent?.engineType === "INVESTOR" ? "investors" : plan.structuredIntent?.engineType === "PARTNER" ? "partners" : "leads");
-      const count = (plan.structuredIntent as any)?.targetCount || plan.structuredIntent?.count || 4;
-      const targetAudience = (plan.structuredIntent as any)?.targetAudience || plan.structuredIntent?.targetIndustry || "Dental & Healthcare Clinics";
-      const location = (plan.structuredIntent as any)?.targetLocation || plan.structuredIntent?.location || "United Kingdom";
+      // `targetCount`, `targetAudience` and `targetLocation` are not fields of
+      // `structuredIntent` — the producer writes `count`, `targetIndustry` and `location` — so
+      // each cast read `undefined` and every call fell through to the default beside it.
+      const count = plan.structuredIntent?.count || 4;
+      const targetAudience = plan.structuredIntent?.targetIndustry || "Dental & Healthcare Clinics";
+      const location = plan.structuredIntent?.location || "United Kingdom";
 
       if (targetTab === "leads" || plan.structuredIntent?.engineType === "CUSTOMER") {
         const res = await diagnosticFetch(

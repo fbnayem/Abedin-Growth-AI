@@ -1,3 +1,4 @@
+import { fieldOf } from '../lib/fields';
 import crypto from 'crypto';
 import { store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
@@ -62,7 +63,7 @@ export async function incrementInboundVersion(
 
   return runTransaction(store, async (tx) => {
     const snap = await tx.get(ref);
-    const current = snap.exists() ? Number((snap.data() as any)?.inboundVersion ?? 0) : 0;
+    const current = snap.exists() ? Number(fieldOf(snap.data(), 'inboundVersion') ?? 0) : 0;
     const next = Number.isFinite(current) ? current + 1 : 1;
     // merge:true so this works whether or not the conversation document already exists.
     tx.set(ref, { inboundVersion: next, inboundVersionUpdatedAt: Date.now() }, { merge: true });
@@ -91,7 +92,7 @@ export async function getInboundVersion(
     // (as opposed to "unknown"), and a draft stamped with anything else is stale.
     return 0;
   }
-  const raw = (snap.data() as any)?.inboundVersion;
+  const raw = fieldOf(snap.data(), 'inboundVersion');
   const version = Number(raw ?? 0);
   if (!Number.isFinite(version) || version < 0) {
     throw new Error(`Conversation ${conversationId} has a malformed inboundVersion: ${JSON.stringify(raw)}`);

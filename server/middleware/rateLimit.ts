@@ -62,8 +62,10 @@ function defaultKey(req: Request): string {
   //
   // Budgets are per (tenant, user) rather than per user, so one tenant cannot consume
   // another tenant's allowance through a shared operator account.
-  const tenant = (req as any).tenant;
-  const user = (req as any).user;
+  // Both are declared on Express.Request — `tenant` in tenancy/orgScope.ts, `user` in
+  // middleware/auth.ts — so these casts asserted what the compiler already knew.
+  const tenant = req.tenant;
+  const user = req.user;
   if (user?.uid) return tenant?.orgId ? `u:${tenant.orgId}:${user.uid}` : `u:${user.uid}`;
   if (tenant?.orgId) return `o:${tenant.orgId}`;
   return `ip:${req.ip || req.socket?.remoteAddress || 'unknown'}`;

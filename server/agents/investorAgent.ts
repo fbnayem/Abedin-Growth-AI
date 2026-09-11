@@ -1,3 +1,4 @@
+import { INVESTOR_STAGES, INVESTOR_STATUSES, memberOf } from '../../shared/domain/enums';
 import { safeGenerateJSON, extractArray } from "../geminiClient";
 import { Investor, CompanyBrain } from "../../shared/domain/models";
 
@@ -157,7 +158,7 @@ Return ONLY a valid JSON array of objects with this exact structure:
       email: `${p.name.split(" ")[0].toLowerCase()}@${domain}`,
       linkedinUrl: `https://linkedin.com/in/${p.name.toLowerCase().replace(" ", "")}-vc`,
       country: loc,
-      stage: stage as any,
+      stage: memberOf(INVESTOR_STAGES, stage, 'SEED'),
       typicalCheckSize: stage === "PRE_SEED" ? "$250K - $500K" : stage === "SEED" ? "$500K - $1.5M" : "$2M - $5M",
       targetSectors: sectors,
       investorFitScore: 89 + (i % 8),
@@ -195,11 +196,11 @@ Return ONLY a valid JSON array of objects with this exact structure:
         email: item.email || fallbackItem.email,
         linkedinUrl: item.linkedinUrl || fallbackItem.linkedinUrl,
         country: item.country || fallbackItem.country || (location === "Global" ? "Singapore" : location),
-        stage: (item.stage || stage) as any,
+        stage: memberOf(INVESTOR_STAGES, item.stage ?? stage, 'SEED'),
         typicalCheckSize: item.typicalCheckSize || fallbackItem.typicalCheckSize,
         targetSectors: item.targetSectors && item.targetSectors.length > 0 ? item.targetSectors : sectors,
         investorFitScore: typeof item.investorFitScore === "number" ? item.investorFitScore : (fallbackItem.investorFitScore || 92),
-        status: (item.status as any) || "DISCOVERED",
+        status: memberOf(INVESTOR_STATUSES, item.status, 'DISCOVERED'),
         thesisMatchReason: item.thesisMatchReason || fallbackItem.thesisMatchReason,
         portfolioFitExample: item.portfolioFitExample || fallbackItem.portfolioFitExample,
         recommendedPitchAngle: item.recommendedPitchAngle || fallbackItem.recommendedPitchAngle,

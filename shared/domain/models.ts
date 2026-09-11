@@ -1,3 +1,4 @@
+import type { InvestorStage, InvestorStatus, LeadStatus, PartnerStatus, PartnerType } from './enums';
 export enum EmailStatus {
   DRAFT = 'DRAFT',
   APPROVAL_REQUIRED = 'APPROVAL_REQUIRED',
@@ -108,53 +109,20 @@ export type EngineCategory = 'CUSTOMER' | 'INVESTOR' | 'PARTNER';
 export type EngineType = EngineCategory;
 export type PipelineStage = LeadStatus;
 
-export type LeadStatus =
-  | 'NEW'
-  | 'QUALIFIED'
-  | 'CONTACTED'
-  | 'ENGAGED'
-  | 'DEMO_SCHEDULED'
-  | 'MEETING_SCHEDULED'
-  | 'DEMO_COMPLETED'
-  | 'PROPOSAL_SENT'
-  | 'PILOT'
-  | 'PROPOSAL'
-  | 'NEGOTIATION'
-  | 'WON'
-  | 'LOST'
-  | 'UNSUBSCRIBED';
+export type { LeadStatus } from './enums';
 
-export type InvestorStatus =
-  | 'DISCOVERED'
-  | 'QUALIFIED'
-  | 'CONTACTED'
-  | 'REPLIED'
-  | 'MEETING_BOOKED'
-  | 'DUE_DILIGENCE'
-  | 'TERM_SHEET'
-  | 'COMMITTED'
-  | 'PASSED';
+/**
+ * These five unions are declared in `./enums.ts` as `const` lists with the type derived from each
+ * list, and re-exported here so every existing importer keeps working.
+ *
+ * They moved because a union that exists only at compile time cannot be checked at runtime, and
+ * three agents were putting MODEL OUTPUT into these fields behind `as any`.
+ */
+export type { InvestorStatus } from './enums';
 
-export type PartnerStatus =
-  | 'DISCOVERED'
-  | 'QUALIFIED'
-  | 'CONTACTED'
-  | 'CONVERSATION'
-  | 'MEETING'
-  | 'PROPOSAL'
-  | 'NEGOTIATION'
-  | 'ACTIVE_PARTNER'
-  | 'DECLINED';
+export type { PartnerStatus } from './enums';
 
-export type PartnerType =
-  | 'RESELLER'
-  | 'REFERRAL'
-  | 'TELECOM'
-  | 'AGENCY'
-  | 'CRM_CONSULTANT'
-  | 'BPO_CALL_CENTER'
-  | 'TECHNOLOGY_INTEGRATION'
-  | 'STRATEGIC';
+export type { PartnerType } from './enums';
 
 export type ReplyIntent =
   | 'INTERESTED'
@@ -298,7 +266,7 @@ export interface Lead {
   createdAt: string;
 }
 
-export type InvestorStage = 'PRE_SEED' | 'SEED' | 'SERIES_A' | 'SERIES_B' | 'GROWTH' | 'ANGEL';
+export type { InvestorStage } from './enums';
 
 export type KnowledgeCategory =
   | 'PRODUCT'

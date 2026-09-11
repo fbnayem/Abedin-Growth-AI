@@ -1,3 +1,4 @@
+import { PARTNER_STATUSES, PARTNER_TYPES, memberOf } from '../../shared/domain/enums';
 import { safeGenerateJSON, extractArray } from "../geminiClient";
 import { Partner, CompanyBrain } from "../../shared/domain/models";
 
@@ -128,7 +129,7 @@ Return ONLY a valid JSON array of objects with this exact structure:
       workspaceId: "default",
       name: c.name,
       companyName: company,
-      partnerType: partnerType as any,
+      partnerType: memberOf(PARTNER_TYPES, partnerType, 'AGENCY'),
       role: c.role,
       email: `${c.name.split(" ")[0].toLowerCase()}@${domain}`,
       country: territory,
@@ -159,12 +160,12 @@ Return ONLY a valid JSON array of objects with this exact structure:
         workspaceId: "default",
         name: item.name || fallbackItem.name,
         companyName: item.companyName || fallbackItem.companyName,
-        partnerType: (item.partnerType || partnerType) as any,
+        partnerType: memberOf(PARTNER_TYPES, item.partnerType ?? partnerType, 'AGENCY'),
         role: item.role || fallbackItem.role,
         email: item.email || fallbackItem.email,
         country: item.country || fallbackItem.country || territory,
         partnerFitScore: typeof item.partnerFitScore === "number" ? item.partnerFitScore : (fallbackItem.partnerFitScore || 90),
-        status: (item.status as any) || "DISCOVERED",
+        status: memberOf(PARTNER_STATUSES, item.status, 'DISCOVERED'),
         potentialCollaboration: item.potentialCollaboration || fallbackItem.potentialCollaboration,
         revenueModel: item.revenueModel || fallbackItem.revenueModel,
         targetDecisionMaker: item.targetDecisionMaker || fallbackItem.targetDecisionMaker,

@@ -159,8 +159,11 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     lead?.status === "ENGAGED" ||
     lead?.status === "DEMO_SCHEDULED" ||
     lead?.status === "WON" ||
-    !!conversation ||
-    (conversation && (conversation as any).thread?.length > 1);
+    // The clause that stood here — `(conversation as any).thread?.length > 1` — was UNREACHABLE:
+    // `!!conversation` above already answers true whenever a conversation exists, so the operand
+    // was only ever evaluated when `conversation` was undefined. TypeScript says so by narrowing it
+    // to `never`; the cast is what stopped it saying so.
+    !!conversation;
 
   const [activeTab, setActiveTab] = useState<
     "conversation" | "timeline" | "overview" | "compose" | "linkedin" | "revenue_calc" | "sequence" | "live_call" | "qc"

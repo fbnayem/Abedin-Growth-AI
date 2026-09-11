@@ -367,17 +367,14 @@ export const MeetingsView: React.FC<MeetingsViewProps> = ({
                   </div>
                 )}
                 {/* Key Goals */}
-                {(activeMeeting.aiBrief.keyGoals || (activeMeeting.aiBrief as any).summary) && (
+                {/* `summary` and `keyPainPoints` are not fields of `aiBrief`. The casts are what
+                    stopped the compiler saying so, and both rendered as nothing. */}
+                {activeMeeting.aiBrief.keyGoals && (
                   <div className="p-4 bg-blue-50/70 rounded-xl border border-blue-100 space-y-2">
                     <div className="text-xs font-bold uppercase tracking-wider text-blue-900 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-blue-600" />
                       <span>Key Meeting Objectives</span>
                     </div>
-                    {(activeMeeting.aiBrief as any).summary && (
-                      <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                        {(activeMeeting.aiBrief as any).summary}
-                      </p>
-                    )}
                     {activeMeeting.aiBrief.keyGoals && activeMeeting.aiBrief.keyGoals.length > 0 && (
                       <ul className="space-y-1">
                         {activeMeeting.aiBrief.keyGoals.map((goal, i) => (
@@ -397,11 +394,7 @@ export const MeetingsView: React.FC<MeetingsViewProps> = ({
                     Primary Operational Pain Points
                   </div>
                   <ul className="space-y-1.5">
-                    {(
-                      activeMeeting.aiBrief.potentialPains ||
-                      (activeMeeting.aiBrief as any).keyPainPoints ||
-                      []
-                    ).map((pain: string, i: number) => (
+                    {(activeMeeting.aiBrief.potentialPains || []).map((pain, i) => (
                       <li
                         key={i}
                         className="text-xs text-slate-700 flex items-start gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200/60"

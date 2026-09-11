@@ -52,6 +52,7 @@ import { isUnauthenticatedApiPath } from "./server/middleware/authAllowlist";
 import { cspReportRouter } from "./server/routes/cspReport.routes";
 import { CSP_REPORT_PATH } from "./server/middleware/securityHeaders";
 import { resolvePort } from "./server/config/port";
+import { stringField } from "./server/lib/fields";
 import { mergeSingletonBody } from "./server/lib/singleton";
 import { actionTrailRouter } from "./server/routes/actionTrail.routes";
 
@@ -1970,7 +1971,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
           // the shared transition map. The rule is the same; the difference is that it is now
           // the same rule every other handler uses, instead of one someone remembered to write
           // here and nowhere else.
-          const current = (snap.data() as any)?.status;
+          const current = stringField(snap.data(), 'status');
           const verdict = assertTransition(MEETING, current, 'CONFIRMED');
           if (verdict.ok === false) {
             console.warn(

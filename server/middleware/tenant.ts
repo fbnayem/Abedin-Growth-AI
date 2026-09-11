@@ -1,3 +1,4 @@
+import { stringField } from '../lib/fields';
 import type { Request, Response, NextFunction } from 'express';
 import { doc, getDoc } from '../store';
 import { store } from '../store';
@@ -192,7 +193,7 @@ export async function checkMembershipRevoked(
   try {
     const snap = await getDoc(doc(store, orgPath(orgId, 'members'), uid));
     if (!snap.exists()) return { revoked: false };
-    const status = (snap.data() as any)?.status;
+    const status = stringField(snap.data(), 'status');
     if (status === undefined || status === 'ACTIVE') return { revoked: false };
     return {
       revoked: true,

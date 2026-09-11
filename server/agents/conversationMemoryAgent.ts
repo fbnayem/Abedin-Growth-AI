@@ -188,7 +188,7 @@ Return strictly JSON matching this structure:
     commitmentsMade: list(aiMemory.commitmentsMade),
     agreedTimeSlots: list(aiMemory.agreedTimeSlots),
     // An unrecognised sentiment is UNASSESSED, not the most optimistic member of the union.
-    prospectSentiment: SENTIMENTS.includes(aiMemory.prospectSentiment as any)
+    prospectSentiment: SENTIMENTS.includes(String(aiMemory.prospectSentiment))
       ? (aiMemory.prospectSentiment as ConversationMemory['prospectSentiment'])
       : 'UNASSESSED',
     keyFactsExtracted: {

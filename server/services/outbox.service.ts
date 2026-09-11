@@ -575,7 +575,7 @@ export class OutboxService {
     // mutation run demonstrated.
     writeOperatorAction(
       tx,
-      actions === null ? null : { collection: actions, newDocRef: (c) => doc(c as any, uuidv4()) },
+      actions === null ? null : { collection: actions, newDocRef: (c) => doc(c, uuidv4()) },
       { ...input, at: Date.now() }
     );
   }

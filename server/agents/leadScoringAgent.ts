@@ -1,3 +1,4 @@
+import { LEAD_STATUSES, memberOf } from '../../shared/domain/enums';
 import { safeGenerateJSON, extractArray } from "../geminiClient";
 import { Lead, CompanyBrain } from "../../shared/domain/models";
 
@@ -284,7 +285,7 @@ Return ONLY a valid JSON array of objects with this exact structure:
         industry: item.industry || industry,
         country: item.country || location,
         employeeCount: item.employeeCount || fallbackItem.employeeCount || "15-30",
-        status: (item.status as any) || "QUALIFIED",
+        status: memberOf(LEAD_STATUSES, item.status, 'QUALIFIED'),
         aiScore: typeof item.aiScore === "number" ? item.aiScore : (fallbackItem.aiScore || 91),
         scoreBreakdown: item.scoreBreakdown || fallbackItem.scoreBreakdown,
         inboundCallVolumeLikelihood: item.inboundCallVolumeLikelihood || "HIGH",

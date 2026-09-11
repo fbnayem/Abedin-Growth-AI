@@ -1,3 +1,4 @@
+import { LEAD_STATUSES } from '../../shared/domain/enums';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
@@ -239,14 +240,11 @@ describe('the machines use the vocabulary the rest of the app uses', () => {
   });
 
   it('OPPORTUNITY states are all members of the LeadStatus union', () => {
-    // LeadStatus is a type-only union with no runtime representation, so it is read out of the
-    // source. Hardcoding a copy here is what lets a machine and a type drift apart unnoticed —
-    // which is how the pipeline machine was first written against invented stage names.
-    const source = readFileSync('shared/domain/models.ts', 'utf8');
-    const block = source.match(/export type LeadStatus =([\s\S]*?);/);
-    expect(block, 'LeadStatus union not found in shared/domain/models.ts').toBeTruthy();
-
-    const declared = new Set([...block![1].matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]));
+    // This parsed the union out of models.ts because "LeadStatus is a type-only union with no
+    // runtime representation". That is no longer true: the members are a `const` list in
+    // shared/domain/enums.ts and the type is derived from it, so this reads the list itself rather
+    // than a regex over a file — which is what the old comment wanted and could not have.
+    const declared = new Set<string>(LEAD_STATUSES);
     expect(declared.size).toBeGreaterThan(5);
 
     for (const state of legalStates(OPPORTUNITY)) {

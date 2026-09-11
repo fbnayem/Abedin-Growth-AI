@@ -261,7 +261,7 @@ export async function setCircuitBreaker(
   }
 
   try {
-    await setDoc(ref, record as any, { merge: false });
+    await setDoc(ref, record, { merge: false });
   } catch (e: any) {
     console.error('[CircuitBreaker] Failed to persist state:', e?.message);
     const state = await getCircuitBreakerState();
