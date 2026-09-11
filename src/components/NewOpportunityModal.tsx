@@ -1,7 +1,7 @@
 import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { X, DollarSign, Sparkles, Building, User, Mail, Plus, Loader2 } from "lucide-react";
-import { Opportunity, PipelineStage, EngineType } from "../types";
+import { Opportunity, EngineType } from "../types";
 
 interface NewOpportunityModalProps {
   isOpen: boolean;
@@ -19,7 +19,6 @@ export const NewOpportunityModal: React.FC<NewOpportunityModalProps> = ({
   const [contactName, setContactName] = useState("");
   const [contactEmail, setContactEmail] = useState("");
   const [category, setCategory] = useState<EngineType>("CUSTOMER");
-  const [stage, setStage] = useState<PipelineStage>("QUALIFIED");
   const [estimatedValue, setEstimatedValue] = useState<number>(12000);
   const [probability, setProbability] = useState<number>(50);
   const [nextStep, setNextStep] = useState("Schedule product discovery & voice demo");
@@ -33,7 +32,6 @@ export const NewOpportunityModal: React.FC<NewOpportunityModalProps> = ({
       setContactName("");
       setContactEmail("");
       setCategory("CUSTOMER");
-      setStage("QUALIFIED");
       setEstimatedValue(12000);
       setProbability(50);
       setNextStep("Schedule product discovery & voice demo");
@@ -58,9 +56,13 @@ export const NewOpportunityModal: React.FC<NewOpportunityModalProps> = ({
           contactName: contactName || "Decision Maker",
           contactEmail,
           category,
-          stage,
+          // S6 — no stage. An opportunity is created at the map's entry point (NEW) and moved
+          // from there on the board; this used to default to QUALIFIED because the board had no
+          // NEW column, and the server honoured any legal stage, WON included.
           estimatedValue: Number(estimatedValue) || 10000,
-          currency: "£",
+          // Was "£", which the server's schema (a three-letter code) refused — so this modal
+          // could not create anything. Found while closing S6; the type checker could not see it.
+          currency: "GBP",
           probability: Number(probability) || 50,
           nextStep: nextStep || "Follow up on initial demonstration",
         }),
@@ -176,17 +178,9 @@ export const NewOpportunityModal: React.FC<NewOpportunityModalProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block font-bold text-slate-700 mb-1">Pipeline Stage</label>
-              <select
-                value={stage}
-                onChange={(e) => setStage(e.target.value as PipelineStage)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs font-medium bg-white focus:ring-2 focus:ring-blue-500 outline-hidden"
-              >
-                <option value="QUALIFIED">Qualified</option>
-                <option value="MEETING_SCHEDULED">Meeting Scheduled</option>
-                <option value="DEMO_COMPLETED">Demo Completed</option>
-                <option value="PROPOSAL_SENT">Proposal Sent</option>
-                <option value="WON">Closed Won</option>
-              </select>
+              <div className="w-full px-3 py-2 border border-slate-200 rounded-lg text-xs font-medium bg-slate-50 text-slate-600">
+                New &mdash; move it on the board once it qualifies
+              </div>
             </div>
 
             <div>

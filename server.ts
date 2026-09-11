@@ -19,7 +19,7 @@ import { schemaCompatibility } from "./server/build/schemaCompatibility";
 import { healthResponse } from "./server/build/health";
 import { resolveTenant } from "./server/middleware/tenant";
 import { orgScope, orgPath, isValidOrgId } from "./server/tenancy/orgScope";
-import { assertTransition, CAMPAIGN, MEETING, OPPORTUNITY } from "./server/domain/stateMachines";
+import { assertTransition, creationState, CAMPAIGN, MEETING, OPPORTUNITY } from "./server/domain/stateMachines";
 import {
   createContactSchema,
   createKnowledgeItemSchema,
@@ -1632,13 +1632,16 @@ app.get("/api/inbox/circuit-breaker", async (req: Request, res: Response) => {
       const input = parseOrRespond(createOpportunitySchema, req, res);
       if (input === null) return;
 
-      // P1.4 — A new opportunity starts at an initial stage of the machine, not at whatever
-      // the caller sent. A supplied stage is honoured only if it is a legal starting point.
-      const requestedStage = input.stage;
-      const stage =
-        requestedStage && OPPORTUNITY.transitions[requestedStage] !== undefined
-          ? requestedStage
-          : OPPORTUNITY.initial[0];
+      // P1.4 said "a supplied stage is honoured only if it is a legal starting point", and
+      // checked `transitions[stage] !== undefined` — whether the stage EXISTS. Every legal stage
+      // was honoured, so an opportunity could be created WON. S6: the map is asked the right
+      // question, and a stage that is not an entry point is refused rather than quietly replaced.
+      // Move it afterwards with PUT /api/pipeline/:id/stage, which asks the map too.
+      const creation = creationState(OPPORTUNITY, input.stage);
+      if (creation.ok === false) {
+        return sendError(req, res, 'VALIDATION_ERROR', creation.message);
+      }
+      const stage = creation.state;
 
       const payload = {
         id: `opp_${Date.now()}`,

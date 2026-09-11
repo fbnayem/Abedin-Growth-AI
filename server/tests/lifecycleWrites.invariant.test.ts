@@ -4,12 +4,15 @@ import {
   CAMPAIGN,
   KNOWLEDGE_ITEM,
   MEETING,
+  OPPORTUNITY,
   OUTBOX_JOB,
   assertTransition,
+  creationState,
   isInitialState,
   type EntityStateMachine,
 } from '../domain/stateMachines';
 import { killSwitchGate } from '../domain/operatorAction';
+import { CURRENCIES } from '../../shared/domain/pricing';
 import { orgPath } from '../tenancy/orgScope';
 import { memory } from './helpers/memoryDocumentStore';
 
@@ -118,6 +121,72 @@ describe('1. creation asks a question transitions cannot answer', () => {
     // ACTIVE. It must remain one click away, or the change breaks the surface it was meant to make
     // honest.
     expect(assertTransition(CAMPAIGN, 'DRAFT', 'ACTIVE').ok).toBe(true);
+  });
+
+  /**
+   * The fourth creation takes its state from the CALLER. `POST /api/pipeline` said "a supplied
+   * stage is honoured only if it is a legal starting point" and checked `transitions[stage] !==
+   * undefined` — whether the stage exists. Every legal stage was honoured; an opportunity could be
+   * created WON. And the console defaulted to QUALIFIED because its board had no column for NEW.
+   */
+  describe('creation with a caller-supplied state', () => {
+    it('absent means the first entry point', () => {
+      for (const absent of [undefined, null, '']) {
+        expect(creationState(OPPORTUNITY, absent)).toEqual({ ok: true, state: 'NEW' });
+      }
+    });
+
+    it('an entry point is honoured', () => {
+      expect(creationState(OPPORTUNITY, 'NEW')).toEqual({ ok: true, state: 'NEW' });
+      expect(creationState(OUTBOX_JOB, 'HUMAN_REVIEW')).toEqual({ ok: true, state: 'HUMAN_REVIEW' });
+    });
+
+    it('THE INVARIANT — a legal stage that is not an entry point is refused, not substituted', () => {
+      for (const arrived of ['QUALIFIED', 'PROPOSAL_SENT', 'WON']) {
+        const verdict = creationState(OPPORTUNITY, arrived);
+        expect(verdict.ok, arrived).toBe(false);
+        expect(verdict.ok === false && verdict.message).toContain(`cannot be created as ${arrived}`);
+      }
+    });
+
+    it('and a non-state is refused as such', () => {
+      for (const junk of ['bogus', 'new', 42, {}]) {
+        const verdict = creationState(OPPORTUNITY, junk);
+        expect(verdict.ok, JSON.stringify(junk)).toBe(false);
+        expect(verdict.ok === false && verdict.message).toContain('is not a');
+      }
+    });
+
+    it('the pipeline handler asks it and refuses on its answer', () => {
+      const source = strip('server.ts');
+      const start = source.indexOf('app.post("/api/pipeline"');
+      expect(start).toBeGreaterThan(-1);
+      const handler = source.slice(start, source.indexOf('\n  app.', start + 1));
+
+      expect(handler).toContain('creationState(OPPORTUNITY, input.stage)');
+      expect(handler).toContain("sendError(req, res, 'VALIDATION_ERROR', creation.message)");
+      expect(handler).not.toContain('OPPORTUNITY.transitions[');
+      expect(handler).not.toContain('OPPORTUNITY.initial[');
+    });
+  });
+
+  describe('the console creates where the map says records start', () => {
+    it('the new-opportunity modal sends no stage, and a currency the price book knows', () => {
+      const modal = strip('src/components/NewOpportunityModal.tsx');
+      const start = modal.indexOf('apiFetch("/api/pipeline", {');
+      expect(start).toBeGreaterThan(-1);
+      const request = modal.slice(start, modal.indexOf('});', start));
+
+      expect(request).not.toMatch(/\bstage\b/);
+      const currency = /currency:\s*"([A-Z]{3})"/.exec(request);
+      expect(currency, 'the modal must send a three-letter currency code').not.toBeNull();
+      expect(CURRENCIES as readonly string[]).toContain(currency![1]);
+    });
+
+    it('the board has a column for the entry point', () => {
+      const board = strip('src/pages/PipelineView.tsx');
+      expect(board).toMatch(/id:\s*"NEW"/);
+    });
   });
 });
 

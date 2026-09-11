@@ -24,6 +24,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
   onAddOpportunity,
 }) => {
   const stages: { id: PipelineStage; label: string; color: string }[] = [
+    // S6 — the map's entry point. Every opportunity is created here now; without this column a
+    // new record was invisible, which is why creation used to skip straight to QUALIFIED.
+    { id: "NEW", label: "New", color: "slate" },
     { id: "QUALIFIED", label: "Qualified", color: "blue" },
     { id: "MEETING_SCHEDULED", label: "Meeting Scheduled", color: "indigo" },
     { id: "DEMO_COMPLETED", label: "Demo Completed", color: "purple" },
@@ -59,7 +62,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       </div>
 
       {/* Kanban Board Columns */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3 overflow-x-auto pb-4">
+      <div className="grid grid-cols-1 md:grid-cols-6 gap-3 overflow-x-auto pb-4">
         {stages.map((stage) => {
           const items = opportunities.filter((o) => o.stage === stage.id);
           const stageValue = items.reduce((sum, o) => sum + o.estimatedValue, 0);

@@ -71,6 +71,39 @@ export function isInitialState(machine: EntityStateMachine, state: unknown): boo
   return typeof state === 'string' && machine.initial.includes(state);
 }
 
+export type CreationVerdict =
+  | { ok: true; state: string }
+  | { ok: false; message: string };
+
+/**
+ * The state a record may be CREATED in, given what the caller asked for (S6).
+ *
+ * Absent means the machine's first declared entry point. Present and an entry point means that
+ * state. Present and anything else — a legal state that is not an entry point, or a string that
+ * is no state at all — is REFUSED, not substituted. A caller who asked for WON and was given NEW
+ * has been corrected silently, and no console reads a response closely enough to notice.
+ *
+ * `POST /api/pipeline` did the substitution, and checked the wrong thing while doing it:
+ * `transitions[requested] !== undefined` asks whether a stage EXISTS, so every legal stage was
+ * honoured and an opportunity could be born WON. The comment above that line said otherwise.
+ */
+export function creationState(machine: EntityStateMachine, requested: unknown): CreationVerdict {
+  if (requested === undefined || requested === null || requested === '') {
+    return { ok: true, state: machine.initial[0] };
+  }
+  if (typeof requested === 'string' && isInitialState(machine, requested)) {
+    return { ok: true, state: requested };
+  }
+  const known = typeof requested === 'string' && legalStates(machine).includes(requested);
+  return {
+    ok: false,
+    message: known
+      ? `A ${machine.name} cannot be created as ${requested}. It starts at ` +
+        `${machine.initial.join(' or ')} and is moved from there through its transitions.`
+      : `${JSON.stringify(requested)} is not a ${machine.name} state.`,
+  };
+}
+
 export function isTerminal(machine: EntityStateMachine, state: string): boolean {
   const outgoing = machine.transitions[state];
   return Array.isArray(outgoing) && outgoing.length === 0;
