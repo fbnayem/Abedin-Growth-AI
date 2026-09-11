@@ -44,7 +44,17 @@ import { execSync } from 'node:child_process';
 const BASELINE = {
   critical: 0,
   high: 0,
-  moderate: 13,
+  // 13 -> 6, 2026-09-12: `npm audit fix` (no --force) resolved seven advisories with no change
+  // to any direct dependency range — only package-lock.json moved. What remains is NOT all of
+  // one kind, and the difference matters:
+  //
+  //   - four in the drizzle-kit toolchain (drizzle-kit, esbuild, @esbuild-kit/*). Dev-time
+  //     only; the offered fix is a semver-MAJOR DOWNGRADE to drizzle-kit 0.18.1.
+  //   - express and qs. npm reports a fix as available, and `npm audit fix` did not take it:
+  //     it needs express 4 -> 5, which is a major. `qs` is in the PRODUCTION request path, as
+  //     the note above says, so this is a live exposure carried deliberately and not a
+  //     dev-only leftover.
+  moderate: 6,
 };
 
 /** Severities that must be zero outright, whatever the baseline says. */
