@@ -116,7 +116,10 @@ let availabilityAnswer: { availability: string; reason: string } = {
 let availabilityThrows: unknown = null;
 let availabilityCalls: any[] = [];
 let createEventCalls: any[] = [];
-let createEventResult = { eventId: 'goog-evt-1', conferenceUrl: 'https://meet.google.com/abc-defg-hij' };
+let createEventResult: { eventId: string; conferenceUrl: string | null } = {
+  eventId: 'goog-evt-1',
+  conferenceUrl: 'https://meet.google.com/abc-defg-hij',
+};
 
 vi.mock('../services/calendar.service', () => ({
   calendarService: {

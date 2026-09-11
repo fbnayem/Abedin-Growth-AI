@@ -118,6 +118,9 @@ const ownerUrl = process.env.MIGRATION_DATABASE_URL;
 const appUrl = process.env.DATABASE_URL;
 if (!ownerUrl) fail('MIGRATION_DATABASE_URL is not set.');
 if (!appUrl) fail('DATABASE_URL is not set.');
+// `fail` returns `never`, but control-flow narrowing is per-function: inside the async body below
+// `appUrl` widens back to `string | undefined`. Naming the checked value carries the refusal in.
+const APP_URL: string = appUrl;
 // Every connection below is verified before a byte of Postgres protocol reaches it. This
 // used to be `{ rejectUnauthorized: false }` — a script that drops tables, restores a
 // backup and grants privileges, talking to whatever answered on the address.
@@ -320,7 +323,7 @@ async function main() {
 
   // 6c. The only test that matters: connect AS the app role and actually write, then undo it.
   // A GRANT that ran without error is not evidence that the application can insert a row.
-  const app = new pg.Client({ ...verifiedPgOptions(appUrl), connectionTimeoutMillis: 20000 });
+  const app = new pg.Client({ ...verifiedPgOptions(APP_URL), connectionTimeoutMillis: 20000 });
   await app.connect();
   try {
     await app.query('BEGIN');

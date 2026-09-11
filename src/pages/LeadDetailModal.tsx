@@ -188,7 +188,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
     setTimeout(() => {
       const snippets = lead.personalizationSnippets || [];
       const bestSnippet = snippets.length > 0 ? snippets[0].text : `I saw your recent work at ${lead.companyName}`;
-      const valProp = companyBrain.valueProposition || "We help scale operations efficiently.";
+      const valProp = companyBrain.tagline || "We help scale operations efficiently.";
       
       const suggestedDraft = `Hi ${lead.name.split(" ")[0]},
 
@@ -197,7 +197,7 @@ ${bestSnippet}. Given ${companyBrain.companyName}'s focus on ${valProp.toLowerCa
 We built a solution specifically for teams like yours at ${lead.companyName}. Would you be open to a 2-minute test call this week?
 
 Best,
-${companyBrain.founderName || "Founder"}
+Founder
 ${companyBrain.companyName}`;
       
       setEmailBody(suggestedDraft);
@@ -1285,7 +1285,7 @@ ${companyBrain.companyName}`;
           {activeTab === "revenue_calc" && (
             <RevenueLeakCalculator
               lead={lead}
-              onInjectIntoEmail={(hook) => {
+              onApplyPitchHook={(hook) => {
                 setEmailBody((prev) => `${prev}\n\n${hook}`);
                 setActiveTab("compose");
               }}
@@ -1298,8 +1298,9 @@ ${companyBrain.companyName}`;
           {activeTab === "sequence" && (
             <SequenceCadenceViewer
               lead={lead}
-              onSelectStep={(bodyText) => {
-                setEmailBody(bodyText);
+              onUseStep={(stepSubject, stepBody) => {
+                setSubject(stepSubject);
+                setEmailBody(stepBody);
                 setActiveTab("compose");
               }}
             />
@@ -1308,10 +1309,13 @@ ${companyBrain.companyName}`;
           {/* ========================================================================= */}
           {/* TAB 8: LIVE PHONE TEST SIMULATOR                                          */}
           {/* ========================================================================= */}
+          {/* `lead` and `onScheduleDemo` were not props of this widget, so it fell back to its own
+              defaults and showed every lead as "Dr. Practice Manager" at "Harley Street Dental". */}
           {activeTab === "live_call" && (
             <LivePhoneTestWidget
-              lead={lead}
-              onScheduleDemo={() => onBookMeeting(lead)}
+              prospectName={lead.name}
+              clinicName={lead.companyName}
+              defaultPhone={lead.phone ?? ""}
             />
           )}
 
@@ -1322,8 +1326,7 @@ ${companyBrain.companyName}`;
             <DeliverabilityScanner
               subject={subject}
               body={emailBody}
-              recipientEmail={lead.email}
-              companyName={lead.companyName}
+              onApplyOptimization={(optimized) => setEmailBody(optimized)}
             />
           )}
         </div>

@@ -1,33 +1,10 @@
 import { safeGenerateJSON } from "../geminiClient";
 import { CompanyBrain } from "../../shared/domain/models";
+import type { AICommandPlanStep, AICommandResult } from "../../shared/domain/growthCommand";
 
-export interface AICommandPlanStep {
-  stepNumber: number;
-  title: string;
-  description: string;
-  actionType: "READ" | "WRITE" | "EXTERNAL";
-}
-
-export interface AICommandResult {
-  intent: string;
-  userMessage: string;
-  responseSummary: string;
-  requiresPlanApproval: boolean;
-  structuredIntent?: {
-    goal: string;
-    engineType: "CUSTOMER" | "INVESTOR" | "PARTNER";
-    targetIndustry?: string;
-    location?: string;
-    count?: number;
-    filters?: Record<string, any>;
-  };
-  planSteps?: AICommandPlanStep[];
-  actionRecommendation?: {
-    type: string;
-    targetTab?: string;
-    payload?: any;
-  };
-}
+// S40 — these types lived here, so four React modules imported this server agent to name them.
+// They live in shared/domain/growthCommand.ts now, and are re-exported for server callers.
+export type { AICommandPlanStep, AICommandResult };
 
 function buildDynamicFallback(
   userQuery: string,

@@ -177,11 +177,12 @@ describe('4. the classifier still refuses what it can see, and now sees three mo
   });
 
   it('none of the new classes permit a reply', () => {
-    for (const headers of [
+    const cases: Record<string, string>[] = [
       { 'content-type': 'multipart/report; report-type=disposition-notification' },
       { 'x-loop': 'x' },
       { 'x-auto-response-suppress': 'All' },
-    ]) {
+    ];
+    for (const headers of cases) {
       expect(mayReplyTo(classOf(headers)), JSON.stringify(headers)).toBe(false);
     }
   });

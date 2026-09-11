@@ -13,7 +13,7 @@ import {
   Zap,
   HelpCircle,
 } from "lucide-react";
-import { AICommandResult } from "../../server/agents/growthCommandAgent";
+import type { AICommandResult } from "../../shared/domain/growthCommand";
 
 interface ChatMessage {
   id: string;
@@ -203,7 +203,8 @@ export const GrowthAgentView: React.FC<GrowthAgentViewProps> = ({
                       onClick={() => onNavigateTab(msg.planResult!.actionRecommendation!.targetTab)}
                       className="inline-flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-200 transition-colors"
                     >
-                      <span>{msg.planResult.actionRecommendation.label}</span>
+                      {/* `label` was read here and no producer sets it, so the button had no text. */}
+                      <span>Open {msg.planResult.actionRecommendation.targetTab}</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </button>
                   )}

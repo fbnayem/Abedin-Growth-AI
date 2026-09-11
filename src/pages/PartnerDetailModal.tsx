@@ -55,7 +55,7 @@ export const PartnerDetailModal: React.FC<PartnerDetailModalProps> = ({
 
   const [replyBody, setReplyBody] = useState(
     conversation?.proposedAiDraft?.body ||
-      `Hi ${partner.contactName?.split(" ")[0] || "there"},\n\nThanks for your interest in our Partner Revenue Share program. We offer 30% recurring margin for each clinic onboarded with Abedin Voice AI.\n\nCould we set up a 15-minute walkthrough to show you how our agency dashboard and white-label tools work?\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`
+      `Hi ${partner.name?.split(" ")[0] || "there"},\n\nThanks for your interest in partnering with Abedin Voice AI.\n\nCould we set up a 15-minute call to discuss how a partnership could work?\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`
   );
   const [sendingReply, setSendingReply] = useState(false);
   const [replySuccess, setReplySuccess] = useState(false);
@@ -93,20 +93,20 @@ export const PartnerDetailModal: React.FC<PartnerDetailModalProps> = ({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white">{partner.name}</h3>
+                <h3 className="text-base font-bold text-white">{partner.companyName}</h3>
                 <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                   {partner.status}
                 </span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-                  {partner.revenueShareModel}
+                  {partner.revenueModel}
                 </span>
               </div>
               <div className="text-xs text-slate-300 flex items-center gap-2 mt-0.5">
-                <span>{partner.contactName} ({partner.title})</span>
+                <span>{partner.name} ({partner.role})</span>
                 <span>•</span>
                 <span className="text-slate-400">{partner.partnerType}</span>
                 <span>•</span>
-                <span className="text-slate-400">{partner.location}</span>
+                <span className="text-slate-400">{partner.country}</span>
               </div>
             </div>
           </div>
@@ -187,7 +187,7 @@ export const PartnerDetailModal: React.FC<PartnerDetailModalProps> = ({
                     >
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="font-bold text-slate-900">
-                          {isAgent ? "Nayem Abedin (Founder & CEO)" : msg.senderName || partner.contactName}
+                          {isAgent ? "Nayem Abedin (Founder & CEO)" : msg.senderName || partner.name}
                         </span>
                         <span className="text-slate-400">
                           {msg.sentAt ? new Date(msg.sentAt).toLocaleString() : "Recent"}
@@ -205,7 +205,7 @@ export const PartnerDetailModal: React.FC<PartnerDetailModalProps> = ({
               <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-3">
                 <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                   <Send className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>Send Follow-Up to {partner.contactName}</span>
+                  <span>Send Follow-Up to {partner.name}</span>
                 </div>
 
                 {replySuccess && (
@@ -255,23 +255,27 @@ export const PartnerDetailModal: React.FC<PartnerDetailModalProps> = ({
                   </div>
                 </div>
 
-                <div className="relative">
-                  <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow-xs" />
-                  <div className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-1 text-xs">
-                    <div className="font-bold text-slate-900">2. Revenue Share Proposal Dispatched</div>
-                    <p className="text-slate-600">
-                      Sent partnership proposal detailing 30% recurring margin and white-label capabilities.
-                    </p>
+                {/* Only when a message to this partner is on record. This read "Sent partnership proposal
+                    detailing 30% recurring margin" for every partner, and no price book defines that figure. */}
+                {conversation?.thread?.some((m) => m.sender === "AGENT" || m.sender === "USER") && (
+                  <div className="relative">
+                    <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-blue-600 border-2 border-white shadow-xs" />
+                    <div className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-1 text-xs">
+                      <div className="font-bold text-slate-900">2. Outreach Sent</div>
+                      <p className="text-slate-600">
+                        A message to {partner.name} is in the conversation thread.
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {conversation && (
+                {conversation && conversation.thread?.some((m) => m.sender === "PROSPECT") && (
                   <div className="relative">
                     <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-purple-600 border-2 border-white shadow-xs" />
                     <div className="p-3.5 bg-purple-50 rounded-xl border border-purple-200 space-y-1 text-xs">
-                      <div className="font-bold text-purple-950">3. Partner Reply Received</div>
+                      <div className="font-bold text-purple-950">3. Reply Received</div>
                       <p className="text-purple-900">
-                        {partner.contactName} replied to schedule a partner agreement review.
+                        {conversation.aiSummary || `${partner.name} replied; the message is in the conversation thread.`}
                       </p>
                     </div>
                   </div>
@@ -285,7 +289,9 @@ export const PartnerDetailModal: React.FC<PartnerDetailModalProps> = ({
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                 <div className="font-bold text-slate-900">Commercial Alignment & Model</div>
                 <p className="text-slate-700 leading-relaxed">
-                  {partner.notes || "High-volume dental agency managing marketing and booking for 20+ private dental practices."}
+                  {/* `notes` is not a Partner field, so every partner was described as "High-volume dental
+                      agency managing marketing and booking for 20+ private dental practices". */}
+                  {partner.potentialCollaboration || "No collaboration model was recorded for this partner."}
                 </p>
               </div>
 
@@ -297,7 +303,7 @@ export const PartnerDetailModal: React.FC<PartnerDetailModalProps> = ({
 
                 <div className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-1">
                   <div className="text-[11px] text-slate-400 font-bold uppercase">Rev Share Model</div>
-                  <div className="font-bold text-slate-900">{partner.revenueShareModel}</div>
+                  <div className="font-bold text-slate-900">{partner.revenueModel}</div>
                 </div>
               </div>
             </div>

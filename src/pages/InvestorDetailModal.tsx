@@ -65,7 +65,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
   );
   const [replyBody, setReplyBody] = useState(
     conversation?.proposedAiDraft?.body ||
-      `Hi ${investor.name.split(" ")[0]},\n\nThanks for your response! Attached is our 10-slide Seed Pitch Deck and 2-minute live voice latency demo recording.\n\nWould you have 15 minutes Tuesday afternoon for a brief partner intro call?\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`
+      `Hi ${investor.name.split(" ")[0]},\n\nThanks for your response.\n\nWould you have 15 minutes this week for a brief intro call?\n\nBest regards,\nNayem Abedin\nFounder & CEO | Abedin Tech`
   );
   const [sendingReply, setSendingReply] = useState(false);
   const [replySuccess, setReplySuccess] = useState(false);
@@ -108,15 +108,15 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
                   {investor.status}
                 </span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
-                  Check: {investor.typicalCheck}
+                  Check: {investor.typicalCheckSize}
                 </span>
               </div>
               <div className="text-xs text-slate-300 flex items-center gap-2 mt-0.5">
-                <span>{investor.title}</span>
+                <span>{investor.role}</span>
                 <span>•</span>
                 <span className="font-semibold text-white">{investor.fundName}</span>
                 <span>•</span>
-                <span className="text-slate-400">{investor.stage} ({investor.geography})</span>
+                <span className="text-slate-400">{investor.stage} ({investor.country})</span>
               </div>
             </div>
           </div>
@@ -276,28 +276,38 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
                   <div className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-1 text-xs">
                     <div className="font-bold text-slate-900">1. Fund Research & Partner Matching</div>
                     <p className="text-slate-600">
-                      Matched thesis: {investor.thesisMatch || "Voice AI and vertical healthcare SaaS applications"}.
+                      {investor.thesisMatchReason
+                        ? `Matched thesis: ${investor.thesisMatchReason}`
+                        : "No thesis match was recorded for this investor."}
                     </p>
                   </div>
                 </div>
 
-                <div className="relative">
-                  <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-emerald-600 border-2 border-white shadow-xs" />
-                  <div className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-1 text-xs">
-                    <div className="font-bold text-slate-900">2. Personalized Cold Inbound Sent</div>
-                    <p className="text-slate-600">
-                      Dispatched personalized pitch email highlighting unit economics and customer pipeline.
-                    </p>
+                {/* Shown only when contact is on record. This step read "Dispatched personalized pitch
+                    email highlighting unit economics" for every investor, whether or not anything had been
+                    sent. */}
+                {(investor.contactedAt || investor.lastOutreachSubject) && (
+                  <div className="relative">
+                    <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-emerald-600 border-2 border-white shadow-xs" />
+                    <div className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-1 text-xs">
+                      <div className="font-bold text-slate-900">2. Contacted</div>
+                      <p className="text-slate-600">
+                        {investor.lastOutreachSubject ? `Subject: ${investor.lastOutreachSubject}` : "Contact recorded."}
+                        {investor.contactedAt ? ` (${new Date(investor.contactedAt).toLocaleDateString()})` : ""}
+                      </p>
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {conversation && (
+                {/* Only when the investor has actually replied. This read "requested 10-slide deck and
+                    offered 15-min intro slot" whenever any conversation existed. */}
+                {conversation && conversation.thread?.some((m) => m.sender === "PROSPECT") && (
                   <div className="relative">
                     <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-purple-600 border-2 border-white shadow-xs" />
                     <div className="p-3.5 bg-purple-50 rounded-xl border border-purple-200 space-y-1 text-xs">
-                      <div className="font-bold text-purple-950">3. Partner Reply Received</div>
+                      <div className="font-bold text-purple-950">3. Reply Received</div>
                       <p className="text-purple-900">
-                        {investor.name} requested 10-slide deck and offered 15-min intro slot.
+                        {conversation.aiSummary || `${investor.name} replied; the message is in the conversation thread.`}
                       </p>
                     </div>
                   </div>
@@ -311,7 +321,7 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
                 <div className="font-bold text-slate-900">Investment Thesis Alignment</div>
                 <p className="text-slate-700 leading-relaxed">
-                  {investor.thesisMatch || "Invests in Seed-stage AI infrastructure, vertical voice agents, and high gross-margin B2B SaaS."}
+                  {investor.thesisMatchReason || "No investment thesis was recorded for this investor."}
                 </p>
               </div>
 
@@ -323,20 +333,15 @@ export const InvestorDetailModal: React.FC<InvestorDetailModalProps> = ({
 
                 <div className="p-3.5 bg-white rounded-xl border border-slate-200 space-y-1">
                   <div className="text-[11px] text-slate-400 font-bold uppercase">Check Size</div>
-                  <div className="font-bold text-slate-900">{investor.typicalCheck}</div>
+                  <div className="font-bold text-slate-900">{investor.typicalCheckSize}</div>
                 </div>
               </div>
 
-              {investor.portfolioCompanies && investor.portfolioCompanies.length > 0 && (
+              {/* `portfolioCompanies` is not a field any producer writes; `portfolioFitExample` is. */}
+              {investor.portfolioFitExample && (
                 <div className="p-4 bg-white rounded-xl border border-slate-200 space-y-2">
-                  <div className="font-bold text-slate-900">Notable Portfolio Companies</div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {investor.portfolioCompanies.map((c) => (
-                      <span key={c} className="px-2 py-1 rounded-md bg-slate-100 font-semibold text-slate-700">
-                        {c}
-                      </span>
-                    ))}
-                  </div>
+                  <div className="font-bold text-slate-900">Portfolio Fit</div>
+                  <p className="text-slate-700 leading-relaxed">{investor.portfolioFitExample}</p>
                 </div>
               )}
             </div>

@@ -31,14 +31,12 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   const [activeTab, setActiveTab] = useState<"brain" | "docs">("brain");
   const [editingBrain, setEditingBrain] = useState(false);
   const [tagline, setTagline] = useState(brain.tagline || "");
-  const [pricingOverview, setPricingOverview] = useState(brain.pricingOverview || "");
   const [isAddDocOpen, setIsAddDocOpen] = useState(false);
 
   const handleSaveBrain = () => {
     onUpdateBrain({
       ...brain,
       tagline,
-      pricingOverview,
     });
     setEditingBrain(false);
   };
@@ -178,7 +176,7 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
               <div className="text-slate-500 font-medium">Key Buyer Personas:</div>
               <ul className="list-disc pl-4 space-y-0.5 text-slate-700">
                 {(brain.targetPersonas || []).map((p, i) => (
-                  <li key={i}>{p.title} — Focus: {p.primaryGoal || (p as any).painPoint || "Operational efficiency"}</li>
+                  <li key={i}>{p.title} — Focus: {p.painPoint}</li>
                 ))}
               </ul>
             </div>
@@ -192,13 +190,13 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {(brain.objectionsHandling || (brain as any).objectionsAndAnswers || []).map((obj: any, i: number) => (
+              {(brain.objectionsAndAnswers || []).map((obj, i) => (
                 <div
                   key={i}
                   className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1 text-xs"
                 >
                   <div className="font-bold text-rose-800">&quot;{obj.objection}&quot;</div>
-                  <div className="text-slate-700 leading-relaxed font-sans">{obj.counterAngle || obj.recommendedResponse || obj.answer}</div>
+                  <div className="text-slate-700 leading-relaxed font-sans">{obj.recommendedResponse}</div>
                 </div>
               ))}
             </div>

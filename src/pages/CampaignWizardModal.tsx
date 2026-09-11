@@ -247,24 +247,26 @@ export const CampaignWizardModal: React.FC<CampaignWizardModalProps> = ({
 
               <div className="space-y-2.5">
                 <div className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  4-Step Sequence Timeline
+                  {previewSteps.length}-Step Sequence Timeline
                 </div>
 
-                {previewSteps.map((step) => (
+                {/* `stepNumber`, `title` and `delayDays` are not CampaignStep fields, so every step
+                    rendered with no number, no title and "Day +undefined". */}
+                {previewSteps.map((step, index) => (
                   <div
-                    key={step.stepNumber}
+                    key={step.id}
                     className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1.5"
                   >
                     <div className="flex items-center justify-between text-xs font-bold text-slate-900">
                       <div className="flex items-center gap-2">
                         <span className="w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px]">
-                          {step.stepNumber}
+                          {index + 1}
                         </span>
-                        <span>{step.title}</span>
+                        <span>{step.objective || step.stepType}</span>
                       </div>
                       <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1">
                         <Clock className="w-3 h-3" />
-                        {step.delayDays === 0 ? "Day 0 (Instant)" : `Day +${step.delayDays}`}
+                        {step.dayOffset === 0 ? "Day 0 (Instant)" : `Day +${step.dayOffset}`}
                       </span>
                     </div>
 

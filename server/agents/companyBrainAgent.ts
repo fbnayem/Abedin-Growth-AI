@@ -106,15 +106,15 @@ export function brainFromModelOutcome(
     return {
       ok: true,
       //
-      // `as CompanyBrain` is sound: `generatedBrainSchema` requires every field at runtime, which
-      // companyBrain.invariant.test.ts section 2 asserts. It exists only because zod decides
-      // optionality with `undefined extends T`, which without strictNullChecks holds for EVERY T —
-      // so zod's output types mark every field optional however the schema is written.
+      // No cast. Until strictNullChecks was enabled this needed `as CompanyBrain`: zod decides
+      // optionality with `undefined extends T`, which without that flag holds for every T, so its
+      // output types marked every field optional however the schema was written. With the flag
+      // the schema's own output is a CompanyBrain, and the compiler checks that it is.
       brain: {
         ...parsed.data,
         workspaceId: DEFAULT_WORKSPACE_ID,
         updatedAt: now.toISOString(),
-      } as CompanyBrain,
+      },
     };
   }
   return {

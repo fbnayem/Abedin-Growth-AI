@@ -13,10 +13,17 @@ import type { Request } from 'express';
  * unauthenticated endpoint that mutates meeting state or drives a paid AI loop.
  */
 
-export interface VerificationResult {
-  ok: boolean;
-  reason?: string;
-}
+/**
+ * A verdict, or the reason there is not one.
+ *
+ * `{ ok: boolean; reason?: string }` could not be narrowed: after `if (!verification.ok)` the
+ * reason was still `string | undefined`, so each refusal handed `sendError` a message its type
+ * said might be missing. `reason?: undefined` on the success arm keeps `.reason` readable on the
+ * union without narrowing first.
+ */
+export type VerificationResult =
+  | { readonly ok: true; readonly reason?: undefined }
+  | { readonly ok: false; readonly reason: string };
 
 /**
  * Constant-time comparison. A plain `===` on a signature leaks its contents through timing,

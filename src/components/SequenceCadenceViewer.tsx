@@ -19,13 +19,23 @@ import { DeliverabilityScanner } from "./DeliverabilityScanner";
 interface SequenceCadenceViewerProps {
   lead: Lead;
   onEnrollSequence?: (lead: Lead) => void;
-  onSendStep?: (lead: Lead, stepNumber: number, subject: string, body: string) => void;
+  /**
+   * Put this step in the composer.
+   *
+   * `onSendStep` stood here and this component never called it, while `LeadDetailModal` passed an
+   * `onSelectStep` this component does not accept. The path was broken from both ends, and neither
+   * end could be reported while React's types were absent and every prop was `any`.
+   *
+   * It fills the composer rather than sending: a step is a draft a person edits, and every send in
+   * this system goes through the Production Action Gateway.
+   */
+  onUseStep?: (subject: string, body: string) => void;
 }
 
 export const SequenceCadenceViewer: React.FC<SequenceCadenceViewerProps> = ({
   lead,
   onEnrollSequence,
-  onSendStep,
+  onUseStep,
 }) => {
   const [selectedStep, setSelectedStep] = useState<number>(1);
   const [copiedStep, setCopiedStep] = useState<number | null>(null);
@@ -122,7 +132,9 @@ Nayem`,
             </h3>
           </div>
           <p className="text-[11px] text-slate-500">
-            Over 68% of booked clinic demos convert on Step 2 or 3 follow-ups
+            {/* "Over 68% of booked clinic demos convert on Step 2 or 3 follow-ups" stood here. Nothing
+                measured it: there is no open pixel, click redirect or bounce webhook in this system. */}
+            Three follow-up steps you can adapt before sending
           </p>
         </div>
 
@@ -177,24 +189,36 @@ Nayem`,
             <span>Subject: {currentStepData.subject}</span>
           </div>
 
-          <button
-            onClick={() =>
-              handleCopy(`Subject: ${currentStepData.subject}\n\n${currentStepData.body}`, currentStepData.step)
-            }
-            className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg flex items-center gap-1 transition-colors"
-          >
-            {copiedStep === currentStepData.step ? (
-              <>
-                <Check className="w-3 h-3 text-emerald-600" />
-                <span className="text-emerald-700">Copied!</span>
-              </>
-            ) : (
-              <>
-                <Copy className="w-3 h-3" />
-                <span>Copy Step</span>
-              </>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() =>
+                handleCopy(`Subject: ${currentStepData.subject}\n\n${currentStepData.body}`, currentStepData.step)
+              }
+              className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg flex items-center gap-1 transition-colors"
+            >
+              {copiedStep === currentStepData.step ? (
+                <>
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  <span className="text-emerald-700">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-3 h-3" />
+                  <span>Copy Step</span>
+                </>
+              )}
+            </button>
+
+            {onUseStep && (
+              <button
+                onClick={() => onUseStep(currentStepData.subject, currentStepData.body)}
+                className="px-2.5 py-1 text-[11px] font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg flex items-center gap-1 transition-colors"
+              >
+                <Send className="w-3 h-3" />
+                <span>Use in composer</span>
+              </button>
             )}
-          </button>
+          </div>
         </div>
 
         <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] text-slate-800 whitespace-pre-wrap leading-relaxed">

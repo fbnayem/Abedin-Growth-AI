@@ -63,7 +63,10 @@ function section(title: string): void {
 }
 
 async function main(): Promise<void> {
-  if (!store) {
+  // A local const: `store` is an imported binding, and TypeScript does not keep a narrowing
+  // of one across the closures below, so `handle.pool` read as possibly-null inside them.
+  const handle = store;
+  if (!handle) {
     console.error(
       'REFUSING: no database configured. Set DATABASE_URL (or SQL_HOST/SQL_USER/SQL_PASSWORD).\n' +
         'This script exists to prove the store against a real PostgreSQL instance; there is ' +
@@ -73,7 +76,7 @@ async function main(): Promise<void> {
   }
 
   const wipe = async () =>
-    store.pool.query('DELETE FROM documents WHERE org_id = $1', [TENANT]);
+    handle.pool.query('DELETE FROM documents WHERE org_id = $1', [TENANT]);
   await wipe();
 
   // ---------------------------------------------------------------- 1. privileges
@@ -174,7 +177,7 @@ async function main(): Promise<void> {
   // ---------------------------------------------------------------- 5. tenancy
   section('5. the tenant is stored as a column, derived from the path');
   {
-    const rows = await store.pool.query(
+    const rows = await handle.pool.query(
       'SELECT DISTINCT org_id FROM documents WHERE path LIKE $1',
       [`organizations/${TENANT}/%`]
     );
@@ -182,14 +185,14 @@ async function main(): Promise<void> {
 
     const topLevel = doc(store, 'system_settings', 'probe');
     await setDoc(topLevel, { v: 1 });
-    const t = await store.pool.query(
+    const t = await handle.pool.query(
       'SELECT org_id FROM documents WHERE path = $1 AND id = $2',
       ['system_settings', 'probe']
     );
     ok('a top-level collection stores NULL, not a fabricated tenant', t.rows[0].org_id === null);
     await deleteDoc(topLevel);
 
-    const foreign = await store.pool.query(
+    const foreign = await handle.pool.query(
       'SELECT count(*)::int AS n FROM documents WHERE org_id = $1 AND path NOT LIKE $2',
       [TENANT, `organizations/${TENANT}/%`]
     );
@@ -288,13 +291,13 @@ async function main(): Promise<void> {
 
   // ---------------------------------------------------------------- clean up
   await wipe();
-  const left = await store.pool.query(
+  const left = await handle.pool.query(
     'SELECT count(*)::int AS n FROM documents WHERE org_id = $1',
     [TENANT]
   );
   ok('the verifier cleaned up after itself', left.rows[0].n === 0);
 
-  await store.pool.end();
+  await handle.pool.end();
 
   console.log('');
   if (problems.length > 0) {

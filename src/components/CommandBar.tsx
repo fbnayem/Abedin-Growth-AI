@@ -1,7 +1,7 @@
 import { apiFetch } from '../lib/apiFetch';
 import React, { useState } from "react";
 import { Sparkles, ArrowRight, X, Loader2, Target, Users, TrendingUp, Mail, AlertCircle } from "lucide-react";
-import { AICommandResult } from "../../server/agents/growthCommandAgent";
+import type { AICommandResult } from "../../shared/domain/growthCommand";
 
 interface CommandBarProps {
   isOpen: boolean;

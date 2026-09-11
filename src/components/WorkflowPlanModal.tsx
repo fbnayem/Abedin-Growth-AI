@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Sparkles, CheckCircle2, Play, X, Loader2, ArrowRight, Layers } from "lucide-react";
-import { AICommandResult } from "../../server/agents/growthCommandAgent";
+import type { AICommandResult } from "../../shared/domain/growthCommand";
 
 interface WorkflowPlanModalProps {
   plan: AICommandResult | null;

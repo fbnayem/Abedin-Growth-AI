@@ -61,7 +61,7 @@ export const MeetingsView: React.FC<MeetingsViewProps> = ({
     
     // Simulate AI processing using companyBrain
     setTimeout(() => {
-      const companyInfo = companyBrain ? ` leveraging ${companyBrain.companyName}'s ${companyBrain.valueProposition?.toLowerCase().substring(0, 30)}...` : "";
+      const companyInfo = companyBrain ? ` leveraging ${companyBrain.companyName}'s ${companyBrain.tagline?.toLowerCase().substring(0, 30)}...` : "";
       
       const newItems = [
         `Follow up with ${activeMeeting.prospectName} regarding specific operational pain points mentioned.`,
@@ -158,7 +158,9 @@ export const MeetingsView: React.FC<MeetingsViewProps> = ({
           <div className="space-y-2.5">
             {meetings.map((m) => {
               const isSelected = activeMeeting?.id === m.id;
-              const dateObj = new Date(m.scheduledTime);
+              // `scheduledTime` is null when no slot could be proposed, and `new Date(null)` is 1 January
+              // 1970 — which this list rendered as the meeting time.
+              const dateObj = m.scheduledTime ? new Date(m.scheduledTime) : null;
               return (
                 <div
                   key={m.id}
@@ -192,8 +194,9 @@ export const MeetingsView: React.FC<MeetingsViewProps> = ({
 
                     <span className="text-xs font-mono text-slate-500 font-semibold flex items-center gap-1">
                       <Clock className="w-3 h-3 text-slate-400" />
-                      {dateObj.toLocaleDateString([], { month: "short", day: "numeric" })},{" "}
-                      {dateObj.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {dateObj
+                        ? `${dateObj.toLocaleDateString([], { month: "short", day: "numeric" })}, ${dateObj.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                        : "No time proposed"}
                     </span>
                   </div>
 

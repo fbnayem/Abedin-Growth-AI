@@ -57,7 +57,8 @@ import {
   EngineType,
   AutopilotStatusState,
 } from "./types";
-import { AICommandResult } from "../server/agents/growthCommandAgent";
+import type { AICommandResult } from "../shared/domain/growthCommand";
+import { EMPTY_COMPANY_BRAIN } from "./lib/emptyCompanyBrain";
 
 export function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>("home");
@@ -129,54 +130,38 @@ export function App() {
   } | null>(null);
 
   // App Data State
+  // Zeros until /api/dashboard answers. These were 18 qualified leads, 48,000 of pipeline and
+  // 12,000 of projected monthly revenue: invented figures shown as measured whenever the dashboard
+  // had not loaded, and permanently whenever it failed to.
   const [kpis, setKpis] = useState({
-    qualifiedLeads: 18,
-    positiveConversations: 7,
-    meetingsBooked: 4,
-    pipelineValue: 48000,
-    investorConversations: 3,
-    partnerConversations: 4,
-    projectedMonthlyRevenue: 12000,
+    qualifiedLeads: 0,
+    positiveConversations: 0,
+    meetingsBooked: 0,
+    pipelineValue: 0,
+    investorConversations: 0,
+    partnerConversations: 0,
+    projectedMonthlyRevenue: 0,
   });
 
   const [attentionItems, setAttentionItems] = useState<NeedsAttentionItem[]>([]);
+  // An empty brief until the server supplies one. The literal here asserted that "Dental practices
+  // with 5-20 staff are responding 38% better", which nothing measured, and it lacked four fields the
+  // type requires — an error the compiler could not report while React's types were absent.
   const [dailyBrief, setDailyBrief] = useState<DailyGrowthBrief>({
     date: new Date().toISOString().split("T")[0],
-    prospectsResearched: 34,
-    qualifiedCount: 18,
-    contactedCount: 12,
-    demosBooked: 2,
-    strategicRecommendation:
-      "Dental practices with 5-20 staff are responding 38% better when the opening line references after-hours missed patient call volume.",
+    prospectsResearched: 0,
+    qualifiedCount: 0,
+    contactedCount: 0,
+    repliesCount: 0,
+    positiveConversationsCount: 0,
+    demosBooked: 0,
+    investorsInterested: 0,
+    strategicRecommendation: "",
+    topPerformingSegment: "",
   });
 
-  const [companyBrain, setCompanyBrain] = useState<CompanyBrain>({
-    companyName: "Abedin Tech",
-    companyUrl: "https://abedintech.com/voice-ai/",
-    productName: "Abedin Voice AI",
-    productUrl: "https://abedintech.com/voice-ai/",
-    tagline: "Autonomous 24/7 Voice AI Receptionists & Appointment Booking for High-Call Businesses",
-    primaryBenefits: [
-      "Sub-500ms voice response latency for natural, fluent conversations",
-      "Direct 2-way Google Calendar and CRM appointment scheduling",
-      "Zero missed after-hours patient or customer revenue",
-      "80% reduction in front-desk reception overhead",
-    ],
-    targetIndustries: ["Dental & Healthcare Clinics", "Real Estate Agencies", "Legal Practices"],
-    targetPersonas: [
-      { title: "Practice Manager", primaryGoal: "Ensure every patient call is answered without burning out front desk", mainObjection: "Is AI realistic enough for patient triage?" },
-      { title: "Managing Partner / Founder", primaryGoal: "Increase revenue recovery from after-hours callers", mainObjection: "Integration friction with calendar software" },
-    ],
-    objectionsHandling: [
-      { objection: "Does it sound like an annoying robotic IVR?", counterAngle: "No, Abedin Voice AI uses fluid sub-500ms conversational models with human-like cadence." },
-      { objection: "Can it book directly into our calendar?", counterAngle: "Yes, it verifies free/busy slots and books directly via Google Calendar/CRM." },
-    ],
-    investorNarrative: {
-      vision: "Building the universal autonomous voice layer for global service operations.",
-      marketSize: "$45B Global Conversational AI & Reception Market",
-      tractionHighlights: "Deploying across UK clinics with 98.4% call resolution rate.",
-    },
-  });
+  // Empty until GET /api/company-brain answers. See src/lib/emptyCompanyBrain.ts for what this was.
+  const [companyBrain, setCompanyBrain] = useState<CompanyBrain>(EMPTY_COMPANY_BRAIN);
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [investors, setInvestors] = useState<Investor[]>([]);
@@ -186,11 +171,25 @@ export function App() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
+  // The literal here set two fields AutopilotSettings does not have (`requireApprovalForPartners`,
+  // `requireApprovalForDiscountRequests`) and omitted eleven it requires. The displayed choices are
+  // kept; every capability the type adds is OFF, because a default for autonomy is a refusal (§A).
   const [autopilotSettings, setAutopilotSettings] = useState<AutopilotSettings>({
+    workspaceId: "default",
+    researchProspects: false,
+    scoreLeads: false,
+    writeOutreach: false,
+    sendApprovedCampaigns: false,
+    sendFollowups: false,
+    replyToSimpleQuestions: false,
+    bookMeetingsAutomatically: false,
+    discussPricingAutonomously: false,
+    negotiateContractsAutonomously: false,
+    discussInvestorValuationAutonomously: false,
+    minAiConfidenceToSend: 0.9,
+    dailyEmailSendingLimit: 0,
     autonomyLevel: "SEMI_AUTONOMOUS",
     requireApprovalForInvestors: true,
-    requireApprovalForPartners: false,
-    requireApprovalForDiscountRequests: true,
     autoCheckQualityControl: true,
     autoReengageStaleLeads: false,
     maxOutreachPerDay: 50,

@@ -91,11 +91,22 @@ export interface DocumentSnapshot<T = Record<string, unknown>> {
   data(): T | undefined;
 }
 
+/**
+ * A row a query returned. It exists by construction, so `data()` is `T`, not `T | undefined`.
+ *
+ * One snapshot type used to serve both `getDoc` and query rows, so every
+ * `snap.forEach(d => d.data().x)` read a possibly-undefined value: twelve strictNullChecks errors,
+ * each at a call site where the row could not be absent. Firestore drew the same distinction.
+ */
+export interface QueryDocumentSnapshot<T = Record<string, unknown>> extends DocumentSnapshot<T> {
+  data(): T;
+}
+
 export interface QuerySnapshot<T = Record<string, unknown>> {
-  readonly docs: DocumentSnapshot<T>[];
+  readonly docs: QueryDocumentSnapshot<T>[];
   readonly size: number;
   readonly empty: boolean;
-  forEach(fn: (doc: DocumentSnapshot<T>) => void): void;
+  forEach(fn: (doc: QueryDocumentSnapshot<T>) => void): void;
 }
 
 /** A filter, an ordering or a row cap. Built by `where`, `orderBy` and `limit`. */
@@ -476,8 +487,13 @@ export function compileQuery(q: StoreQuery): { text: string; values: unknown[] }
 async function readDocs<T>(exec: Executor, q: StoreQuery): Promise<QuerySnapshot<T>> {
   const { text, values } = compileQuery(q);
   const result = await exec.query(text, values);
-  const docs = result.rows.map((row: { id: string; data: unknown }) =>
-    snapshotOf<T>({ kind: 'document', path: q.collectionPath, id: row.id }, row)
+  const docs = result.rows.map(
+    (row: { id: string; data: unknown }): QueryDocumentSnapshot<T> => ({
+      id: row.id,
+      ref: { kind: 'document', path: q.collectionPath, id: row.id },
+      exists: () => true,
+      data: () => row.data as T,
+    })
   );
   return {
     docs,

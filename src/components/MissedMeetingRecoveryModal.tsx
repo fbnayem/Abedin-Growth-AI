@@ -1,3 +1,4 @@
+import { nextRecoveryVariation, type RecoveryVariation } from "../../shared/domain/meetingRecovery";
 import React, { useState } from "react";
 import {
   X,
@@ -27,8 +28,10 @@ export const MissedMeetingRecoveryModal: React.FC<MissedMeetingRecoveryModalProp
   onClose,
   onUpdateMeeting,
 }) => {
-  const [selectedVariation, setSelectedVariation] = useState<1 | 2 | 3 | 4>(
-    (meeting.missedRecoveryStage as 1 | 2 | 3 | 4) || 1
+  // See shared/domain/meetingRecovery.ts: the stage is a string, and casting it to a number
+  // selected no variation at all.
+  const [selectedVariation, setSelectedVariation] = useState<RecoveryVariation>(
+    nextRecoveryVariation(meeting.missedRecoveryStage)
   );
   const [sending, setSending] = useState(false);
   const [sendSuccess, setSendSuccess] = useState(false);

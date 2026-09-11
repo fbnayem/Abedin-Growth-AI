@@ -699,7 +699,9 @@ export const InboxView: React.FC<InboxViewProps> = ({
     if (categoryFilter !== "ALL" && conv.category !== categoryFilter) return false;
 
     // Status Filter
-    if (statusFilter === "AWAITING" && (conv.status === "RESOLVED" || conv.status === "DEMO_BOOKED")) return false;
+    // `"RESOLVED"` is not a conversation status, so this comparison could never be true and CLOSED
+    // conversations were listed as awaiting a reply. CLOSED is the status it meant.
+    if (statusFilter === "AWAITING" && (conv.status === "CLOSED" || conv.status === "DEMO_BOOKED")) return false;
     if (statusFilter === "DEMO_BOOKED" && conv.status !== "DEMO_BOOKED" && conv.status !== "MEETING_REQUESTED") return false;
 
     // Search Query
@@ -707,7 +709,8 @@ export const InboxView: React.FC<InboxViewProps> = ({
       const q = searchQuery.toLowerCase();
       const matchName = conv.contactName.toLowerCase().includes(q);
       const matchCompany = conv.companyName.toLowerCase().includes(q);
-      const matchSubject = conv.subject.toLowerCase().includes(q);
+      // `subject` is optional, so searching the inbox threw on the first conversation without one.
+      const matchSubject = (conv.subject ?? "").toLowerCase().includes(q);
       const matchSnippet = conv.thread?.some((m) => m.bodyText.toLowerCase().includes(q));
       return matchName || matchCompany || matchSubject || matchSnippet;
     }
@@ -1010,7 +1013,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
                   const latestMsg = conv.thread?.[conv.thread.length - 1];
                   const hasProspectReply = prospectMsgs.length > 0;
                   const isLastMsgProspect = latestMsg?.sender === "PROSPECT";
-                  const hasAgentReplied = conv.thread?.some((m) => m.sender === "AGENT" || m.sender === "AI");
+                  const hasAgentReplied = conv.thread?.some((m) => m.sender === "AGENT");
 
                   return (
                     <div
@@ -1501,7 +1504,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
                       className="flex-1 min-h-0 p-4 overflow-y-auto custom-scrollbar space-y-4 bg-slate-50/40 relative"
                     >
                       {activeConv.thread?.map((msg, msgIdx) => {
-                        const isAgent = msg.sender === "AGENT" || msg.sender === "AI" || msg.sender === "USER";
+                        const isAgent = msg.sender === "AGENT" || msg.sender === "USER";
                         return (
                           <div
                             key={msg.id ? `${msg.id}_${msgIdx}` : `msg_${msgIdx}`}
@@ -1727,7 +1730,7 @@ export const InboxView: React.FC<InboxViewProps> = ({
             {/* Modal Messages Scroll Container */}
             <div className="flex-1 min-h-0 p-6 overflow-y-auto custom-scrollbar space-y-4 bg-slate-50">
               {activeConv.thread?.map((msg, msgIdx) => {
-                const isAgent = msg.sender === "AGENT" || msg.sender === "AI" || msg.sender === "USER";
+                const isAgent = msg.sender === "AGENT" || msg.sender === "USER";
                 return (
                   <div
                     key={msg.id ? `modal_${msg.id}_${msgIdx}` : `modal_msg_${msgIdx}`}
