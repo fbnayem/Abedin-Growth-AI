@@ -3815,19 +3815,52 @@ console-only (S4, deploying `firestore.rules`), and one is a capability that doe
 not scheduled (S25, a payment path). The phase after this section starts with the eight.
 ---
 
+## 1ae. Phase two: the rows that remained after §1ad (2026-09-12)
+
+§1ad left ten PARTIAL rows and said which eight are work in this repository. This section is
+appended as each of them closes or moves, in the order they were taken, with the evidence each
+rests on. It is written at the time of the change, not reconstructed afterwards.
+
+### S22 — reproducibility: the table, the versions, and the cost that is not this row's
+
+The row's remainder had three parts. The relational `ai_run_logs` table — never a writer — is
+RETIRED beside `outbox_messages` and guarded the same way, with one rule the outbox never had: no
+file outside the schema may so much as name the symbol. That rule found `dataStore.ts` importing
+the table to keep an in-memory array of the same name, seeded with sixty-two lines of fabricated
+SUCCESS run logs that nothing read and that were serialised into the persistence snapshot; all of
+it is gone. `runLog.ts`'s own header still said rows go to Firestore and the PostgreSQL table
+"remains the right destination if PostgreSQL is ever provisioned" — a paragraph describing the
+datastore from before §1x, on the module that writes the log.
+
+The second part is the one §21 actually asks for. The log recorded `promptHash` — which
+*rendering* ran — and nothing that said which *template*, or which *policy*. A declared version
+answers that only if the number cannot go on describing a template that has since changed, so
+`promptVersions.invariant.test.ts` pins each version to a fingerprint of the text it names: the
+two live-path templates (the reply composer and the memory extractor), and the five policy
+modules the inbound pipeline consults, comments stripped. Change the text and not the number,
+and the gate fails with the fingerprint to record under a new key. One version covers a
+template and the output shape it demands, because the shape is declared inside the template; a
+second number for the same text would drift from the first.
+
+The third part — cost recorded as `null` — is not reproducibility. It is the tokens-to-money
+table S37 needs, and the row says so rather than counting a null as closed.
+
+Mutation: 4/4 for the retirement, 8/8 for the versions. Gate: 76 suites, 1,944 tests.
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
 
 | State | Count | Sections |
 |---|---:|---|
-| `VERIFIED` | **39** | S2, S3, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
+| `VERIFIED` | **40** | S2, S3, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
 | `IMPLEMENTED_UNVERIFIED` | **0** | — |
-| `PARTIAL` | **10** | S1, S4, S5, S11, S22, S25, S26, S27, S37, S39 |
+| `PARTIAL` | **9** | S1, S4, S5, S11, S25, S26, S27, S37, S39 |
 | `NOT_STARTED` | **0** | — |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-39 + 0 + 10 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
+40 + 0 + 9 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad and §1ae. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
 
 | Severity | Count |
 |---|---:|
@@ -3926,7 +3959,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S19 | SSRF / outbound URL fetching | VERIFIED | MEDIUM | `gmail.service.ts:49,64,151`; `actionGateway.ts:272,287`; `calendar.service.ts:44`; `server/lib/httpClient.ts` (`fetchWithTimeout`, the only bare `fetch` in `server/`); `server/services/gmail.service.ts` (`isValidHistoryId`); `server/workers/outbox.worker.ts` (`processing` re-entrancy guard); `historySync.invariant.test.ts` | Classic SSRF is **not reachable**: all 6 fetch hosts are string literals on `googleapis.com`. **This row was stale and is corrected 2026-09-07 (§1u):** every provider call has gone through `fetchWithTimeout` since P0.5 and the un-awaited `setInterval` has had a re-entrancy guard since P0.9 — the "zero fetch timeouts" evidence no longer holds. The one live item, attacker-controlled `historyId` interpolated into a URL from an unauthenticated webhook, is now **validated** (unsigned decimal or refuse) as well as encoded. **Remainder: none of it exercised against a live provider or a genuinely hung socket** |
 | S20 | Fact provenance, temporal validity, supersession | VERIFIED | CRITICAL | `db/schema.ts:127-145`; `inboundPipeline.ts:88-101`; `models.ts:401-412` | **Nothing on a live path writes provenance.** The only fact write hard-deletes all prior facts, sets no provenance column, and hits the throwing Drizzle proxy; the live memory object is a flat key→value map; no Firestore fact collection exists. The declared bitemporal schema is aspirational, which the rubric grades NOT_STARTED |
 | S21 | Deterministic context selection and context-ID recording | VERIFIED | HIGH | `multiAgentReplySystem.ts:296`, `:319`; `salesDecisionEngine.ts:584`, `:604-607`; `db/schema.ts:221-228` | Live path concatenates the entire thread with no bound; `knownRelevantFacts` is a 2-item literal; the one ledger read passes an email as a contactId and is wrapped in `catch(e){}`; no context ids recorded |
-| S22 | AI run reproducibility (`ai_run_logs`) | PARTIAL | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | **This row was stale and is corrected 2026-09-07 (§1u):** `writeRunLog` has written a row per inbound run since §1p, carrying every model actually called, per-call prompt hashes, the context hash and manifest, token usage with an explicit partial flag, and the fallback disposition. **Remainder: no prompt VERSION, schema version or policy version** (the same residue S21 carries); cost is recorded as `null` and enforced nowhere; and the PostgreSQL `ai_run_logs` table still has no writer — the rows go to Firestore |
+| S22 | AI run reproducibility (`ai_run_logs`) | VERIFIED | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\| **Closed 2026-09-12.** Three remainders, two closed here and one named as another row's. (1) The relational table is RETIRED and guarded: `deadSchema.invariant` refuses a writer, a reader, or so much as an importer outside the schema — which found `dataStore.ts` importing it to keep an in-memory array of the same name seeded with 62 lines of fabricated SUCCESS run logs nothing read; import, array and fixture are deleted. No rows to preserve, so it stays only until S5 drops it with a rollback-bearing migration. (2) The run log records `promptVersions` per call and `policyVersion` per run. Each version is declared beside the text it names and pinned to a fingerprint of that text by `promptVersions.invariant.test.ts`: a template or a policy module that changes while its number does not fails the gate and prints the fingerprint to record under a NEW key. The output shape is declared inside each template, so one version covers template and schema — a separate schema version would be a second number for the same text. The policy set is the five modules the inbound pipeline consults to decide whether and how a reply is sent. (3) Cost is still `null`, with the reason beside it, because the tokens-to-money table it needs is S37's work, not reproducibility's. Mutation: 4/4 and 8/8. `runLog.invariant` (+3), `promptVersions.invariant` (12), `deadSchema.invariant` (+4) |policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | **This row was stale and is corrected 2026-09-07 (§1u):** `writeRunLog` has written a row per inbound run since §1p, carrying every model actually called, per-call prompt hashes, the context hash and manifest, token usage with an explicit partial flag, and the fallback disposition. **Remainder: no prompt VERSION, schema version or policy version** (the same residue S21 carries); cost is recorded as `null` and enforced nowhere; and the PostgreSQL `ai_run_logs` table still has no writer — the rows go to Firestore |
 | S23 | Agent abstention | VERIFIED | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | Landed 2026-09-07 (§1v). `ModelOutcome<T>` is a discriminated union a caller must branch on; `generateJsonOrAbstain` replaces the silent substitution on the live drafting and extraction paths; the 107-line canned reply template and the 82 lines of fact-inventing heuristics are deleted; an abstained extraction records ZERO facts; `ABSTAINED` is a disposition distinct from `SUPPRESSED`. Three dead agents whose fallbacks fabricated emails, a confidence of 0.88 and a `policyStatus: "ALLOW"` were removed. **Remainder: 10 legacy `safeGenerateJSON` call sites still substitute silently (held by a ratchet; 11 -> 10 in §1w); no caller ever SETS a confidence, so `LOW_CONFIDENCE` and `CONFLICTING_EVIDENCE` are declared and unreachable, and the policy engine confidence gate still has nothing to read** |
 | S24 | Specialist disagreement detection and resolution | VERIFIED | CRITICAL | `server/domain/adjudication.ts`; `independentAuditor.ts`; `inboundPipeline.ts` (the audit step); `adjudication.invariant.test.ts` | Landed 2026-09-07 (§1w). `adjudicate` combines findings by worst-severity with no accumulator and no threshold — tested monotone over 81 ordered subset pairs and non-compensatory in both directions. `reconcile` has no majority, tie-break, first-wins or confidence rule, and `consulted: false` carries no value, so an unasked specialist cannot be represented as an agreeing one. `specialistsRequired`, written at three sites and read at none, has its first reader and fails closed. The auditor now runs on the live path; its safety record is tri-state and derived; its two "independent" price checks were **measured identical over 1,350 drafts (0 disagreements)** and collapsed to one. A dead second reply gate that forced a detected phone violation to `PASS` was deleted. **Remainder: no specialist agent is invoked on any live path, so no two opinions are yet produced — what the check proves today is that the system knows it has not asked** |
 | S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts` (`quoteAvailability`) | **Note corrected 2026-09-12.** No quote is ever written, which is the row's substance and is unchanged. The checkout amount is configuration with no default (§1ac). `PAYMENT_CREATE` no longer "falls through to Unsupported action type": it refuses BY NAME with `UNSUPPORTED_ACTION`, terminally rather than through five retries, and a ninth ActionType is now a compile error. That is a correct refusal, not a payment path — nothing in the repository dispatches `PAYMENT_CREATE`, so what is missing is the capability, not a fix to one that exists |
