@@ -3,7 +3,8 @@
 // read, no matter how this gateway is reached. See server/config/safeMode.ts.
 import { isRealActionEnabled } from '../config/safeMode';
 import { store } from '../store';
-import { collection, doc, getDoc, getDocs, setDoc, query, where } from '../store';
+import { addDoc, collection, doc, getDoc, getDocs, setDoc, query, where } from '../store';
+import { auditEvent, mustCommitBefore } from '../domain/actionAudit';
 import { gmailService } from '../services/gmail.service';
 import { outreachPolicyService } from '../policies/outreachPolicy';
 import { fetchWithTimeout } from '../lib/httpClient';
@@ -96,7 +97,22 @@ export interface ActionResult {
      * credential cannot see returns per-calendar `errors` inside a 200). Unknown availability
      * is not availability, so no event is created.
      */
-    | 'AVAILABILITY_UNKNOWN';
+    | 'AVAILABILITY_UNKNOWN'
+    /**
+     * S10 — the action was refused because the audit record that must precede it could not be
+     * written. Carries NO `blockedReason`: the outbox worker treats a policy block as terminal
+     * ("retrying cannot change a policy decision"), and a datastore outage is transient — the send
+     * has not happened, so the job must come back through backoff rather than be dead-lettered.
+     */
+    | 'AUDIT_UNAVAILABLE';
+  /**
+   * S10 — false when the action HAPPENED but the record of its outcome could not be written.
+   *
+   * Only ever false AFTER the side effect: a failed write before it refuses the dispatch instead.
+   * Reporting failure here would retry an irreversible action (§32); reporting plain success would
+   * claim a record that does not exist.
+   */
+  auditRecorded?: boolean;
   /** P1.11 — the normalized provider failure kind, when the failure came from a provider. */
   errorKind?: ProviderErrorKind;
   /**
@@ -197,6 +213,15 @@ export class ActionGateway {
    * nothing about the boundary it claims to test. This is the seam that lets a test stand one
    * millisecond either side of the settle window and observe two different verdicts.
    */
+  /**
+   * The next sequence number for each action's trail.
+   *
+   * Bounded below, because this object outlives every request in the worker: one small entry per
+   * dispatch, trimmed oldest-first past a cap. A trail's ordering is the property being recorded,
+   * so the number has to come from somewhere that cannot be rewritten by a concurrent dispatch.
+   */
+  private readonly auditSeq = new Map<string, number>();
+
   constructor(private readonly clock: Clock = systemClock) {}
 
   /**
@@ -217,9 +242,21 @@ export class ActionGateway {
       return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
     }
 
-    // 1. Audit Logging - Propose
+    // 1. Audit logging — PROPOSED, and the dispatch does not continue without it.
+    //
+    // S10: this write could not fail and nothing inspected it, so a datastore outage printed one
+    // line and the action proceeded. Refusing costs a retry. Proceeding costs a send nobody can
+    // afterwards prove happened, to someone who can prove that it did.
     const actionId = `action_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-    await this.logAction(actionId, 'PROPOSED', request);
+    if (!(await this.logAction(actionId, 'PROPOSED', request))) {
+      return {
+        success: false,
+        errorCode: 'AUDIT_UNAVAILABLE',
+        error:
+          'The audit record that must precede this action could not be written, so the action was ' +
+          'not attempted. This is transient: retry when the datastore is reachable.',
+      };
+    }
 
     // 2. Pre-execution checks
 
@@ -291,7 +328,16 @@ export class ActionGateway {
     // measure the timeout's own duration as settle time.
     const attemptedAt = this.clock.now();
     try {
-      await this.logAction(actionId, 'DISPATCHING', request);
+      // The last record before the side effect. Same rule as PROPOSED: no record, no dispatch.
+      if (!(await this.logAction(actionId, 'DISPATCHING', request))) {
+        return {
+          success: false,
+          errorCode: 'AUDIT_UNAVAILABLE',
+          error:
+            'The audit record immediately preceding dispatch could not be written, so nothing was ' +
+            'dispatched. This is transient: retry when the datastore is reachable.',
+        };
+      }
       
       switch (request.actionType) {
         case ActionType.EMAIL_SEND:
@@ -305,8 +351,15 @@ export class ActionGateway {
           result = { success: false, error: 'Unsupported action type' };
       }
 
-      await this.logAction(actionId, result.success ? 'SUCCESS' : 'FAILED', request, result);
-      return result;
+      // AFTER the side effect, so this may not change the verdict: reporting failure because the
+      // LOG failed would send the message a second time (§32). The result carries the gap instead.
+      const recorded = await this.logAction(
+        actionId,
+        result.success ? 'SUCCESS' : 'FAILED',
+        request,
+        result
+      );
+      return recorded ? result : { ...result, auditRecorded: false };
     } catch (e: any) {
       console.error(`[ActionGateway] Fatal error during ${request.actionType}:`, e);
 
@@ -580,21 +633,72 @@ export class ActionGateway {
     }
   }
 
-  private async logAction(actionId: string, status: string, request: ActionRequest, resultDetails?: any) {
-    if (!store) return;
+  /**
+   * Append one immutable event to this action's trail. Returns whether it committed.
+   *
+   * S10 — this returned `void`, so `await this.logAction(...)` was a statement whose outcome no
+   * caller could inspect:
+   *
+   *     if (!store) return;
+   *     try { await setDoc(doc(store, orgPath(org, 'actionLogs'), actionId), {...}, { merge: true }); }
+   *     catch (e) { console.error("[ActionGateway] Failed to audit log action:", e); }
+   *
+   * Two defects in six lines. A datastore that was briefly unavailable printed one line and the
+   * irreversible action proceeded — the inversion §10 exists to prevent. And every status merged
+   * onto ONE document id, so DISPATCHING overwrote PROPOSED and SUCCESS overwrote both: what
+   * survived was the last status, never the sequence, and the sequence is what a trail is.
+   *
+   * `addDoc` mints a fresh id per event, so a write can only add. The decisions — what is
+   * fingerprinted, which statuses must commit before proceeding, how a result is made storable —
+   * live in server/domain/actionAudit.ts, where a test reaches them without a datastore.
+   */
+  private async logAction(
+    actionId: string,
+    status: string,
+    request: ActionRequest,
+    resultDetails?: any
+  ): Promise<boolean> {
+    const seq = (this.auditSeq.get(actionId) ?? -1) + 1;
+    this.auditSeq.set(actionId, seq);
+    if (this.auditSeq.size > 5_000) {
+      for (const key of this.auditSeq.keys()) {
+        this.auditSeq.delete(key);
+        if (this.auditSeq.size <= 4_000) break;
+      }
+    }
+
     try {
-      await setDoc(doc(store, orgPath(request.organizationId, 'actionLogs'), actionId), {
-        actionId,
-        status,
-        actionType: request.actionType,
-        targetId: request.targetId,
-        conversationId: request.conversationId || null,
-        proposedBy: request.proposedBy,
-        resultDetails: resultDetails || null,
-        timestamp: Date.now()
-      }, { merge: true });
+      // No `if (!store) return`. An unconfigured datastore is exactly the condition under which
+      // the old code let an irreversible action through, so it takes the same path as a failure.
+      if (!store) throw new Error('the datastore is not configured');
+      await addDoc(
+        collection(store, orgPath(request.organizationId, 'actionLogs')),
+        auditEvent({
+          actionId,
+          seq,
+          status,
+          actionType: request.actionType,
+          organizationId: request.organizationId,
+          targetId: request.targetId,
+          conversationId: request.conversationId ?? null,
+          proposedBy: request.proposedBy,
+          provider: providerFor(request.actionType),
+          idempotencyKey: request.payload?.idempotencyKey,
+          payload: request.payload,
+          resultDetails,
+          at: this.clock.now().getTime(),
+        })
+      );
+      return true;
     } catch (e) {
-      console.error("[ActionGateway] Failed to audit log action:", e);
+      console.error(
+        `[ActionGateway] Audit write FAILED for ${actionId} (${status}). ` +
+          (mustCommitBefore(status)
+            ? 'It precedes the side effect, so the action is refused.'
+            : 'The action has already happened; recording that its trail is incomplete.'),
+        e
+      );
+      return false;
     }
   }
 

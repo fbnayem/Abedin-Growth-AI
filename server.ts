@@ -52,6 +52,7 @@ import { isUnauthenticatedApiPath } from "./server/middleware/authAllowlist";
 import { cspReportRouter } from "./server/routes/cspReport.routes";
 import { CSP_REPORT_PATH } from "./server/middleware/securityHeaders";
 import { resolvePort } from "./server/config/port";
+import { actionTrailRouter } from "./server/routes/actionTrail.routes";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
 import { simulatePitchBattle } from './server/agents/pitchBattleAgent';
@@ -202,6 +203,8 @@ for (const aiPath of [
   // set; until this router existed, nothing in the running system could set it — the only
   // writer was a service with no callers. See server/routes/autonomy.routes.ts.
   app.use("/api/autonomy", autonomyRouter);
+  // S10 — the audit trail had one writer and no reader anywhere in the repository.
+  app.use("/api/actions", actionTrailRouter);
   app.use("/api/unsubscribe", unsubscribeRouter);
   app.use(CSP_REPORT_PATH, cspReportRouter);
 
