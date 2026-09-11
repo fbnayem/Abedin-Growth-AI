@@ -17,9 +17,12 @@ import type { BudgetSnapshot } from '../policies/workflowBudgets';
  * observability surface was three correct halves that had never met: an endpoint, a shape, and
  * a schema, with no writer.
  *
- * Rows go to FIRESTORE, under the tenant path, because that is the datastore that runs here.
- * The PostgreSQL table remains the right destination if PostgreSQL is ever provisioned; the
- * column set below is deliberately the same so a migration is a copy rather than a redesign.
+ * Rows go to the DOCUMENT STORE, under the tenant path. When this was written that store was
+ * Firestore, and this paragraph said the PostgreSQL table "remains the right destination if
+ * PostgreSQL is ever provisioned". It has been (§1x): the document store runs on it, so the
+ * relational `ai_run_logs` table is not a future destination but a second, empty table in the
+ * same database with the same columns. It is RETIRED in schema.ts and guarded by
+ * `deadSchema.invariant.test.ts` until S5 drops it (S22).
  *
  * WHAT IS DELIBERATELY NOT WRITTEN
  * --------------------------------

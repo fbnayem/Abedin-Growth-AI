@@ -3,7 +3,7 @@ import { isValidOrgId } from './tenancy/orgScope';
 import { normalizeEmailKey } from './lib/emailKey';
 import { db } from './db/index';
 import { eq } from 'drizzle-orm';
-import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, campaigns, meetings, opportunities, knowledgeItems, attentionItems, aiRunLogs } from './db/schema';
+import { organizations, users, accounts, contacts, conversations, messages, conversationFacts, campaigns, meetings, opportunities, knowledgeItems, attentionItems } from './db/schema';
 
 import fs from "fs";
 import path from "path";
@@ -20,7 +20,6 @@ import {
   AutopilotSettings,
   NeedsAttentionItem,
   DailyGrowthBrief,
-  AIRunLog,
   SenderIdentity,
   LinkedInConfig,
   OutboxLogItem,
@@ -70,7 +69,6 @@ export class DataStore {
   public outboxLogs: OutboxLogItem[] = [];
   public attentionItems: NeedsAttentionItem[] = [];
   public dailyBrief: DailyGrowthBrief;
-  public aiRunLogs: AIRunLog[] = [];
   public suppressionList: string[] = ["unsub_competitor@example.com"];
 
   constructor() {
@@ -340,7 +338,6 @@ export class DataStore {
         outboxLogs: this.outboxLogs,
         attentionItems: this.attentionItems,
         dailyBrief: this.dailyBrief,
-        aiRunLogs: this.aiRunLogs,
         suppressionList: this.suppressionList,
         savedAt: new Date().toISOString(),
       };
@@ -390,7 +387,6 @@ export class DataStore {
       }
       if (Array.isArray(data.attentionItems) && data.attentionItems.length > 0) this.attentionItems = data.attentionItems;
       if (data.dailyBrief) this.dailyBrief = data.dailyBrief;
-      if (Array.isArray(data.aiRunLogs) && data.aiRunLogs.length > 0) this.aiRunLogs = data.aiRunLogs;
       if (Array.isArray(data.suppressionList)) this.suppressionList = data.suppressionList;
       return true;
     } catch (e) {
@@ -2198,68 +2194,6 @@ export class DataStore {
     ];
 
     // 11. AI RUN LOGS (Past 3 days of operations)
-    this.aiRunLogs = [
-      {
-        id: "log_run_1",
-        workspaceId: "default",
-        agentType: "InboxAgent",
-        actionType: "PROCESS_INBOUND_REPLY",
-        modelCategory: "SMART",
-        status: "SUCCESS",
-        confidence: 0.98,
-        summary: "Analyzed inbound reply from Dr. Sarah Jenkins (Harley Street Aesthetics). Classified intent: INTERESTED (Google Calendar sync question). Generated reply draft.",
-        durationMs: 410,
-        createdAt: d1,
-      },
-      {
-        id: "log_run_2",
-        workspaceId: "default",
-        agentType: "LeadScoringAgent",
-        actionType: "ICP_SCORING",
-        modelCategory: "SMART",
-        status: "SUCCESS",
-        confidence: 0.95,
-        summary: "Scored 9 UK Dental & Aesthetic clinics with 89-96 ICP fit against missed call revenue benchmarks.",
-        durationMs: 650,
-        createdAt: d2,
-      },
-      {
-        id: "log_run_3",
-        workspaceId: "default",
-        agentType: "InvestorAgent",
-        actionType: "INVESTOR_MATCH",
-        modelCategory: "SMART",
-        status: "SUCCESS",
-        confidence: 0.96,
-        summary: "Sourced Seedcamp, LocalGlobe, and Air Street Capital matching Applied AI and vertical SaaS thesis.",
-        durationMs: 580,
-        createdAt: d2,
-      },
-      {
-        id: "log_run_4",
-        workspaceId: "default",
-        agentType: "QualityControlAgent",
-        actionType: "DELIVERABILITY_AUDIT",
-        modelCategory: "FAST",
-        status: "SUCCESS",
-        confidence: 0.99,
-        summary: "Audited 12 outgoing emails: 0 spam triggers detected, SPF/DKIM aligned with sender identity.",
-        durationMs: 190,
-        createdAt: d1,
-      },
-      {
-        id: "log_run_5",
-        workspaceId: "default",
-        agentType: "MeetingAgent",
-        actionType: "GENERATE_PRE_MEETING_BRIEF",
-        modelCategory: "SMART",
-        status: "SUCCESS",
-        confidence: 0.97,
-        summary: "Generated comprehensive pre-meeting strategy brief for Apex Dental Centers (Jonathan Thorne).",
-        durationMs: 520,
-        createdAt: d0,
-      }
-    ];
 
     // Sweep and sanitize all loaded records against phone numbers and meeting/calendar link mismatches
     this.sanitizeStore();

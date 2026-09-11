@@ -460,6 +460,34 @@ export const oauthConnections = pgTable(
   ]
 );
 
+/**
+ * RETIRED. THE LIVE RUN LOG IS `server/lib/runLog.ts`, IN THE DOCUMENT STORE (S22).
+ *
+ * WHY IT IS DEAD
+ * --------------
+ * This table had the right columns and never a single writer — an endpoint, a shape and a schema
+ * that had never met (see the header of runLog.ts). The writer that closed that, in §1p, writes
+ * the document collection `ai_run_logs` under the tenant path, and `/api/logs` reads the same.
+ * Since the document store moved onto this PostgreSQL instance (§1x) the two have been one
+ * database, so this is not "the relational copy": it is a second, empty table with the same
+ * columns as the live one.
+ *
+ * WHY IT IS STILL HERE, AND UNTIL WHEN
+ * -----------------------------------
+ * Unlike `outbox_messages` above, there are no rows to preserve — nothing ever inserted one. It
+ * is kept only until S5 drops it with a migration that carries a rollback, because a DROP whose
+ * reverse is written and tested is exactly the expand/contract demonstration S5 is missing, and
+ * an ad hoc drop here would spend that opportunity. When that migration lands, this declaration
+ * goes with it.
+ *
+ * WHAT GUARDS IT UNTIL THEN
+ * -------------------------
+ * The columns being identical to the live log's is what makes it dangerous: a developer who
+ * greps for `promptHash` finds this, inserts into it, and `/api/logs` never sees the row.
+ * `deadSchema.invariant.test.ts` fails if anything inserts into, reads from, or so much as
+ * IMPORTS this symbol outside this file. `dataStore.ts` imported it and used only an in-memory
+ * array of the same name, seeded with fabricated SUCCESS rows that nothing read; both are gone.
+ */
 export const aiRunLogs = pgTable(
   'ai_run_logs',
   {

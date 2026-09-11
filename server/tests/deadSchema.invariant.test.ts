@@ -300,47 +300,71 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
   });
 });
 
-describe('3. the retired outbox_messages table does not acquire a writer', () => {
-  /**
-   * P0.7 found the producer writing the POSTGRES table while the worker polled a different
-   * store, so nothing enqueued there was ever consumed. Both moved onto the document store.
-   *
-   * The table is KEPT rather than dropped, because it may hold rows recording real mail from
-   * the period when it was written, and dropping those to tidy a schema is not a trade worth
-   * making. But it still reads as the live outbox — tenant index, idempotency constraint — so
-   * the danger is that someone writes to it, the worker never sees it, and the message
-   * silently never sends. That is P0.7 returning in a form that looks like working code.
-   */
-  it('nothing inserts into or updates it', () => {
-    const WRITES = [
-      /insert\s*\(\s*outboxMessages\s*\)/,
-      /update\s*\(\s*outboxMessages\s*\)/,
-      /delete\s*\(\s*outboxMessages\s*\)/,
-      /from\s*\(\s*outboxMessages\s*\)/,
-    ];
-    for (const { path, code } of SOURCES) {
-      for (const pattern of WRITES) {
-        expect(
-          code,
-          `${path} uses the retired outbox_messages table. The live queue is ` +
-            'server/services/outbox.service.ts, in the document store — see the note on the ' +
-            'table in server/db/schema.ts.'
-        ).not.toMatch(pattern);
+/**
+ * Two tables are retired, for different reasons, and guarded the same way.
+ *
+ * OUTBOX_MESSAGES — P0.7 found the producer writing the POSTGRES table while the worker polled a
+ * different store, so nothing enqueued there was ever consumed. Both moved onto the document
+ * store. The table is KEPT because it may hold rows recording real mail from the period when it
+ * was written, and dropping those to tidy a schema is not a trade worth making.
+ *
+ * AI_RUN_LOGS — S22. The run log has been written to the document store since §1p, and the
+ * relational table never had a writer at all: an endpoint, a shape and a schema that had never
+ * met. No rows, so nothing to preserve; it stays only until S5 drops it with a migration that
+ * has a rollback, which is the demonstration S5 is missing.
+ *
+ * Both still READ as the live thing — the outbox by its tenant index and idempotency constraint,
+ * the run log by columns identical to the live log's — so the danger is the same: someone writes
+ * to the table, the reader never sees it, and the write silently vanishes. That is P0.7
+ * returning in a form that looks like working code. And a symbol that is merely IMPORTED is a
+ * write waiting to happen, so importing one is refused too.
+ */
+const RETIRED = [
+  { symbol: 'outboxMessages', table: 'outbox_messages', live: 'server/services/outbox.service.ts' },
+  { symbol: 'aiRunLogs', table: 'ai_run_logs', live: 'server/lib/runLog.ts' },
+] as const;
+
+describe('3. the retired tables do not acquire a writer, a reader, or an importer', () => {
+  for (const { symbol, table, live } of RETIRED) {
+    const uses = ['insert', 'update', 'delete', 'from'].map(
+      (verb) => new RegExp(verb + '\\s*\\(\\s*' + symbol + '\\s*\\)')
+    );
+    const mention = new RegExp('\\b' + symbol + '\\b');
+
+    it(`nothing inserts into, updates, deletes from, or reads ${table}`, () => {
+      for (const { path, code } of SOURCES) {
+        for (const pattern of uses) {
+          expect(
+            code,
+            `${path} uses the retired ${table} table. The live one is ${live}, in the document ` +
+              'store — see the note on the table in server/db/schema.ts.'
+          ).not.toMatch(pattern);
+        }
       }
-    }
-  });
+    });
 
-  it('the schema says so, where somebody reading the table will see it', () => {
-    // A comment on the table, not in a document nobody opens. The failure mode is a developer
-    // who greps `schema.ts` for "outbox" and writes to what they find.
-    const schema = readFileSync('server/db/schema.ts', 'utf8');
-    const note = schema.slice(0, schema.indexOf('export const outboxMessages'));
-    expect(note.slice(-2000)).toContain('RETIRED');
-    expect(note.slice(-2000)).toContain('outbox.service.ts');
-  });
+    it(`nothing outside the schema so much as names ${symbol}`, () => {
+      const importers = SOURCES.filter(
+        ({ path, code }) => !path.replace(/\\/g, '/').endsWith('server/db/schema.ts') && mention.test(code)
+      ).map(({ path }) => path);
+      expect(importers, `${symbol} is in scope outside server/db/schema.ts`).toEqual([]);
+    });
 
-  it('that check would catch a real write', () => {
-    const sample = "await db.insert(outboxMessages).values({ id, status: 'PENDING' });";
-    expect(/insert\s*\(\s*outboxMessages\s*\)/.test(sample)).toBe(true);
+    it(`the schema says so, where somebody reading ${table} will see it`, () => {
+      // A comment on the table, not in a document nobody opens. The failure mode is a developer
+      // who greps `schema.ts` for the thing they need and writes to what they find.
+      const schema = readFileSync('server/db/schema.ts', 'utf8');
+      const declaration = schema.indexOf(`export const ${symbol} = pgTable(`);
+      expect(declaration, `${symbol} is not declared in schema.ts`).toBeGreaterThan(-1);
+      const note = schema.slice(0, declaration).slice(-2500);
+      expect(note).toContain('RETIRED');
+      expect(note).toContain(live.split('/').pop()!);
+    });
+  }
+
+  it('those checks would catch a real write and a real import', () => {
+    expect(/insert\s*\(\s*aiRunLogs\s*\)/.test("await db.insert(aiRunLogs).values({ id, status: 'SUCCESS' });")).toBe(true);
+    expect(/\baiRunLogs\b/.test("import { contacts, aiRunLogs } from './db/schema';")).toBe(true);
+    expect(/\baiRunLogs\b/.test('const view = store.aiRunLogsView;')).toBe(false);
   });
 });
