@@ -20,7 +20,11 @@ import { isGenerationEnabled } from '../config/safeMode';
 import { globalStore } from "../dataStore";
 import { assemblePrompt } from "../lib/promptAssembly";
 import { CALENDAR_BOOKING_URL, GOOGLE_MEET_URL, WEBSITE_URL, ONBOARDING_URL } from "./trustedCtaRegistry";
-import { aiSecurityService } from '../services/aiSecurity.service';
+import {
+  injectionSignalsIn,
+  looksLikeInjection,
+  redactInjections,
+} from '../domain/promptInjection';
 import { LedgerService } from '../services/ledgers.service';
 import { type ContextBundle } from '../domain/contextBundle';
 import { pricingContextFor, type Quote } from '../../shared/domain/quote';
@@ -94,6 +98,18 @@ export function isDuplicateSend(conversationId: string, text: string): boolean {
 // ==========================================
 // PART 43: PROMPT INJECTION SANITIZER
 // ==========================================
+/**
+ * The tripwire's legacy entry point, kept because `salesEngineTestMatrix` and the adversarial suite
+ * call it, and now a thin wrapper over the one rule.
+ *
+ * It carried its own eight regexes over the RAW text, which is how this system came to hold two
+ * detectors that disagreed: this one logging, and `detectPromptInjection` deciding. The verdict now
+ * comes from `server/domain/promptInjection.ts`, which matches on normalised text.
+ *
+ * `sanitized` is best-effort and cosmetic. Redaction has to edit the ORIGINAL string, so it removes
+ * only the spaced forms it can locate there; the verdict does not depend on it, and nothing on the
+ * live path reads it — `assemblePrompt` fences the untrusted block, which is the control.
+ */
 export function sanitizeUntrustedProspectInput(rawText: string): {
   sanitized: string;
   hasInjectionAttempt: boolean;
@@ -101,29 +117,9 @@ export function sanitizeUntrustedProspectInput(rawText: string): {
 } {
   if (!rawText) return { sanitized: "", hasInjectionAttempt: false, neutralizedPatterns: [] };
 
-  let text = rawText;
-  const neutralizedPatterns: string[] = [];
-
-  const injectionRegexes = [
-    /ignore\s+(?:all\s+)?(?:previous|prior)\s+instructions/gi,
-    /disregard\s+(?:all\s+)?(?:previous|prior)\s+prompts/gi,
-    /system\s*:\s*you\s+are\s+now/gi,
-    /you\s+must\s+give\s+a\s+(?:\d+%\s+)?discount/gi,
-    /grant\s+free\s+access/gi,
-    /act\s+as\s+an\s+unrestricted/gi,
-    /forget\s+all\s+rules/gi,
-    /output\s+the\s+system\s+prompt/gi,
-  ];
-
-  for (const regex of injectionRegexes) {
-    if (regex.test(text)) {
-      neutralizedPatterns.push(regex.source);
-      text = text.replace(regex, "[Redacted untrusted instruction]");
-    }
-  }
-
+  const neutralizedPatterns = injectionSignalsIn(rawText);
   return {
-    sanitized: text,
+    sanitized: redactInjections(rawText),
     hasInjectionAttempt: neutralizedPatterns.length > 0,
     neutralizedPatterns,
   };
@@ -776,7 +772,9 @@ export async function composeAutonomousSalesReply(input: {
   threadHistory?: EmailMessage[];
 }): Promise<ComposedReply> {
   // S. AI SECURITY / RED TEAM TESTS
-  if (aiSecurityService.detectPromptInjection(input.rawInboundText)) {
+  // One rule, matched on normalised text. The substring detector this replaces caught one of
+  // eight trivial variants of the same phrase; see server/domain/promptInjection.ts.
+  if (looksLikeInjection(input.rawInboundText)) {
       console.warn("[AiSecurity] Prompt injection detected in inbound text. Suppressing response.");
       return {
           subject: "",
@@ -784,7 +782,11 @@ export async function composeAutonomousSalesReply(input: {
           replyPlan: {
               contact: { name: input.identity.name, company: input.identity.company, email: input.identity.email },
               product: "Abedin Voice AI",
-              primaryIntent: "SUPPRESS" as any,
+              // "SUPPRESS" is an ACTION (NextBestActionType), not an intent, and was cast in
+              // here with `as any`. The intent is genuinely unknown: the message was not read,
+              // because it carried an injection signature. The suppression travels in
+              // `nextBestAction`, which is what `suppressesReply` reads.
+              primaryIntent: "UNKNOWN",
               secondaryIntents: [],
               buyingStage: input.buyingStage,
               purchaseReadiness: 0,
@@ -1047,7 +1049,7 @@ Return JSON ONLY:
          { label: 'PROSPECT_COMPANY', content: companyName, source: 'from-header/identity-resolution' },
          { label: 'INBOUND_EMAIL', content: input.rawInboundText, source: 'inbound-email' },
        ],
-       detectSignals: (text) => sanitizeUntrustedProspectInput(text).neutralizedPatterns,
+       detectSignals: (text) => injectionSignalsIn(text),
      });
 
      if (assembled.manifest.injectionSignals.length > 0) {

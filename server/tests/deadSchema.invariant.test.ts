@@ -138,6 +138,10 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
     'server/services/privacyOps.service.ts',
     'server/services/canary.service.ts',
     'server/services/privacy.service.ts',
+    // And one more, deleted with the injection work: it held a LIVE substring detector that
+    // suppressed replies and a DEAD sanitiser that would have defeated five of the evasions
+    // the detector missed. Both are now one normaliser in server/domain/promptInjection.ts.
+    'server/services/aiSecurity.service.ts',
   ]) {
     it(`${gone} does not exist`, () => {
       expect(existsSync(gone), `${gone} is back`).toBe(false);
@@ -158,7 +162,15 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
     }
   });
 
-  const AUDIT_2026_09_10 = ['buyingStage', 'nextBestAction', 'claimGrounding', 'privacyOps', 'canary', 'privacy'];
+  const AUDIT_2026_09_10 = [
+    'buyingStage',
+    'nextBestAction',
+    'claimGrounding',
+    'privacyOps',
+    'canary',
+    'privacy',
+    'aiSecurity',
+  ];
   const importOf = (name: string) => new RegExp(`from\\s+['"][^'"]*/${name}\\.service['"]`);
 
   it('nothing imports the six the 2026-09-10 audit found', () => {
