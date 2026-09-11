@@ -229,6 +229,15 @@ export interface CompanyBrain {
     idealPartnerProfile: string;
   };
   updatedAt: string;
+  /**
+   * P1.3 — the version this copy was read at. See Campaign.version.
+   *
+   * Transport, not content: `GET /api/company-brain` returns it beside the document and
+   * `validateBody` strips it before the schema sees it, so it is never stored as a field. It is
+   * declared here because a caller cannot state the version it is updating unless the type it
+   * holds can carry one — which is why the brain editor could not send `If-Match` at all.
+   */
+  version?: number;
 }
 
 export interface ScoreBreakdown {

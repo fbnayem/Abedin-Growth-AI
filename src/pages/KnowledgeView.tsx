@@ -15,10 +15,13 @@ import {
 import { CompanyBrain, KnowledgeItem } from "../types";
 import { AddKnowledgeModal } from "../components/AddKnowledgeModal";
 
+/** What a save attempt answers. A `void` return is why a failed save looked like a saved one. */
+export type BrainSaveOutcome = { ok: true } | { ok: false; message: string };
+
 interface KnowledgeViewProps {
   brain: CompanyBrain;
   knowledgeItems: KnowledgeItem[];
-  onUpdateBrain: (updated: CompanyBrain) => void;
+  onUpdateBrain: (updated: CompanyBrain) => Promise<BrainSaveOutcome>;
   onAddKnowledgeItem: (item: KnowledgeItem) => void;
 }
 
@@ -33,12 +36,30 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
   const [tagline, setTagline] = useState(brain.tagline || "");
   const [isAddDocOpen, setIsAddDocOpen] = useState(false);
 
-  const handleSaveBrain = () => {
-    onUpdateBrain({
-      ...brain,
-      tagline,
-    });
-    setEditingBrain(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  /**
+   * This called `onUpdateBrain` and closed the editor, and `onUpdateBrain` was
+   * `(updated) => setCompanyBrain(updated)` — local state, nothing else. No file under src/ wrote
+   * to `/api/company-brain` at all, so an operator's edit to the brain that is stringified into
+   * every outbound prompt survived until the next reload and no further, while the button said
+   * "Save Brain".
+   *
+   * The editor now stays OPEN on failure, with the operator's text still in it. Closing it is what
+   * makes a person believe the edit was stored.
+   */
+  const handleSaveBrain = async () => {
+    setSaving(true);
+    setSaveError(null);
+    const outcome = await onUpdateBrain({ ...brain, tagline });
+    setSaving(false);
+
+    if (outcome.ok) {
+      setEditingBrain(false);
+      return;
+    }
+    setSaveError(outcome.message);
   };
 
   return (
@@ -61,15 +82,16 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
           {activeTab === "brain" ? (
             <button
               onClick={() => {
-                if (editingBrain) handleSaveBrain();
+                if (editingBrain) void handleSaveBrain();
                 else setEditingBrain(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors"
+              disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm transition-colors disabled:opacity-60"
             >
               {editingBrain ? (
                 <>
                   <Save className="w-3.5 h-3.5" />
-                  <span>Save Brain</span>
+                  <span>{saving ? "Saving..." : "Save Brain"}</span>
                 </>
               ) : (
                 <>
@@ -89,6 +111,13 @@ export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
           )}
         </div>
       </div>
+
+      {saveError && (
+        <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900">
+          <strong className="font-bold">The brain was not saved. </strong>
+          {saveError}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-slate-200 text-xs font-semibold">

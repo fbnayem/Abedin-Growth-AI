@@ -857,7 +857,35 @@ export function App() {
             <KnowledgeView
               brain={companyBrain}
               knowledgeItems={knowledgeItems}
-              onUpdateBrain={(updated) => setCompanyBrain(updated)}
+              onUpdateBrain={async (updated) => {
+                // P1.3 — the version travels with the write. `expectedVersionFrom` refuses a write
+                // that does not state one, so without this header every save answers 428.
+                const res = await apiFetch("/api/company-brain", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "If-Match": String(companyBrain.version ?? 0),
+                  },
+                  body: JSON.stringify(updated),
+                });
+
+                if (res.ok) {
+                  setCompanyBrain(await res.json());
+                  return { ok: true as const };
+                }
+
+                const body = await res.json().catch(() => null);
+                if (res.status === 409) {
+                  // Somebody else changed it first. Show them what is there now rather than
+                  // overwriting an edit they have not seen.
+                  const fresh = await apiFetch("/api/company-brain");
+                  if (fresh.ok) setCompanyBrain(await fresh.json());
+                }
+                return {
+                  ok: false as const,
+                  message: body?.error?.message ?? `The brain could not be saved (HTTP ${res.status}).`,
+                };
+              }}
               onAddKnowledgeItem={(newItem) => {
                 setKnowledgeItems((prev) => [newItem, ...prev]);
               }}

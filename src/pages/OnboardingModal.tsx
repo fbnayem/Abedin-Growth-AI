@@ -53,6 +53,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
   const [calendarConnected, setCalendarConnected] = useState(true);
 
   const [analyzing, setAnalyzing] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
   const [generatedBrain, setGeneratedBrain] = useState<CompanyBrain | null>(initialBrain || null);
 
 
@@ -90,12 +91,22 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
 
   const handleRunAnalysis = async () => {
     setAnalyzing(true);
+    setGenerateError(null);
+    // A previous run's brain must not be shown as this run's result.
+    setGeneratedBrain(null);
     setStep(5);
 
     try {
       const res = await apiFetch("/api/company-brain/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          // P1.3 — this route refuses a write that does not state the version it is updating, so
+          // without this header it answered 428 VERSION_REQUIRED every time and this button has
+          // never once produced a brain. The failure was invisible: the catch logged to the
+          // console and step 5 announced success regardless.
+          "If-Match": String(initialBrain?.version ?? 0),
+        },
         body: JSON.stringify({
           companyName,
           companyUrl,
@@ -106,11 +117,16 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to generate company brain");
-      const data = await res.json();
-      setGeneratedBrain(data);
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setGenerateError(
+          body?.error?.message ?? `The company brain was not generated (HTTP ${res.status}).`
+        );
+        return;
+      }
+      setGeneratedBrain(await res.json());
     } catch (err) {
-      console.error(err);
+      setGenerateError(err instanceof Error ? err.message : "The company brain was not generated.");
     } finally {
       setAnalyzing(false);
     }
@@ -409,15 +425,29 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 flex items-start gap-3">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
-                    <div className="text-xs text-emerald-950 space-y-1">
-                      <div className="font-bold text-sm">Company Brain Generated Successfully</div>
-                      <p>
-                        Gemini built a complete strategic profile for <strong>{productName}</strong>. You can review and refine this at any time in the Knowledge hub.
-                      </p>
+                  {/* This banner rendered whenever the step was not loading — success or failure.
+                      With generation answering 428 every time, it announced a brain that had never
+                      been built, over the brain that was already there. */}
+                  {generateError ? (
+                    <div className="p-4 bg-rose-50 rounded-xl border border-rose-200 flex items-start gap-3">
+                      <ShieldCheck className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                      <div className="text-xs text-rose-950 space-y-1">
+                        <div className="font-bold text-sm">No company brain was generated</div>
+                        <p>{generateError}</p>
+                        <p>Nothing has been saved. You can go back and try again.</p>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-200 flex items-start gap-3">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="text-xs text-emerald-950 space-y-1">
+                        <div className="font-bold text-sm">Company Brain Generated Successfully</div>
+                        <p>
+                          Gemini built a complete strategic profile for <strong>{productName}</strong>. You can review and refine this at any time in the Knowledge hub.
+                        </p>
+                      </div>
+                    </div>
+                  )}
 
                   {generatedBrain && (
                     <div className="space-y-3 p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs">
@@ -486,6 +516,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
           {step === 5 && !analyzing && (
             <button
               onClick={handleComplete}
+              disabled={!generatedBrain}
               className="px-6 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm shadow-emerald-500/20 transition-colors flex items-center gap-1.5"
             >
               <Check className="w-4 h-4" />

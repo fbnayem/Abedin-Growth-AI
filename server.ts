@@ -52,6 +52,7 @@ import { isUnauthenticatedApiPath } from "./server/middleware/authAllowlist";
 import { cspReportRouter } from "./server/routes/cspReport.routes";
 import { CSP_REPORT_PATH } from "./server/middleware/securityHeaders";
 import { resolvePort } from "./server/config/port";
+import { mergeSingletonBody } from "./server/lib/singleton";
 import { actionTrailRouter } from "./server/routes/actionTrail.routes";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
@@ -625,7 +626,15 @@ app.get("/api/health", async (req: Request, res: Response) => {
     // as document fields, or the next read would hand them back as data.
     const { expectedVersion: _ignored, version: _alsoIgnored, ...body } = payload as any;
 
-    const outcome = await mutateWithVersion(ref, expected.value, () => body);
+    // The contract for these two documents says PARTIAL update — "Every field is optional" —
+    // and `mutateWithVersion` writes the document WHOLE, deliberately, so that a field removed by
+    // `produceNext` is genuinely removed. Both are right; composing the merge here is what makes
+    // them true at once. Without it, `POST /api/company-brain` with `{ tagline }` — exactly what
+    // the schema invites and what the brain editor sends — replaced the entire brain with one
+    // field. See server/lib/singleton.ts.
+    const outcome = await mutateWithVersion(ref, expected.value, (current) =>
+      mergeSingletonBody(current, body)
+    );
     return sendMutationOutcome(req, res, outcome);
   }
 
