@@ -106,6 +106,12 @@ export const ErrorCodes = {
   STORE_UNAVAILABLE: 503,
   PROVIDER_UNAVAILABLE: 503,
   /**
+   * A model answered and the answer did not match the contract the caller required, so it was
+   * not used. 502: an upstream returned something unusable. Distinct from PROVIDER_UNAVAILABLE
+   * because retrying an outage can help, and re-asking a model that ignored its schema may not.
+   */
+  MODEL_OUTPUT_INVALID: 502,
+  /**
    * The deployment is missing a value that has no safe default, so the route refuses.
    *
    * 503 and not 500: nothing is broken and a retry will not help, but the condition is the

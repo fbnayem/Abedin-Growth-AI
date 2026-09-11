@@ -33,7 +33,9 @@ import { join, relative } from 'node:path';
  *
  * Lower this when you convert one. Do not raise it.
  */
-const BASELINE = 10;
+// 10 -> 9, 2026-09-12: companyBrainAgent converted. Its fallback was a hand-written brain,
+// stored as though generated whenever no model answered.
+const BASELINE = 9;
 
 const SCAN_ROOTS = ['server', 'src', 'shared'];
 const SCAN_FILES = ['server.ts'];

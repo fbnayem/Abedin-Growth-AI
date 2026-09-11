@@ -1,4 +1,3 @@
-import { CanaryRolloutService } from './canary.service';
 import { BudgetTracker } from '../policies/workflowBudgets';
 import { withModelCallCollector, type ModelCallRecord } from '../lib/modelCallLog';
 import { runLogFieldsFor, writeRunLog } from '../lib/runLog';

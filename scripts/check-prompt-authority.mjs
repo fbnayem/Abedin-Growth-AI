@@ -39,6 +39,18 @@ import { join, relative } from 'node:path';
  */
 const BASELINE = 10;
 
+/**
+ * The model-call functions whose options this scans.
+ *
+ * `safeGenerateJSON` alone, until 2026-09-12. `generateJsonOrAbstain` takes the SAME options —
+ * `{ prompt }` or `{ systemInstruction, contents }` — and was invisible here. So converting a
+ * call site from the legacy wrapper to the abstaining one, which S23's ratchet asks for, removed
+ * it from THIS ratchet while leaving its prompt exactly as legacy as before: the count would have
+ * fallen because the detector went blind, not because anything was fixed. Found while converting
+ * the company brain, which would have been the first site to disappear that way.
+ */
+const MODEL_CALLS = ['safeGenerateJSON', 'generateJsonOrAbstain'];
+
 const ROOT = 'server';
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', 'tests']);
 
@@ -89,15 +101,14 @@ function stripCommentsAndStrings(source) {
 }
 
 /**
- * The character span of each `safeGenerateJSON( ... )` call, by matching parentheses.
+ * The character span of each model call, by matching parentheses.
  *
  * The optional generic argument is skipped: most real call sites in this codebase are written
  * `safeGenerateJSON<{ steps?: any[] }>({ prompt, ... })`, and a needle of `safeGenerateJSON(`
  * matches none of them — which made this scanner report ZERO offenders where there were 16.
  */
-function callSpans(code) {
+function callSpansOf(code, needle) {
   const spans = [];
-  const needle = 'safeGenerateJSON';
   let from = 0;
   for (;;) {
     const at = code.indexOf(needle, from);
@@ -134,17 +145,47 @@ function callSpans(code) {
   return spans;
 }
 
-function scan(path) {
-  const source = readFileSync(path, 'utf8');
-  if (!source.includes('safeGenerateJSON')) return;
+/** Every call, to every function that takes these options. */
+function callSpans(code) {
+  return MODEL_CALLS.flatMap((needle) => callSpansOf(code, needle));
+}
 
-  // Only `prompt:` INSIDE a safeGenerateJSON call counts. The check is about a model call
-  // using the legacy single-string form, not about the word `prompt` appearing in a file —
-  // and an object literal passed to something else (a hash, a log record) is neither a model
-  // call nor an authority boundary.
+// `prompt` as a KEY of the options object: `{ prompt, ... }` shorthand or `{ prompt: expr }`.
+//
+// Anchoring on the preceding `{` or `,` is what separates a key from a value. Without it,
+// `safeGenerateJSON({ contents: prompt, ... })` — the SAFE form, where the untrusted material
+// simply lives in a variable called `prompt` — would be reported as a legacy call site.
+const LEGACY = /[{,]\s*prompt\s*[,}:]/g;
+
+/**
+ * The offset of every legacy `prompt` key inside a model call in `source`.
+ *
+ * Only a key INSIDE a model call counts. The check is about a model call using the legacy
+ * single-string form, not about the word `prompt` appearing in a file — and an object literal
+ * passed to something else (a hash, a log record) is neither a model call nor an authority
+ * boundary.
+ *
+ * Pulled out of `scan` so the self-check below runs the real rule rather than a copy of it.
+ */
+function legacyOffsets(source) {
+  if (!MODEL_CALLS.some((name) => source.includes(name))) return { code: '', offsets: [] };
   const code = stripCommentsAndStrings(source);
-  const spans = callSpans(code);
-  if (spans.length === 0) return;
+  const offsets = [];
+  for (const [start, end] of callSpans(code)) {
+    const segment = code.slice(start, end + 1);
+    LEGACY.lastIndex = 0;
+    let match;
+    while ((match = LEGACY.exec(segment)) !== null) offsets.push(start + match.index);
+  }
+  return { code, offsets };
+}
+
+let filesScanned = 0;
+
+function scan(path) {
+  filesScanned++;
+  const { code, offsets } = legacyOffsets(readFileSync(path, 'utf8'));
+  if (offsets.length === 0) return;
 
   const lineStarts = [0];
   for (let i = 0; i < code.length; i++) if (code[i] === '\n') lineStarts.push(i + 1);
@@ -156,20 +197,8 @@ function scan(path) {
     }
     return lo + 1;
   };
-
-  // `prompt` as a KEY of the options object: `{ prompt, ... }` shorthand or `{ prompt: expr }`.
-  //
-  // Anchoring on the preceding `{` or `,` is what separates a key from a value. Without it,
-  // `safeGenerateJSON({ contents: prompt, ... })` — the SAFE form, where the untrusted material
-  // simply lives in a variable called `prompt` — would be reported as a legacy call site.
-  const LEGACY = /[{,]\s*prompt\s*[,}:]/g;
-  for (const [start, end] of spans) {
-    const segment = code.slice(start, end + 1);
-    LEGACY.lastIndex = 0;
-    let match;
-    while ((match = LEGACY.exec(segment)) !== null) {
-      offenders.push({ path: relative(process.cwd(), path), line: lineOf(start + match.index) });
-    }
+  for (const offset of offsets) {
+    offenders.push({ path: relative(process.cwd(), path), line: lineOf(offset) });
   }
 }
 
@@ -184,10 +213,51 @@ function walk(dir) {
   }
 }
 
+// SELF-CHECK. The rule runs against sources whose answer is known, so a change that blinds it
+// fails here rather than turning the ratchet into a count of nothing. Every row was a real
+// shape: the nested generic is `conversationMemoryAgent.ts`, and the safe form is the migration
+// target.
+//
+// NOTE, recorded rather than hidden: disabling this self-check is a mutant that SURVIVES the gate
+// (measured 2026-09-12), and it is unexpressible against this tree. A self-check is insurance —
+// it fires only when the rule itself is broken, so with the rule intact removing it changes no
+// outcome. The insured event, the rule going blind to `generateJsonOrAbstain`, was run as its own
+// mutant and is KILLED.
+const SELF_CHECK = [
+  ['safeGenerateJSON({ prompt, fallbackData: {} })', 1],
+  ['safeGenerateJSON<{ steps?: any[] }>({ prompt: p, fallbackData: {} })', 1],
+  ['generateJsonOrAbstain({ prompt })', 1],
+  ['generateJsonOrAbstain<Partial<ConversationMemory>>({ prompt, category: "SMART" })', 1],
+  ['generateJsonOrAbstain({ systemInstruction, contents: prompt })', 0],
+  ['// generateJsonOrAbstain({ prompt })', 0],
+  ['hashPrompt({ prompt: options.prompt })', 0],
+];
+for (const [source, expected] of SELF_CHECK) {
+  const found = legacyOffsets(source).offsets.length;
+  if (found !== expected) {
+    console.error(
+      `check-prompt-authority SELF-CHECK FAILED: ${JSON.stringify(source)} gave ${found} legacy ` +
+        `site(s), expected ${expected}. The rule is broken, not the tree clean.`
+    );
+    process.exit(1);
+  }
+}
+
 try {
   if (statSync(ROOT).isDirectory()) walk(ROOT);
 } catch {
   console.error(`Cannot read ${ROOT}/`);
+  process.exit(1);
+}
+
+// A broken walk returns a handful of files or none; the tree has over a hundred. The floor sits
+// well below that so deleting dead modules never trips it.
+const MIN_FILES = 50;
+if (filesScanned < MIN_FILES) {
+  console.error(
+    `check-prompt-authority: only ${filesScanned} files scanned (floor ${MIN_FILES}). The scan is ` +
+      'broken, not the tree clean.'
+  );
   process.exit(1);
 }
 
@@ -208,7 +278,10 @@ if (count < BASELINE) {
     `Prompt-authority ratchet: ${count} legacy call sites remain, baseline is ${BASELINE}.\n` +
       `Progress — now lower BASELINE in scripts/check-prompt-authority.mjs to ${count} so it cannot go back up.`
   );
+  for (const o of offenders) console.error(`  ${o.path}:${o.line}`);
   process.exit(1);
 }
 
-console.log(`OK: ${count} legacy prompt call sites (baseline ${BASELINE}); none added.`);
+console.log(
+  `OK: ${count} legacy prompt call sites (baseline ${BASELINE}); none added. ${filesScanned} files scanned.`
+);

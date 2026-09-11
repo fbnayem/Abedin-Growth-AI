@@ -9,7 +9,6 @@ import { isFabricatedProviderId, actionGateway, ActionType } from './server/gate
 import { verifyDocuSignSignature, verifyPubSubToken } from './server/services/webhookVerification.service';
 import { standardApiLimiter, aiOperationLimiter, webhookLimiter } from './server/middleware/rateLimit';
 import { collection, getDocs, getDoc, addDoc, doc, setDoc, updateDoc, query, where, orderBy, limit } from './server/store';
-import { PrivacyService } from './server/services/privacy.service';
 import { globalStore } from "./server/dataStore";
 import { store } from "./server/store";
 import { requireAuth } from "./server/middleware/auth";
@@ -52,6 +51,7 @@ import { unsubscribeRouter } from "./server/routes/unsubscribe.routes";
 import { isUnauthenticatedApiPath } from "./server/middleware/authAllowlist";
 import { cspReportRouter } from "./server/routes/cspReport.routes";
 import { CSP_REPORT_PATH } from "./server/middleware/securityHeaders";
+import { resolvePort } from "./server/config/port";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
 import { simulatePitchBattle } from './server/agents/pitchBattleAgent';
@@ -91,14 +91,17 @@ import { runCompleteSalesEngineTestMatrix } from "./server/agents/salesEngineTes
 import { evaluatePolicy } from "./server/policies/policyEngine";
 import { autopilotRunner } from "./server/autopilotRunner";
 import { resolveProvenance, describeProvenance } from "./server/build/provenance";
-import { BODY_SCHEMAS, validateBody, type ContractRoute } from "./server/domain/apiContracts";
+import { BODY_SCHEMAS, type ContractBody, validateContractBody, type ContractRoute } from "./server/domain/apiContracts";
 import { Lead, Investor, Partner, Campaign, Meeting, Opportunity, KnowledgeItem, EmailMessage, CompanyBrain } from "./src/types";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Read from PORT, which is how Cloud Run and App Engine say where traffic will arrive. This
+  // was the literal 3000, so a platform-assigned port was ignored and the container was never
+  // reached. A malformed PORT throws here, before anything binds. See server/config/port.ts.
+  const PORT = resolvePort();
 
   // P0.14 — Raw body capture MUST be mounted before express.json(), otherwise the JSON parser
   // consumes the stream and the signature can only ever be computed over a re-serialised
@@ -581,12 +584,12 @@ app.get("/api/health", async (req: Request, res: Response) => {
    *
    * Returns null when it has already answered, so the caller returns without a second response.
    */
-  function parsedBodyOr400(
+  function parsedBodyOr400<R extends ContractRoute>(
     req: Request,
     res: Response,
-    route: ContractRoute
-  ): Record<string, unknown> | null {
-    const outcome = validateBody(BODY_SCHEMAS[route], req.body ?? {});
+    route: R
+  ): ContractBody<R> | null {
+    const outcome = validateContractBody(route, req.body ?? {});
     if (outcome.ok === false) {
       sendError(
         req,
@@ -684,9 +687,25 @@ app.get("/api/health", async (req: Request, res: Response) => {
 
       // Generated BEFORE the transaction: it is an external model call, and produceNext runs
       // inside a transaction that may be retried. A retryable block must not make paid calls.
-      const result = await generateCompanyBrain(req.body);
+      // S11 — validated against the registry, like its sibling. This passed `req.body` straight
+      // to the agent, which interpolates every field into the prompt.
+      const input = parsedBodyOr400(req, res, 'POST /api/company-brain/generate');
+      if (input === null) return;
 
-      const outcome = await mutateWithVersion(ref, expected.value, () => result as any);
+      const generated = await generateCompanyBrain(input);
+      if (generated.ok === false) {
+        // Nothing is written. An abstention used to be a hand-written template stored as though a
+        // model had produced it, and an off-contract answer used to be stored whole.
+        return sendError(
+          req,
+          res,
+          generated.code === 'MODEL_UNAVAILABLE' ? 'PROVIDER_UNAVAILABLE' : 'MODEL_OUTPUT_INVALID',
+          generated.reason
+        );
+      }
+
+      const brain: Record<string, unknown> = { ...generated.brain };
+      const outcome = await mutateWithVersion(ref, expected.value, () => brain);
       return sendMutationOutcome(req, res, outcome);
     } catch(e: any) { sendCaught(req, res, e); }
   });
@@ -2028,4 +2047,7 @@ app.post("/api/signature/webhook", async (req: Request, res: Response) => {
 
 startServer().catch((err) => {
   console.error("Failed to start server:", err);
+  // Exit non-zero. Logging and returning left a process that either lingered with nothing
+  // bound or exited 0, reporting success, and neither is restarted as a crash.
+  process.exit(1);
 });

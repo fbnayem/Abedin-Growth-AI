@@ -1,114 +1,141 @@
-import { safeGenerateJSON } from "../geminiClient";
+import { generateJsonOrAbstain } from "../geminiClient";
 import { CompanyBrain } from "../../shared/domain/models";
+import { companyBrainSchema } from "../domain/apiContracts";
+import type { ModelOutcome } from "../domain/abstention";
 
-export async function generateCompanyBrain(input: {
-  companyName: string;
-  companyUrl: string;
-  productName: string;
-  productUrl: string;
-  targetMarkets: string[];
-  primaryObjectives: string[];
-  additionalNotes?: string;
-}): Promise<CompanyBrain> {
-  const fallbackBrain: CompanyBrain = {
-    workspaceId: "default",
-    companyName: input.companyName || "Abedin Tech",
-    companyUrl: input.companyUrl || "https://abedintech.com/voice-ai/",
-    productName: input.productName || "Abedin Voice AI",
-    productUrl: input.productUrl || "https://abedintech.com/voice-ai/",
-    tagline: "Autonomous 24/7 Conversational Voice AI for Enterprise & Appointment Businesses",
-    description: "Abedin Voice AI replaces missed calls and inefficient phone operations with ultra-low latency, human-grade conversational voice agents that qualify leads, schedule appointments, handle customer queries, and integrate with your CRM.",
-    targetIndustries: [
-      "Dental & Healthcare Clinics",
-      "Real Estate & Property Management",
-      "Automotive Dealerships & Service Centers",
-      "Legal & Financial Consultancies",
-      "Home Services & Contracting",
-      "B2B SaaS & Tech Support",
-    ],
-    targetCountries: input.targetMarkets && input.targetMarkets.length > 0 ? input.targetMarkets : ["United Kingdom", "United States", "UAE", "Saudi Arabia", "Singapore"],
-    customerProblems: [
-      "Missed after-hours and peak-time inbound calls losing high-value customer leads",
-      "High cost of staffing 24/7 human receptionists and receptionist turnover",
-      "Slow speed-to-lead response when prospects fill online quote/booking forms",
-      "Inconsistent call qualification and manual CRM data entry errors",
-    ],
-    coreFeatures: [
-      "Sub-500ms voice response latency for natural, uninterrupted phone conversations",
-      "Direct Google Calendar & CRM 2-way real-time appointment booking",
-      "Autonomous multi-turn lead qualification & custom question branch logic",
-      "Warm call transfer to live human specialists when escalation criteria are met",
-      "Automatic call transcript generation, intent analysis, and sentiment tagging",
-    ],
-    primaryBenefits: [
-      "Zero missed calls: 100% answer rate 24/7/365",
-      "3.4x faster lead response time increasing demo/booking conversion rates by 42%",
-      "Over 65% reduction in front-desk reception overhead costs",
-      "Seamless sync into existing scheduling tools and enterprise databases",
-    ],
-    differentiators: [
-      "Domain-tuned conversational nuance preventing robotic turn-taking pauses",
-      "Deterministic business policy engine guaranteeing zero pricing hallucinations",
-      "Omnichannel handoff: Voice to SMS / WhatsApp confirmation within seconds",
-    ],
-    targetPersonas: [
-      {
-        title: "Clinic Practice Manager / Owner",
-        department: "Operations",
-        painPoint: "Front desk staff overwhelmed with scheduling calls during peak patient visit hours.",
-      },
-      {
-        title: "Head of Sales / Business Development",
-        department: "Revenue",
-        painPoint: "High drop-off rate on web inbound inquiries due to delayed callback times.",
-      },
-      {
-        title: "Managing Director / Partner",
-        department: "Executive",
-        painPoint: "High personnel expenditure with limited weekend and after-hours coverage.",
-      },
-    ],
-    customerUseCases: [
-      {
-        industry: "Dental & Medical Clinics",
-        useCase: "24/7 inbound appointment booking, rescheduling, and cancellation handling directly into dental practice management software.",
-        expectedROI: "Recovers £18,000+ per month in previously missed new patient consultations.",
-      },
-      {
-        industry: "Real Estate Agencies",
-        useCase: "Instant callback and qualification of property buyer/renter inquiries from portal listings, booking viewings on agent calendars.",
-        expectedROI: "Triples viewing confirmations and eliminates weekend phone coverage gaps.",
-      },
-    ],
-    salesAngles: [
-      "The Missed Opportunity Angle: Calculate how many thousands in revenue are lost every weekend from unreturned calls.",
-      "The Speed-to-Lead Angle: Contact inbound leads within 15 seconds while their purchase intent is peak.",
-      "The Overhead Reducer Angle: Provide 24/7 call center tier performance at 20% of the cost of a single full-time hire.",
-    ],
-    objectionsAndAnswers: [
-      {
-        objection: "Will our customers know it is AI and get frustrated?",
-        recommendedResponse: "Abedin Voice AI operates with natural cadence, sub-500ms latency, and polite conversational manners. In tests, over 88% of callers complete their booking smoothly without hesitation, and any complex edge case is instantly transferred to your live team.",
-      },
-      {
-        objection: "How difficult is it to integrate with our current calendar/software?",
-        recommendedResponse: "Setup takes under 15 minutes with native calendar syncing (Google Calendar, Outlook) and direct webhook connections to leading industry CRM tools.",
-      },
-    ],
-    investorNarrative: {
-      vision: "Pioneering the global transition from static IVR phone trees and expensive human call centers to intelligent, autonomous voice agent infrastructure for SMBs and mid-market enterprises.",
-      marketOpportunity: "$48B global conversational AI and voice operations market growing at 28% CAGR.",
-      moat: "Proprietary low-latency conversational orchestration, verticalized workflow models, and sticky calendar/CRM integration layer.",
-      tractionHighlights: "Rapidly expanding in UK dental, European property, and Gulf enterprise sectors with high retention and rapid payback period.",
-    },
-    partnerNarrative: {
-      partnerValueProposition: "Enable marketing agencies, telecom providers, and CRM consultants to offer turnkey 24/7 AI voice receptionist solutions to their client base with high margin recurring SaaS revenue.",
-      revenueSharingModel: "25% to 35% recurring monthly revenue share on all managed client subscriptions.",
-      idealPartnerProfile: "Dental marketing agencies, estate agency software consultants, BPO contact center operators, and regional VoIP/telecom resellers.",
-    },
-    updatedAt: new Date().toISOString(),
+/**
+ * THE COMPANY BRAIN, AND WHICH OF ITS FIELDS A MODEL MAY WRITE.
+ *
+ * WHAT WAS WRONG
+ * --------------
+ * This returned `{ workspaceId: "default", ...parsed, updatedAt }`. The spread came AFTER the
+ * literal, so a `workspaceId` in the model's answer replaced the server's: model output
+ * overwriting a field the server owns. TypeScript reports exactly this — TS2783, "specified more
+ * than once, so this usage will be overwritten" — and nobody saw it, because the diagnostic only
+ * surfaces under `strictNullChecks` and `tsconfig.json` did not enable it.
+ *
+ * It was not exploitable, and the reason is worth stating so it is not mistaken for safety:
+ * `workspaceId` is written in fifteen places and read by none, and the document path is
+ * `orgPath(orgScope(req))`, so tenancy never depended on it. The day something reads it, a model
+ * would have been choosing its value.
+ *
+ * Two larger defects lived in the same function.
+ *
+ *   1. The answer was never validated. The brain is stringified into every outbound prompt, so
+ *      whatever keys a model returned became material for every later reply. S11 closed that
+ *      channel for `POST /api/company-brain` and left it open for `/generate`, which writes the
+ *      same document.
+ *   2. It called `safeGenerateJSON` with a hand-written brain as `fallbackData`. When no model
+ *      answered, that template — "over 88% of callers complete their booking smoothly",
+ *      "recovers 18,000+ per month" — was written into the organisation's brain as though it had
+ *      been generated, and fed to every prompt after it. A caller could not tell it from an
+ *      answer, which is S23.
+ *
+ * WHAT IT DOES NOW
+ * ----------------
+ * No answer is no brain: the abstention is returned and nothing is written. An answer that does
+ * not match the contract is refused whole rather than partly kept. The fields the server owns are
+ * stamped after validation, from the server, so no model value for them survives.
+ */
+
+/** `workspaceId` is vestigial — written everywhere, read by nothing — and server-owned regardless. */
+export const DEFAULT_WORKSPACE_ID = "default";
+
+/**
+ * What a GENERATED brain must contain: everything the prompt asks for.
+ *
+ * The stored schema makes every field optional because `POST /api/company-brain` is a partial
+ * update. A generated brain REPLACES the document, so an answer of `{}` would pass that schema and
+ * erase the organisation's brain. Strictness is inherited, so an unexpected key is still refused.
+ */
+const generatedBrainSchema = companyBrainSchema.required({
+  companyName: true,
+  companyUrl: true,
+  productName: true,
+  productUrl: true,
+  tagline: true,
+  description: true,
+  targetIndustries: true,
+  targetCountries: true,
+  customerProblems: true,
+  coreFeatures: true,
+  primaryBenefits: true,
+  differentiators: true,
+  targetPersonas: true,
+  customerUseCases: true,
+  salesAngles: true,
+  objectionsAndAnswers: true,
+  investorNarrative: true,
+  partnerNarrative: true,
+});
+
+export type CompanyBrainGeneration =
+  | { readonly ok: true; readonly brain: CompanyBrain }
+  | {
+      readonly ok: false;
+      readonly code: "MODEL_UNAVAILABLE" | "MODEL_OUTPUT_INVALID";
+      readonly reason: string;
+    };
+
+/**
+ * A model's outcome, as a brain the server may store — or the reason it may not.
+ *
+ * Separate from the call so the decision is testable without a model, which is the only way to
+ * put an attacker's answer in front of it.
+ */
+export function brainFromModelOutcome(
+  outcome: ModelOutcome<unknown>,
+  now: Date
+): CompanyBrainGeneration {
+  if (outcome.abstained === false) {
+    const parsed = generatedBrainSchema.safeParse(outcome.value);
+    if (parsed.success === false) {
+      const problems = parsed.error.issues
+        .slice(0, 10)
+        .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`);
+      return {
+        ok: false,
+        code: "MODEL_OUTPUT_INVALID",
+        reason:
+          "The model's answer did not match the company brain contract, so nothing was " +
+          `written: ${problems.join("; ")}`,
+      };
+    }
+    // Server-owned fields LAST. The order is the fix: an object literal keeps the last value
+    // written for a key, so anything spread after these would replace them.
+    return {
+      ok: true,
+      //
+      // `as CompanyBrain` is sound: `generatedBrainSchema` requires every field at runtime, which
+      // companyBrain.invariant.test.ts section 2 asserts. It exists only because zod decides
+      // optionality with `undefined extends T`, which without strictNullChecks holds for EVERY T —
+      // so zod's output types mark every field optional however the schema is written.
+      brain: {
+        ...parsed.data,
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        updatedAt: now.toISOString(),
+      } as CompanyBrain,
+    };
+  }
+  return {
+    ok: false,
+    code: "MODEL_UNAVAILABLE",
+    reason: `No model produced a company brain, so nothing was written. ${outcome.detail}`,
   };
+}
 
+export async function generateCompanyBrain(
+  input: {
+    companyName: string;
+    companyUrl: string;
+    productName: string;
+    productUrl: string;
+    targetMarkets: string[];
+    primaryObjectives: string[];
+    additionalNotes?: string;
+  },
+  now: () => Date = () => new Date()
+): Promise<CompanyBrainGeneration> {
   const prompt = `
 You are the Senior SaaS Growth Architect and Product Strategist for "${input.companyName}" (Product: "${input.productName}").
 Website: ${input.companyUrl} | Product URL: ${input.productUrl}
@@ -166,17 +193,12 @@ Return ONLY valid JSON matching this exact structure:
 }
 `;
 
-  const parsed = await safeGenerateJSON<CompanyBrain>({
+  const outcome = await generateJsonOrAbstain<unknown>({
     prompt,
     category: "SMART",
     temperature: 0.3,
-    fallbackData: fallbackBrain,
     agentName: "companyBrainAgent",
   });
 
-  return {
-    workspaceId: "default",
-    ...parsed,
-    updatedAt: new Date().toISOString(),
-  };
+  return brainFromModelOutcome(outcome, now());
 }

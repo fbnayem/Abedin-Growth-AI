@@ -49,10 +49,6 @@ const ALLOWED = [
       'price book, which server/tests/pricing.invariant.test.ts asserts separately.',
   },
   {
-    file: 'server/agents/companyBrainAgent.ts',
-    reason: 'ROI narrative figures, not prices. Tracked for P1.8 grounding work.',
-  },
-  {
     file: 'server/agents/pitchBattleAgent.ts',
     reason: 'Competitor cost comparison in pitch copy, not our price.',
   },

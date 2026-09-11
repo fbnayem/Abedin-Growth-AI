@@ -109,6 +109,35 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
     // boolean, invisible to a second replica, gone on restart, answering `success: true`. What
     // an operator finds when they go looking during an incident.
     'server/controllers/killSwitch.controller.ts',
+    // Six more, found by the 2026-09-10 audit. None had a caller, and each one read, to anybody
+    // searching for the concept, like the place that decision is made:
+    //
+    //   - `buyingStage.service.ts` — a second owner of stage transitions beside the OPPORTUNITY
+    //     machine, switching on intent strings the intent union does not contain
+    //     ('COMPLAINT', 'MEETING_CONFIRMED', 'CUSTOM_PRICING_REQUEST').
+    //   - `nextBestAction.service.ts` — a second next-best-action decision, classifying questions
+    //     with `includes('price')`, and answering SEND_PAYMENT_LINK above a readiness score.
+    //   - `claimGrounding.service.ts` — returned a hardcoded "HIPAA and GDPR compliant" claim
+    //     marked APPROVED, beside an auditor that found no unsupported claim in any draft. Wired to
+    //     anything, it would have certified a compliance statement nothing in this repository
+    //     supports.
+    //   - `privacyOps.service.ts` — "anonymised" a contact by overwriting its name, email and
+    //     phone, beside a comment conceding that messages and logs were never purged, and a
+    //     retention job that only logged. An erasure that erases nothing is worse than none: it
+    //     is the kind of record somebody later cites as proof that it happened.
+    //   - `canary.service.ts` — imported by `inboundPipeline.ts` and never called. An import reads
+    //     as a use; `tripCircuitBreaker` was the same shape.
+    //   - `privacy.service.ts` — imported by `server.ts` and never called: a data-subject erasure
+    //     and export whose four queries carried no organisation predicate, so a contact id from
+    //     one tenant would have erased or exported a contact in another. Deleting it leaves this
+    //     system with NO erasure or export path, which addendum-status.md records rather than
+    //     keeping an unsafe one so the gap does not show.
+    'server/services/buyingStage.service.ts',
+    'server/services/nextBestAction.service.ts',
+    'server/services/claimGrounding.service.ts',
+    'server/services/privacyOps.service.ts',
+    'server/services/canary.service.ts',
+    'server/services/privacy.service.ts',
   ]) {
     it(`${gone} does not exist`, () => {
       expect(existsSync(gone), `${gone} is back`).toBe(false);
@@ -127,6 +156,29 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
         /from\s+['"][^'"]*killSwitch\.controller['"]/
       );
     }
+  });
+
+  const AUDIT_2026_09_10 = ['buyingStage', 'nextBestAction', 'claimGrounding', 'privacyOps', 'canary', 'privacy'];
+  const importOf = (name: string) => new RegExp(`from\\s+['"][^'"]*/${name}\\.service['"]`);
+
+  it('nothing imports the six the 2026-09-10 audit found', () => {
+    for (const { path, code } of SOURCES) {
+      for (const name of AUDIT_2026_09_10) {
+        expect(code, `${path} imports the deleted ${name}.service`).not.toMatch(importOf(name));
+      }
+    }
+  });
+
+  it('that import check would catch one of them coming back', () => {
+    // The canary import is quoted exactly as it stood in inboundPipeline.ts.
+    expect("import { CanaryRolloutService } from './canary.service';").toMatch(importOf('canary'));
+    expect("import { privacyOpsService } from '../services/privacyOps.service';").toMatch(
+      importOf('privacyOps')
+    );
+    // And does not fire on a module whose name merely BEGINS with a deleted one's.
+    expect("import { policy } from '../services/nextBestActionPolicy.service';").not.toMatch(
+      importOf('nextBestAction')
+    );
   });
 
   /**

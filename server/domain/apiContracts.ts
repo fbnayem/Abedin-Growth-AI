@@ -126,6 +126,25 @@ export const settingsSchema = z
   .strict();
 
 /**
+ * The inputs to company-brain GENERATION.
+ *
+ * `POST /api/company-brain/generate` passed `req.body` straight to the agent, which interpolates
+ * every field into the prompt and calls `targetMarkets.join(", ")`. A non-array was a TypeError
+ * and a 500; an unbounded string was an unbounded prompt, paid for by the caller's organisation.
+ */
+export const companyBrainGenerateSchema = z
+  .object({
+    companyName: z.string().max(200),
+    companyUrl: z.string().max(500),
+    productName: z.string().max(200),
+    productUrl: z.string().max(500),
+    targetMarkets: z.array(z.string().max(200)).max(50),
+    primaryObjectives: z.array(z.string().max(500)).max(50),
+    additionalNotes: z.string().max(5000).optional(),
+  })
+  .strict();
+
+/**
  * The registry. One place that answers "what does this route accept".
  *
  * A map rather than a decorator on each handler, so the set can be enumerated — by a test, by a
@@ -134,16 +153,35 @@ export const settingsSchema = z
  */
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
+  'POST /api/company-brain/generate': companyBrainGenerateSchema,
   'POST /api/settings': settingsSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;
 
+/** What a route's body is once it has been validated — the schema's output, not a cast. */
+export type ContractBody<R extends ContractRoute> = z.output<(typeof BODY_SCHEMAS)[R]>;
+
+/**
+ * Validate a body against a named route's contract, typed as that route's body.
+ *
+ * The one cast in this module, and it is sound: `BODY_SCHEMAS[route]` IS the schema for `R`, and
+ * `validateBody` returns that schema's output. TypeScript cannot evaluate `z.output` of an indexed
+ * access on a type parameter and reports `unknown`; the cast states what the lookup already
+ * guarantees, rather than widening every handler's body to `Record<string, unknown>`.
+ */
+export function validateContractBody<R extends ContractRoute>(
+  route: R,
+  body: unknown
+): ValidationOutcome<ContractBody<R>> {
+  return validateBody(BODY_SCHEMAS[route], body) as ValidationOutcome<ContractBody<R>>;
+}
+
 /** Fields that govern a write and must never be stored as document content. */
 export const TRANSPORT_FIELDS = ['version', 'expectedVersion'] as const;
 
-export type ValidationOutcome =
-  | { readonly ok: true; readonly value: Record<string, unknown> }
+export type ValidationOutcome<T = Record<string, unknown>> =
+  | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly problems: readonly string[] };
 
 /**
@@ -153,7 +191,10 @@ export type ValidationOutcome =
  * original object has validated nothing — the check passes and the unvalidated bytes are what
  * get written, which is the shape of most validation bugs.
  */
-export function validateBody(schema: z.ZodTypeAny, body: unknown): ValidationOutcome {
+export function validateBody<S extends z.ZodTypeAny>(
+  schema: S,
+  body: unknown
+): ValidationOutcome<z.output<S>> {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     return { ok: false, problems: ['the request body must be a JSON object'] };
   }
@@ -170,5 +211,5 @@ export function validateBody(schema: z.ZodTypeAny, body: unknown): ValidationOut
       ),
     };
   }
-  return { ok: true, value: parsed.data as Record<string, unknown> };
+  return { ok: true, value: parsed.data };
 }
