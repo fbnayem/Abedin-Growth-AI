@@ -3563,6 +3563,14 @@ would have downgraded a row to NOT_STARTED on the strength of a typo.
 These are the honest remainder. Each names a capability that does not exist, not a test that
 was not written.
 
+> **Annotated 2026-09-12, not rewritten.** This table is what was true on 2026-09-08, and it is
+> left standing because a document that edits its own findings after they are fixed stops being
+> evidence. Three of the twelve have since closed — **S40** (no file under `src/` imports from
+> `server/` at all now); **S10**, which was the IMPLEMENTED_UNVERIFIED row below; and **S6**, whose
+> remainder — "other lifecycles still change status by direct assignment" — turned out to include
+> the outbox service's own lease reaper, the kill switch, and an opportunity creation that could be
+> born WON. Ten remain. See §1ad.
+
 | Row | What is still missing |
 |---|---|
 | **S1** | `docs/production/active-code-graph.md` is STALE — it lists modules that §1q, §1t, §1v, §1w and §1ab have since deleted, and does not list the three shadow services removed this pass. The graph is a deliverable, and one that disagrees with the tree is worse than none. `server/repositories/` is still an empty directory. |
@@ -3586,6 +3594,23 @@ is `providerResult.invariant.test.ts`, and it asserts the provider-result invari
 the audit-log one. Implemented on a live path, with no test asserting the business invariant —
 which is precisely what this state is for, and the reason it exists as a state rather than being
 rounded to VERIFIED.
+
+> **Correction, 2026-09-12.** The first sentence above was wrong when it was written, and the grade
+> rested on it. `logAction` did NOT refuse: it opened with `if (!store) return;`, wrapped the write
+> in `catch (e) { console.error(...) }`, and returned `void`, so no caller could inspect it and a
+> datastore outage let an irreversible action proceed. The half about coverage was right —
+> `providerResult.invariant.test.ts` contains zero references to `actionLogs`, which was checked
+> rather than assumed this time.
+>
+> The remediation §4 asked for is now implemented and the row is VERIFIED on evidence: PROPOSED and
+> DISPATCHING are gates, a post-execution failure reports `auditRecorded: false` rather than
+> flipping the verdict, events are append-only with a sequence and a payload fingerprint, and
+> `GET /api/actions/:actionId/trail` is the reader the log never had. Fourteen mutants, fourteen
+> killed. See §1ad.
+>
+> How this happened is worth keeping: the re-grade that produced this paragraph rebuilt every other
+> row from measurement and took this one from a commit message. §2's rule — "never mark VERIFIED
+> because another agent claimed it was complete" — applies to the agent writing the claim as well.
 
 ### What the re-grade found that the roadmap had not
 
@@ -3630,19 +3655,179 @@ deliberately left alone — a fixed CRITICAL was still a CRITICAL.
 
 ---
 
+## 1ad. The 2026-09-10 audit, and what it found that this document did not (2026-09-12)
+
+The audit was asked a three-part question: what is missing, what was not completed from the plan,
+and what else could be improved. The answer had to begin with the instrument, because **this
+document was describing a system that no longer existed in several rows** — and by §1's own
+standard, a grading document that cannot say what is true is not a bookkeeping problem, it is the
+deliverable being wrong.
+
+Then eleven findings in the code. The largest was not a defect in any one file: **the type checker
+could not see the user interface at all**, and had never been able to.
+
+### The instrument was wrong in both directions
+
+The re-grade of 2026-09-08 updated the Status column and left the Notes column describing the
+pre-fix system. Checked row by row against the tree:
+
+| Row | The note said | The code said |
+|---|---|---|
+| S6 | "No transition map anywhere" | `stateMachines.ts`, eight machines, `assertTransition` |
+| S26 | "none of the 14 required guards is implemented" | `campaignSafety.ts`, all fourteen, called live from the gateway |
+| S11 | "zod's only import is in a dead file" | four importers; `apiContracts.ts` is live |
+| S27 | "figures are seeded, sinusoidal" | `Math.sin` survives only in the comment recording its removal |
+| S49 | "the false PASS claims are not retracted" — while graded VERIFIED | both documents open with `# RETRACTED` |
+| S1 | "`server/repositories/` is still an empty directory" | three files, zero importers — worse than empty |
+
+And one row was graded on a claim the code refutes. **S10 read "logAction refuses rather than
+swallowing, and the dispatch path depends on it."** It did not: `if (!store) return;`, a swallowing
+`catch`, and a `void` return that no caller could inspect. That row is now VERIFIED on evidence
+rather than on assertion, and the correction is recorded here rather than quietly applied.
+
+### S6 took four passes, and two of them found claims the pass before had made
+
+The row's remainder read "other lifecycles still change status by direct assignment — the map is
+real and is not yet the only way through." The census that closed it found more direct assignment
+than the sentence implied.
+
+1. **Creation.** `POST /api/campaigns` wrote `status: "ACTIVE"`; `CAMPAIGN.initial` is `['DRAFT']`,
+   and ACTIVE is reachable only from it. Creation is not a transition, so `assertTransition` could
+   never have been asked — `isInitialState` is the question that did not exist. Campaigns are born
+   DRAFT now, one click from active.
+2. **The kill switch**, which cancelled every PENDING job with its own `updateDoc`. The first fix
+   asked `assertTransition` at that spot and wrote, in its own comment, that this refused a row the
+   worker had claimed in between. It did not: `d.data()` is the query snapshot, so the map was being
+   asked about stale data and the claim was false the moment it was written. Mutation testing did
+   not catch that — the suite asserted call order — reading the survivor did. Cancellation now goes
+   through the outbox's transactional `cancelJob`; refused rows are counted and returned to the
+   operator; and the route's `'unattributed'` placeholder became an attribution state, gated
+   asymmetrically — a pause is never refused for want of a name, a resume in production is.
+3. **The outbox service itself.** A paragraph in it said every transition on the collection went
+   through `assertTransition`. Four did not — `claimPendingJobs`, `markProcessed`, `markFailed`,
+   `reapExpiredLeases` — and the reaper wrote from a query snapshot with no transaction: a worker
+   presumed dead because its lease expired, but which had just finished, had its PROCESSED job
+   returned to PENDING and sent again. PROCESSED is terminal in the map for exactly that reason.
+   All four now ask the map inside a transaction, and a late completion records itself as what it
+   is. The structural rule written to hold this missed one of the eight writers on its first run —
+   the claim builds its update into a variable before the call — which is why that shape is now in
+   the rule's self-check.
+4. **Opportunity creation**, under a comment reading "a supplied stage is honoured only if it is a
+   legal starting point", checked whether the stage *existed*. Any legal stage was honoured; an
+   opportunity could be created WON. The console defaulted to QUALIFIED because its board had no
+   NEW column — and could not create an opportunity at all, because it sent `currency: "£"` to a
+   schema requiring three letters, which the type checker had no way to see. `creationState`
+   refuses a non-entry stage; the modal sends none, and `GBP`; the board has the entry column.
+
+What the row does not claim: the datastore does not enforce the map (no CHECK constraint or
+trigger); lease expiry is not proof of a worker's death, so a reaped job re-sent before its first
+worker records delivery is detectable by its deterministic Message-ID, not prevented; and the
+pipeline board renders six of sixteen opportunity stages.
+
+### The compiler could not see the user interface
+
+`@types/react` and `@types/react-dom` were not installed, and `tsconfig.json` has no
+`noImplicitAny`, so every `import React from "react"` resolved to `any` across 47 files.
+`React.FC<Props>` was therefore `any`, every component's props were `any`, and `npx tsc --noEmit`
+passed over `src/` while checking almost nothing in it.
+
+Installing the types surfaced **46 errors in files that had been "clean" for the life of the
+project**; `strictNullChecks` added eighteen more. What they were is the point:
+
+- Fields that do not exist, rendered as blanks: `investor.typicalCheck` beside `typicalCheckSize`,
+  `partner.revenueShareModel` beside `revenueModel`, `thesisMatch`, `portfolioCompanies`,
+  `companyBrain.valueProposition`, `objectionsHandling`.
+- Comparisons that can never be true: `conv.status === "RESOLVED"` against a union with no RESOLVED
+  member, so CLOSED conversations were listed as awaiting a reply; `msg.sender === "AI"` three times.
+- `conv.subject.toLowerCase()` on an optional subject — a crash the first time anyone searched an
+  inbox holding a conversation without one.
+- Four child widgets handed props they do not accept. `LivePhoneTestWidget` is the visible one: it
+  fell back to its own defaults and showed **every lead** as "Dr. Practice Manager" at "Harley
+  Street Dental".
+- `missedRecoveryStage`, a string enum, cast to `1 | 2 | 3 | 4`, so the pre-selected recovery
+  variation matched nothing.
+
+`scripts/` was excluded from type-checking entirely — eight files including `db-apply`, `migrate`
+and `db-grants`. Checking it found two real defects immediately: control-flow narrowing does not
+cross a function boundary, and does not survive into a closure for an imported binding.
+
+### The other ten
+
+1. **`const PORT = 3000`.** `.env.example` documented `PORT` as though it were read. Cloud Run and
+   App Engine route traffic to `$PORT`; this deploys, is never reached, and restarts as unhealthy.
+2. **The company brain a model could re-own.** `{ workspaceId: "default", ...parsed }` — the spread
+   after the literal, so the model's value won (TS2783, invisible without `strictNullChecks`). Not
+   exploitable: `workspaceId` is written in fifteen places and read by none. The answer was also
+   never validated, and when no model answered a hand-written template was stored as though
+   generated.
+3. **Seven dead modules**, each reading like the owner of a decision made elsewhere — including a
+   `claimGrounding` service that returned a hardcoded "HIPAA and GDPR compliant" claim marked
+   APPROVED, and a `privacy` service whose four queries carried no organisation predicate.
+4. **A ratchet the fix would have blinded.** `check-prompt-authority` counted only
+   `safeGenerateJSON` call sites; converting one to `generateJsonOrAbstain`, which S23's ratchet
+   asks for, would have removed a still-legacy prompt from the count.
+5. **A local build shipped React's development runtime** — 1,996,561 bytes against 1,302,215 —
+   because `.env` says `NODE_ENV=development` and Vite honours it.
+6. **Two injection detectors that disagreed, one of which decided.** Measured against eight trivial
+   variants of one phrase, it caught one. The sanitiser that would have answered four of the misses
+   sat in the same file with no callers.
+7. **The audit write could not fail** (S10), and every status merged onto one document id, so the
+   sequence — the thing an audit trail is — was destroyed.
+8. **The brain editor's Save wrote nothing**, and onboarding announced a brain it had never built:
+   the generate route requires a version, the modal sent none, so it answered 428 every time while
+   step 5 rendered "Company Brain Generated Successfully".
+9. **Six action types fell into one silent default**, refusing without a code, which made the outbox
+   worker retry them to exhaustion.
+10. **The `as any` census was itself wrong.** A plain grep reported 67; stripping comments and
+    strings gave 40 — the difference being the comments this codebase writes to record defects it
+    has already fixed. 15 remain, held by a ratchet.
+
+### Four process notes, because they cost real time
+
+- **A bash heredoc collapses `\\` to `\`.** Four separate patches were corrupted by it before the
+  lesson took: a NUL byte in a character class (caught by the guardrail), an unterminated string, a
+  regex broken across a real newline, and a mutation script that silently failed to patch itself.
+- **A source assertion that does not strip comments reads the fix's own explanation as the defect.**
+  Seven times in this pass. Every such check now strips first and self-checks that the stripped
+  rule still catches the real thing.
+- **A mutation survivor is a statement about the test.** Two survived because assertions were scoped
+  to a whole file: `App.tsx` also GETs the brain endpoint in its initial load and handles a 409 for
+  campaigns elsewhere, so disabling the save and deleting the conflict branch both passed. Two more,
+  in S6, survived because the suite asserted call order rather than behaviour — and reading them is
+  what exposed the false race claim above.
+- **A comment is a claim; the code beneath it is the evidence.** Three comments on S6's path said
+  the opposite of what their code did — "refused here" above a snapshot check, "every other
+  transition" above four that did not, "only if it is a legal starting point" above an existence
+  check. Every grade that rested on one was wrong, and one of the three was mine.
+
+### Where this leaves the count
+
+39 VERIFIED, 0 IMPLEMENTED_UNVERIFIED, 10 PARTIAL, 0 NOT_STARTED — from 36 / 1 / 12 / 0 on
+2026-09-08. The three that moved: S10, S40, S6. The gate at the end of this pass: 75 suites, 1,925
+tests, 21 guardrails, 15 `as any` casts under a ratchet, a production client bundle of 1,302,458
+bytes. Mutation figures are per item in each commit message; this section totals nothing it did
+not itself re-run.
+
+Of the ten that remain — the §1ac table minus three — eight are work in this repository (S1's
+graph regeneration; S5 rollback migrations; S11 OpenAPI; S22 the relational run-log table; S26 an
+execution engine; S27 deliverability signals; S37 tenant budgets; S39 the monolith), one is
+console-only (S4, deploying `firestore.rules`), and one is a capability that does not exist and is
+not scheduled (S25, a payment path). The phase after this section starts with the eight.
+---
+
 ## 2. Executive Summary
 
 ### 2.1 Status tally
 
 | State | Count | Sections |
 |---|---:|---|
-| `VERIFIED` | **36** | S2, S3, S7, S8, S9, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S38, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
-| `IMPLEMENTED_UNVERIFIED` | **1** | S10 |
-| `PARTIAL` | **12** | S1, S4, S5, S6, S11, S22, S25, S26, S27, S37, S39, S40 |
+| `VERIFIED` | **39** | S2, S3, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
+| `IMPLEMENTED_UNVERIFIED` | **0** | — |
+| `PARTIAL` | **10** | S1, S4, S5, S11, S22, S25, S26, S27, S37, S39 |
 | `NOT_STARTED` | **0** | — |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-36 + 1 + 12 + 0 = **49 rows**. *(Recomputed 2026-09-08 — see §1ac. The figures above them were the first pass's and had never been recalculated.)*
+39 + 0 + 10 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
 
 | Severity | Count |
 |---|---:|
@@ -3720,16 +3905,16 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 
 | Section | Title | Status | Severity | Key evidence | Primary gap |
 |---|---|---|---|---|---|
-| S1 | Active code graph: dead modules, competing owners, untracked repo-mutation scripts | PARTIAL | CRITICAL | `docs/production/active-code-graph.md` (the deliverable, written); `server/services/pipeline.service.ts:5-11`; `server/gateway/actionGateway.ts:173`; `server.ts:344`; `server/routes/outbox.routes.ts:13` | The artifact exists and **is now STALE**: §1q, §1t, §1v and §1w deleted modules it lists (`executeMultiAgentReplyPipeline`, `inboxAgent.ts`, `generateMemoryAwareReply`, `generateMemoryAwareFollowUp`, `qualityControlAgent.ts`, `ConversationDecisionLog`) and added several it does not. That staleness is itself the finding — **nothing verifies it** — no dependency-cruiser rule, no CI check, no lint boundary fails when it goes stale. (The 25 dead modules, the 6 ownerless capabilities and the 172 `.cjs` scripts are what the graph *documents*; they are graded in the sections that own them, not here.) |
+| S1 | Active code graph: dead modules, competing owners, untracked repo-mutation scripts | PARTIAL | CRITICAL | `docs/production/active-code-graph.md` (the deliverable, written); `server/services/pipeline.service.ts:5-11`; `server/gateway/actionGateway.ts:173`; `server.ts:344`; `server/routes/outbox.routes.ts:13` | **Note corrected 2026-09-12.** `server/repositories/` was described as "an empty directory". It was not: three repository stubs with ZERO importers, now deleted and held deleted by `deadSchema.invariant.test.ts` — along with seven dead service modules removed this pass. Still PARTIAL because `docs/production/active-code-graph.md` remains STALE: it lists modules that no longer exist and omits ten that do. A graph that disagrees with the tree is worse than none, and regenerating it is the remaining work on this row |
 | S2 | Proof-based status: test inventory, runner, CI | VERIFIED | CRITICAL | `package.json:12-13`; `server/tests/adversarial.test.ts:29-41`; `server/tests/pipeline.test.ts:16-19`; no `.github` | Zero assertions repo-wide; no test runner; no CI; the one runnable test reports 4/4 unconditionally |
 | S3 | A message cannot become SENT without a real provider result | VERIFIED | CRITICAL | `server/workers/outbox.worker.ts:99-100`; `actionGateway.ts:204-207`; `server.ts:511,519` | `|| 'sim_' + Date.now()` fabricates provider ids; two paths return success with no network call; no reconciliation; no retry; unlocked claim |
 | S4 | Tenant integrity at database level | PARTIAL | CRITICAL | `server/tenancy/orgScope.ts`; `server/middleware/tenant.ts`; `server/db/schema.ts`; `firestore.rules:5` | **P1.1/P1.2 landed.** Request-scoped tenant from a signed claim; all 13 tables carry `organization_id NOT NULL`; all 5 composite uniques declared; by-id access 404s on a foreign id; 86 executable invariants. Still PARTIAL: `firestore.rules` remains `allow read, write: if true`, so the *datastore* enforces nothing and every control is bypassable by going direct; the PostgreSQL constraints have no writer |
 | S5 | Migration safety: expand/contract, rollback, backfill, tests | PARTIAL | HIGH | `drizzle/0005_catch_up_to_schema.sql`; `scripts/db-apply.ts`; `scripts/db-verify.ts`; `scripts/lib/migration-tables.ts`; `server/db/tls.ts`; `scripts/check-tls-verification.mjs`; `server/tests/migrations.invariant.test.ts`; `server/tests/databaseTls.invariant.test.ts` | **Advanced, not closed.** Migrations now describe `schema.ts` (0005: 2 renames, 76 timestamptz conversions with `AT TIME ZONE`, 11 added columns) and 29 invariants hold them there; drizzle's migrator is wired behind `scripts/db-apply.ts` with a mandatory backup, a pre-drop precondition and catalogue verification; `scripts/db-verify.ts` re-asks from cold. Still PARTIAL: zero down migrations and no up→down→up test; zero `CREATE INDEX`; the 0002 bitemporal columns are still NULL on every historical row; TLS verification is on and enforced by a 14th guardrail, though PINNED rather than CA-verified until the Cloud SQL server CA is supplied |
-| S6 | State machines: campaign, outbox, meeting, payment, opportunity, autopilot, knowledge | PARTIAL | CRITICAL | `server.ts:303`, `:318`, `:782`, `:744`; `salesDecisionEngine.ts:275-291` | No transition map anywhere; `COMPLETED → ACTIVE` is the default branch; opportunity stage accepts any string; `AUTONOMY_PAUSED_BY_HUMAN` has no writer |
+| S6 | State machines: campaign, outbox, meeting, payment, opportunity, autopilot, knowledge | VERIFIED | CRITICAL | `server.ts:303`, `:318`, `:782`, `:744`; `salesDecisionEngine.ts:275-291` | **Closed 2026-09-12, in four passes.** The note here said "no transition map anywhere"; `stateMachines.ts` had eight. What was true is that the map was not the only way through. (1) `POST /api/campaigns` created campaigns ACTIVE — an arrived-at state — and no `isInitialState` existed to ask; campaigns are born DRAFT, activated in one click. (2) The kill switch cancelled queued jobs with its own `updateDoc` on a query snapshot; a first fix asked `assertTransition` there and claimed a race protection it did not have. It now goes through the outbox's transactional `cancelJob`, refused rows are counted and returned, and attribution is a state rather than the string `'unattributed'`. (3) Inside `outbox.service.ts`, under a comment saying every transition asked the map, four did not — and the lease reaper wrote from a snapshot with no transaction, so a slow worker's PROCESSED job could return to PENDING and be sent twice. All four ask the map inside a transaction; a late completion records itself truthfully (`PENDING -> PROCESSED`, `lateProviderMessageId`). (4) `POST /api/pipeline` honoured any KNOWN stage as a starting point, so an opportunity could be created WON under a comment saying otherwise — and the console's modal could not create one at all: it sent `currency: "£"` to a schema requiring three letters. `creationState` refuses a non-entry stage; the modal sends none and `GBP`; the board gains the NEW column it lacked. Every status write on the eight machines' entities now asks the map or is a pinned initial state — `lifecycleWrites.invariant` (29) and `outboxTransitions.invariant` (21, with a structural rule naming all eight outbox writers). Mutation: 4/6, then 9/10 (one equivalent, recorded), 10/10, and 6/6. Residuals, named: the datastore does not enforce the map (no CHECK or trigger); lease expiry is not proof of death, so a re-sent reaped job is detectable by Message-ID rather than prevented; the board renders 6 of 16 opportunity stages |
 | S7 | Optimistic concurrency (version / ETag / conditional write) | VERIFIED | HIGH | `server/db/schema.ts:287`; `server.ts:176-181`, `:193-198`, `:297-307` | No `version` column on any table; zero `runTransaction`/`writeBatch`/`increment`; no 409 anywhere; blind whole-document `setDoc` overwrites |
 | S8 | Inbound version stamping and draft staleness | VERIFIED | CRITICAL | `outbox.worker.ts:69`; `aiSafety.service.ts:25-34`; `inboundPipeline.ts:131-144` | **No staleness guard is on a live path.** The wall-clock comparison queries Postgres, which the Firestore write path never populates, so it evaluates zero rows and always passes; the version implementation has no callers and reads a field with no writer. Neither mechanism can ever return "stale" |
 | S9 | Immutable approval digest and re-verification at send time | VERIFIED | CRITICAL | `outbox.routes.ts:20-28`; `OutboxView.tsx:32`; `db/schema.ts:147-156` | No hashing code exists repo-wide; approval is a status string; no re-check at send; `payload` is mutable while approval persists |
-| S10 | Audit logging fail-closed on the Action Gateway | IMPLEMENTED_UNVERIFIED | CRITICAL | `actionGateway.ts:145-161`, `:54`, `:91`; `firestore.rules:5` | `logAction` swallows every error and returns void, so dispatch proceeds; `setDoc(..., {merge:true})` overwrites lifecycle states; no payload fingerprint; log is write-only and client-writable |
+| S10 | Audit logging fail-closed on the Action Gateway | VERIFIED | CRITICAL | `actionGateway.ts:145-161`, `:54`, `:91`; `firestore.rules:5` | **Closed 2026-09-12.** The previous grade rested on "logAction refuses rather than swallowing, and the dispatch path depends on it" — which the code refuted: `if (!store) return;`, a swallowing `catch`, and a `void` return no caller could inspect. It now returns whether it committed; PROPOSED and DISPATCHING are GATES (a failure refuses the dispatch with `AUDIT_UNAVAILABLE`, carrying no `blockedReason` so the worker retries rather than dead-lettering a send that never happened); a post-execution failure may not flip the verdict and sets `auditRecorded: false` instead (§32). Events are append-only via `addDoc` with a sequence, a payload FINGERPRINT rather than the payload, and the idempotency key. `GET /api/actions/:actionId/trail` is the reader it never had. `server/tests/actionAudit.invariant.test.ts`; 14 mutants, 14 killed |
 | S11 | API contract registry (OpenAPI / runtime validation / contract tests) | PARTIAL | HIGH | `server.ts:115`, `:133`, `:462`, `:486`; `emailUnderstanding.agent.ts:2` | No OpenAPI; zod's only import is in a dead file; six handlers spread `req.body` into Firestore; the nine imported domain types are never applied to any handler |
 | S12 | Error envelope (stable codes, requestId, no raw leakage) | VERIFIED | CRITICAL | `server.ts:109` (×32); `actionGateway.ts:97`; `server/middleware/auth.ts:47` | 32 handlers return raw `e.message` at 500; 11 of 15 required codes absent; no requestId; no error middleware; send-safety decided by substring-matching error text |
 | S13 | Provider capability model | VERIFIED | CRITICAL | `server/lib/capabilities.ts`; `actionGateway.ts` (`checkProviderCapability` pre-flight); `server.ts` (oauth record) | Scopes are recorded at consent and checked BEFORE dispatch; an unrecorded grant is refused, as is a datastore read that failed (§14). The Gmail/Calendar conflation is resolved by scopes rather than by provider name. Gmail refresh flow implemented. **Remainder: every existing connection has no scopes recorded and will be refused until reconnected** — deliberate, and an operator action |
@@ -3737,15 +3922,15 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S15 | Email threading, identity normalization, duplicate prevention | VERIFIED | HIGH | `inboundPipeline.ts:35`; `gmail.service.ts:106-119`; `db/schema.ts:104` | `providerThreadId` is written and never queried; `Message-ID` never parsed; outbound `In-Reply-To` carries a Gmail internal id; dedupe is a racy SELECT with no unique index. *Superseded by §1f: thread resolution, conversation creation and Message-ID parsing landed 2026-09-06; outbound Message-ID landed 2026-09-07 (§1r) and the MIME parser the same day (§1t), which also gave `messageIdHeader` its first writer. **Remainder: no unique index on the provider message id, so dedupe is still a racy read.** |
 | S16 | MIME parsing, encodings, what reaches the model | VERIFIED | HIGH | `gmail.service.ts:80-104`, `:136-143`; `inboundPipeline.ts:65` | Real MIME layer landed 2026-09-07 (§1t): charset-aware decoding, RFC 2047 headers, `multipart/alternative` chosen not concatenated, `message/rfc822` not inlined, `multipart/report` captured, size and depth caps, and `sanitizedHtmlBody` renamed to `rawHtmlBody` beside a text rendering. `Content-Transfer-Encoding` is deliberately not applied to Gmail bodies (they arrive pre-decoded) — see §1t. **Remainder: never run against real Gmail traffic.** outbound header injection **fixed 2026-09-07** (§1r) — every header value is refused if it carries CR, LF or NUL, so a reply subject derived from an inbound one can no longer smuggle a `Bcc:` |
 | S17 | Attachment handling (limits, allowlist, sniffing, scanning, retention) | VERIFIED | HIGH | `gmail.service.ts:84-94`, `:110`; `server.ts:58` | Attachments are now RECORDED rather than dropped (§1t): filename, mime type, size and attachment id, with a count that survives the cap, and their bytes are never inlined into the body. Message-level size and depth caps exist and report their own truncation. **Remainder: no allowlist, no content sniffing, no scanning, no storage and no retention policy** — nothing fetches an attachment, which is why this is PARTIAL rather than more |
-| S18 | Indirect prompt injection via untrusted email | VERIFIED | CRITICAL | `aiSecurity.service.ts:3-15`; `geminiClient.ts:125`; `multiAgentReplySystem.ts:299-303`, `:445`; `firestore.rules:5` | **Both sanitizers are unreachable** — §6.3 concedes the text-channel exploit "is not executable on the live path" — so no defence exists on any live path; no authority separation; raw transcripts interpolated into prompts; the auditor is stubbed to PASS. The reachable injection channel is a **write** channel: the world-writable prompt corpus and outbox |
+| S18 | Indirect prompt injection via untrusted email | VERIFIED | CRITICAL | `aiSecurity.service.ts:3-15`; `geminiClient.ts:125`; `multiAgentReplySystem.ts:299-303`, `:445`; `firestore.rules:5` | **Note corrected 2026-09-12** (the grade was already VERIFIED; this text still read "no defence exists on any live path"). `lib/promptAssembly.ts` is the control: instructions and untrusted material travel in different API fields, fenced with a per-request nonce, and a runtime assertion refuses to build a request whose instruction contains the content. The TRIPWIRE was the weak part — two detectors that disagreed, one of which decided, catching one of eight trivial evasions of a single phrase — and is now one normaliser and one signature list in `server/domain/promptInjection.ts`, with the phrases it CANNOT catch recorded as executable data. The dead sanitiser beside the live detector is deleted |
 | S19 | SSRF / outbound URL fetching | VERIFIED | MEDIUM | `gmail.service.ts:49,64,151`; `actionGateway.ts:272,287`; `calendar.service.ts:44`; `server/lib/httpClient.ts` (`fetchWithTimeout`, the only bare `fetch` in `server/`); `server/services/gmail.service.ts` (`isValidHistoryId`); `server/workers/outbox.worker.ts` (`processing` re-entrancy guard); `historySync.invariant.test.ts` | Classic SSRF is **not reachable**: all 6 fetch hosts are string literals on `googleapis.com`. **This row was stale and is corrected 2026-09-07 (§1u):** every provider call has gone through `fetchWithTimeout` since P0.5 and the un-awaited `setInterval` has had a re-entrancy guard since P0.9 — the "zero fetch timeouts" evidence no longer holds. The one live item, attacker-controlled `historyId` interpolated into a URL from an unauthenticated webhook, is now **validated** (unsigned decimal or refuse) as well as encoded. **Remainder: none of it exercised against a live provider or a genuinely hung socket** |
 | S20 | Fact provenance, temporal validity, supersession | VERIFIED | CRITICAL | `db/schema.ts:127-145`; `inboundPipeline.ts:88-101`; `models.ts:401-412` | **Nothing on a live path writes provenance.** The only fact write hard-deletes all prior facts, sets no provenance column, and hits the throwing Drizzle proxy; the live memory object is a flat key→value map; no Firestore fact collection exists. The declared bitemporal schema is aspirational, which the rubric grades NOT_STARTED |
 | S21 | Deterministic context selection and context-ID recording | VERIFIED | HIGH | `multiAgentReplySystem.ts:296`, `:319`; `salesDecisionEngine.ts:584`, `:604-607`; `db/schema.ts:221-228` | Live path concatenates the entire thread with no bound; `knownRelevantFacts` is a 2-item literal; the one ledger read passes an email as a contactId and is wrapped in `catch(e){}`; no context ids recorded |
 | S22 | AI run reproducibility (`ai_run_logs`) | PARTIAL | HIGH | `db/schema.ts:221-228`; `geminiClient.ts:109`, `:139-145`; `server.ts:150`; grep `promptVersion\|schemaVersion\|policyVersion\|tokenUsage\|usageMetadata\|costUsd\|fallbackUsed` over `server/**/*.ts` → **zero hits**; grep `ai_run_logs\|aiRunLogs` → 6 hits, all declarations/reads, **zero writers** | **This row was stale and is corrected 2026-09-07 (§1u):** `writeRunLog` has written a row per inbound run since §1p, carrying every model actually called, per-call prompt hashes, the context hash and manifest, token usage with an explicit partial flag, and the fallback disposition. **Remainder: no prompt VERSION, schema version or policy version** (the same residue S21 carries); cost is recorded as `null` and enforced nowhere; and the PostgreSQL `ai_run_logs` table still has no writer — the rows go to Firestore |
 | S23 | Agent abstention | VERIFIED | CRITICAL | `independentAuditor.ts:30`; `geminiClient.ts:145`; `multiAgentReplySystem.ts:518`; `policyEngine.ts:51` | Landed 2026-09-07 (§1v). `ModelOutcome<T>` is a discriminated union a caller must branch on; `generateJsonOrAbstain` replaces the silent substitution on the live drafting and extraction paths; the 107-line canned reply template and the 82 lines of fact-inventing heuristics are deleted; an abstained extraction records ZERO facts; `ABSTAINED` is a disposition distinct from `SUPPRESSED`. Three dead agents whose fallbacks fabricated emails, a confidence of 0.88 and a `policyStatus: "ALLOW"` were removed. **Remainder: 10 legacy `safeGenerateJSON` call sites still substitute silently (held by a ratchet; 11 -> 10 in §1w); no caller ever SETS a confidence, so `LOW_CONFIDENCE` and `CONFLICTING_EVIDENCE` are declared and unreachable, and the policy engine confidence gate still has nothing to read** |
 | S24 | Specialist disagreement detection and resolution | VERIFIED | CRITICAL | `server/domain/adjudication.ts`; `independentAuditor.ts`; `inboundPipeline.ts` (the audit step); `adjudication.invariant.test.ts` | Landed 2026-09-07 (§1w). `adjudicate` combines findings by worst-severity with no accumulator and no threshold — tested monotone over 81 ordered subset pairs and non-compensatory in both directions. `reconcile` has no majority, tie-break, first-wins or confidence rule, and `consulted: false` carries no value, so an unasked specialist cannot be represented as an agreeing one. `specialistsRequired`, written at three sites and read at none, has its first reader and fails closed. The auditor now runs on the live path; its safety record is tri-state and derived; its two "independent" price checks were **measured identical over 1,350 drafts (0 disagreements)** and collapsed to one. A dead second reply gate that forced a detected phone violation to `PASS` was deleted. **Remainder: no specialist agent is invoked on any live path, so no two opinions are yet produced — what the check proves today is that the system knows it has not asked** |
-| S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts` (`quoteAvailability`) | No quote is ever written; the single read passes an email as a contactId inside an empty `catch`. The auditor no longer penalises a reply for OMITTING the list price (P1.7), and since §1w it refuses to clear a stated amount when quotes were not looked up: `quote: null` used to mean both "this customer has no quote" and "nobody looked", and the live pipeline — whose context bundle records `QUOTE` as unavailable — was the caller that had not looked, so list pricing was being authorised for customers who may hold a negotiated one |
-| S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | PARTIAL | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | No campaign execution engine exists; none of the 14 required guards is implemented; a reply does not stop the sequence because both stop mechanisms query an empty Postgres |
+| S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts` (`quoteAvailability`) | **Note corrected 2026-09-12.** No quote is ever written, which is the row's substance and is unchanged. The checkout amount is configuration with no default (§1ac). `PAYMENT_CREATE` no longer "falls through to Unsupported action type": it refuses BY NAME with `UNSUPPORTED_ACTION`, terminally rather than through five retries, and a ninth ActionType is now a compile error. That is a correct refusal, not a payment path — nothing in the repository dispatches `PAYMENT_CREATE`, so what is missing is the capability, not a fix to one that exists |
+| S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | PARTIAL | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | **Note corrected 2026-09-12.** It read "none of the 14 required guards is implemented"; all fourteen are in `server/domain/campaignSafety.ts` and `evaluateCampaignSafety`/`maySend` are called on the live dispatch path in the gateway, and the `campaign_recipients` table exists with its (org, campaign, contact) unique constraint. Still PARTIAL for the reason that matters: **there is no campaign execution engine** — nothing enrols a contact, advances a sequence or schedules a step, so the guards protect sequences that cannot run |
 
 | S27 | Deliverability: sender identity health and fabricated metrics | PARTIAL | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
 | S28 | Bounce, DSN and automated-mail classification before replying | VERIFIED | CRITICAL | `inboundPipeline.ts:112`; `models.ts:814-834`; `salesDecisionEngine.ts:133-134`; `schema.ts:122` | Landed 2026-09-07 (§1t). `classifyAutomation` reads DSN fields, `multipart/report`, `X-Failed-Recipients`, null `Return-Path`, `List-*`, RFC 3834 `Auto-Submitted`, `Precedence` and whole role local-parts — never subject prose. Only `NO_AUTOMATION_MARKERS` permits a reply, and the gate runs BEFORE the first model call. A permanent (5.x.x) bounce writes `hardBounced`, the suppression flag the gateway already read and nothing ever wrote. **Remainder: no complaint/feedback-loop handling, and an out-of-office carrying no headers is still replied to** — deliberately, because a subject regex is prose-classification |
@@ -3760,7 +3945,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S37 | AI and provider cost control | PARTIAL | CRITICAL | `workflowBudgets.ts:10-17` vs `aiSafety.service.ts:13-20`; `inboundPipeline.ts:117`; `salesDecisionEngine.ts:35-40` | Two conflicting budget definitions; the one call site feeds hardcoded literals so no limit can trip; no per-tenant/daily/monthly budget; the cost breaker is never tripped by any code |
 | S38 | Recovery console / safe operator tooling | VERIFIED | CRITICAL | `outbox.routes.ts:13,20-38`; `server.ts:337` vs `:560`; `killSwitch.controller.ts:15`; live probe `GET /api/outbox` → 500 | **There is no operator tooling — there is operator-tooling-shaped UI.** The console reads a store the queue does not live in; the kill switch is a stub that returns no `circuitBreaker` field, so the panel crashes; there is no retry, requeue or dead-letter of any kind; operator actions are unaudited and unauthenticated |
 | S39 | Monolith: ~75 route registrations against empty decomposition folders | PARTIAL | CRITICAL | `server.ts:309-344`, `:760-826`, `:62`, `:193-195` | ~70 of ~75 endpoints inline; controller and repository layers are 100% dead; ~30 hardcoded success stubs; zero request validation; webhooks registered only in the production branch |
-| S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | PARTIAL | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | Four React modules value-import a server agent (only esbuild elision keeps `@google/genai` and the API-key read out of the bundle); two real cycles; no lint rule, no dependency-cruiser, no ESLint |
+| S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | VERIFIED | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | **Closed 2026-09-12.** `AICommandResult` and `AICommandPlanStep` moved to `shared/domain/growthCommand.ts`, so the four React modules that imported a server agent to name them no longer do. No file under `src/` imports from `server/` — asserted over every `.ts`/`.tsx` in the tree by `server/tests/uiTypes.invariant.test.ts`, with the rule proved against the four imports it was written for. Only esbuild eliding an unused value import had kept `@google/genai` and its API-key read out of the browser bundle |
 | S41 | Adapter contracts | VERIFIED | HIGH | `server/providers/types.ts`; `gmail.service.ts` (`implements EmailProvider, RefreshableCredential`) | `EmailProvider`, `CalendarProvider`, `ProviderAdapter` and `RefreshableCredential` now exist, and Gmail is checked against the contract by the compiler (renaming `providerName` yields TS2420 — verified by mutation). `CalendarProvider` implemented 2026-09-07 (§1s) by `GoogleCalendarService`, and the compiler holds it — renaming `checkAvailability` fails `tsc`, measured by mutation. **Remainder: Stripe, DocuSign and LinkedIn have no adapter and no interface**, and `PAYMENT_CREATE` / `SIGNATURE_SEND` / `EXTERNAL_MESSAGE_SEND` / `CALENDAR_UPDATE` / `CALENDAR_CANCEL` all still fall through the dispatch switch to `Unsupported action type` |
 | S42 | Chaos / fault-injection across the autonomous send path | VERIFIED | CRITICAL | `db/index.ts:48-51`; `outbox.worker.ts:49,134-137`; `gmail.service.ts:151-167`; `geminiClient.ts:139-145` | Zero fault-injection tests; every one of the 15 required failure modes is unhandled — DB down, mid-sequence commit failure, post-send crash, timeout, 401, 429, 500, malformed AI JSON, duplicate/out-of-order webhook, concurrent claim, concurrent human edit |
 | S43 | Outbox transaction boundaries: atomic claim, crash recovery, duplicates | VERIFIED | CRITICAL | `outbox.service.ts:47-62`; `outbox.worker.ts:23,95,120`; `schema.ts:147-156` | The "claim" is a read; no lease, no CAS, no transaction, no attempt counter, no re-entrancy guard; producer writes Postgres while consumer reads Firestore. **Store split closed 2026-09-08 (1x)** — one database, one transaction manager, and the claim now runs under SERIALIZABLE with a proven single winner; the lease, attempt counter and re-entrancy guard are still absent |
