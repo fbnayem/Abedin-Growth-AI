@@ -321,6 +321,11 @@ export class OutboxWorker {
              } else if (result.errorCode === 'PROVIDER_NOT_CONFIGURED') {
                 // Terminal: no amount of retrying creates a credential.
                 await outboxService.markFailed(orgId, job.id, `PROVIDER_NOT_CONFIGURED: ${result.error}`, true);
+             } else if (result.errorCode === 'UNSUPPORTED_ACTION') {
+                // Terminal: the gateway has no executor for this action type. Backoff cannot
+                // produce one, and the job would otherwise retry to exhaustion before
+                // dead-lettering with the same message five attempts later.
+                await outboxService.markFailed(orgId, job.id, `UNSUPPORTED_ACTION: ${result.error}`, true);
              } else if (result.errorCode === 'UNRECONCILABLE_SEND') {
                 // S32 — terminal. The send was refused because it could not be given an
                 // identity the provider could later be asked about, and retrying reproduces

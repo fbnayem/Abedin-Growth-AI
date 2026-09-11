@@ -346,9 +346,47 @@ export class ActionGateway {
         case ActionType.CALENDAR_CREATE:
           result = await this.executeCalendarCreate(request);
           break;
-        // Other cases stubbed for future
-        default:
-          result = { success: false, error: 'Unsupported action type' };
+
+        // THE SIX THAT ARE DECLARED AND NOT IMPLEMENTED.
+        //
+        // They were one `default: { success: false, error: 'Unsupported action type' }`, which is
+        // three separate problems. The refusal carried no `errorCode`, so the outbox worker fell to
+        // its `else` branch, threw, and RETRIED — backoff after backoff, for an action type that
+        // will never succeed by being attempted again. It named nothing, so an operator reading the
+        // queue could not tell which type was unsupported. And `isIrreversible`, `providerFor` and
+        // `capabilityFor` all carry full branches for these six, so the gateway reads as though it
+        // supports them; only this switch says otherwise, and it said it in five words.
+        //
+        // Nothing dispatches them today — `EMAIL_SEND` from the outbox worker and `CALENDAR_CREATE`
+        // from POST /api/meetings are the only two dispatch sites in the repository — so this
+        // changes no live path. It changes what happens the day somebody adds a third.
+        case ActionType.CALENDAR_UPDATE:
+        case ActionType.CALENDAR_CANCEL:
+        case ActionType.PAYMENT_CREATE:
+        case ActionType.SIGNATURE_SEND:
+        case ActionType.CRM_UPDATE:
+        case ActionType.EXTERNAL_MESSAGE_SEND:
+          result = {
+            success: false,
+            errorCode: 'UNSUPPORTED_ACTION',
+            error:
+              `${request.actionType} is declared on the gateway and has no implementation, so ` +
+              'nothing was attempted. Retrying cannot change that: it needs an executor, not ' +
+              'another attempt.',
+          };
+          break;
+
+        default: {
+          // A NEW ActionType reaches here only if nobody classified it. `never` makes that a
+          // COMPILE error rather than a runtime message — which is the difference between finding
+          // out while adding the type and finding out from a queue full of retries.
+          const unclassified: never = request.actionType;
+          result = {
+            success: false,
+            errorCode: 'UNSUPPORTED_ACTION',
+            error: `Unclassified action type: ${String(unclassified)}.`,
+          };
+        }
       }
 
       // AFTER the side effect, so this may not change the verdict: reporting failure because the
