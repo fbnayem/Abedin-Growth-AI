@@ -1,5 +1,8 @@
 node_modules/
-build/
+# Root-only. `build/` unanchored also matched server/build/, which is SOURCE (provenance, schema
+# compatibility, the route table, the OpenAPI generator): three live modules server.ts imports
+# were never committed and a fresh clone did not compile. Found 2026-09-12.
+/build/
 dist/
 coverage/
 .DS_Store
