@@ -3921,6 +3921,94 @@ On the live instance, as the owner role, at commit 7646af3: `ai_run_logs` held 0
 Mutation: 8/9, then 4/4 once the surviving gate became a function. Gate: 79 suites, 2,002 tests. A new dev dependency, `@electric-sql/pglite`,
 with the advisories count unchanged at six.
 
+### S11 — the API described by the server that serves it
+
+The remainder was an OpenAPI document and a contract test against one. A document written by
+hand is a second copy of the route table, and second copies drift, so the document is generated
+and the suite regenerates it: paths and methods come from what `server.ts` and the seven mounted
+routers register, read by `server/build/routeTable.ts`, which refuses a registration it cannot
+read rather than leaving it out; request bodies come from one contract registry — the three strict
+routes and the five `parseOrRespond` routes, unified in `server/build/apiSurface.ts` — emitted as
+JSON Schema by zod; the error response is the one envelope every error already goes through.
+The committed copy is served at `GET /api/openapi.json`; a deployment that did not ship it gets
+a 503 that says so, because the bundled server carries no source to regenerate from and an empty
+document would read as "no routes".
+
+What makes it a contract rather than a brochure is what the document says about itself and what
+the suite holds. Coverage is stated in the artefact: 87 API routes at closure (88 since S27 added
+`/api/deliverability` the same day), 8 with a request contract, 16 that read a body no schema describes, 2 raw, 0 success responses described. The sixteen are
+named in the suite, a list that may shrink and not grow. Each contract in the document is
+checked byte-for-byte against what zod emits for the schema the handler uses; each schema is
+checked to refuse a non-object and, where strict, an unknown field; and each registry claim is
+checked against the handler's own text, so a route cannot be documented as validated while being
+nothing of the kind.
+
+The extractor's census caught two defects in the extractor before the document shipped. A
+regex comment stripper opened a block comment at the `/*` inside the string `'*/*'` and blanked
+the eighty lines holding the router mounts — the trap recorded in memory an hour earlier, met
+again in new code; it is a scanner now, and the suite feeds it that string. And a helper declared
+between two registrations was read as part of the earlier route, which made two `GET`s look like
+body readers; a handler is now read to its own closing brace, or followed by name.
+
+Live at commit 860ec1a: `GET /api/openapi.json` served the committed document (HTTP 200, `x-coverage` identical to the file), and `POST /api/settings` with an unknown field was refused with `VALIDATION_ERROR` naming the key — the strict contract the document declares, enforced.
+
+Mutation: 10/10, on a clean tree (an earlier run, made while an unrelated failing suite was in the tree, was discarded). Gate: 80 suites, 2,042 tests.
+
+### S27 — deliverability: the sending domain, judged from its DNS, before the network
+
+The remainder was three things, and two of them were already answered or unanswerable here, so
+the first honest move was to say so in the artefact rather than build a second mechanism. A
+bounce webhook: in a Gmail world a bounce is inbound mail, and S28 classifies it from its DSN
+headers and writes `hardBounced`, which the gateway refuses to send past. A complaint feedback
+loop: Gmail provides none per sender; Google Postmaster Tools reports a domain's spam rate and
+needs that domain verified in a console — the response at `GET /api/deliverability` names it as
+console work. What was buildable is the third: whether the domain this tenant sends from is set
+up to be believed.
+
+`server/domain/senderIdentity.ts` is a pure evaluator over DNS answers, tested on the record
+shapes Google publishes: SPF (one `v=spf1` record — two is INVALID, a permanent error at every
+receiver under RFC 7208 §3.2 — with the `all` qualifier read), DMARC (`v=DMARC1` at `_dmarc`, a
+`p=` policy required, `rua` noted when absent), DKIM (a key at each configured selector, `google`
+by default; an empty `p=` is a revocation). The rules that matter most are about what is not
+known: a lookup that failed is UNKNOWN and never MISSING, because "we could not ask" and "it is
+not there" are different facts and only the second is the operator's to fix; and UNKNOWN does not
+permit sending, for the reason the kill switch treats an unreadable state as paused. WEAK — a
+`p=none`, an SPF ending `+all`, no DKIM key found — proceeds with the reasons said. The service
+beside it is the one adapter that touches DNS: NXDOMAIN and ENODATA arrive as answers, a timeout
+as a failure, a posture is cached ten minutes and a failure one, and the domain judged is the
+Gmail connection's account, because the settings address reaches only prompts.
+
+The gate lives in the gateway's capability pre-flight, after the scopes: a connection may hold
+the send scope and still send from a domain no receiver can authenticate, and the pre-flight is
+the question "may this connection perform EMAIL_SEND", tested by calling it directly. The refusal
+is `SENDER_IDENTITY_UNVERIFIED`, with the reasons and where to look. Putting the check there
+surfaced a latent trap in the pre-flight: its connection variable, assigned only inside a
+callback, narrowed to `never` after the null check and had compiled only because `never` passes
+as an argument — reading a property off it did not. It is collected and picked now.
+
+Live at commit 7aa4a15: the tenant view reported no sending domain for this tenant (no Gmail connection with an account email) — stated, not passed; this host's configured resolver refused Node's direct DNS queries and every lookup came back UNKNOWN, which is the fail-closed path observed rather than a defect, and is why `DNS_RESOLVERS` exists; through `DNS_RESOLVERS=8.8.8.8` the evaluator read real records — `github.com` READY; `gmail.com` SPF `redirect=` (the rule real data corrected) and DMARC `p=none`; `google.com` and `example.com` READY on SPF and DMARC, with DKIM verdicts reflecting selectors guessed for the probe, not theirs.
+
+Mutation: 9/9, then 3/3 for the resolver override and the redirect rule. Gate: 83 suites, 2,086 tests.
+
+### The tree a clone would build was not this one
+
+Found while committing S11, and worth its own entry because it is the kind of defect this document
+exists to catch and could not. `.gitignore` carried an unanchored `build/`, meant for a build output
+directory that does not exist here, and it also matched `server/build/` — a source directory.
+`provenance.ts`, `schemaCompatibility.ts` and `health.ts` were written there in earlier sessions,
+are imported by `server.ts`, are cited by rows graded VERIFIED, and were never in git. A fresh
+clone of this repository did not compile. Every gate in this document — the type checker, the
+guardrails, the suites, the mutation runs, the live probes — ran in the one working tree that had
+the files, so every gate passed.
+
+Two things follow. The `.gitignore` pattern is root-only now and the modules are committed
+(`a391ad4`); S1's generated code graph carries the invariant that every live module is tracked by
+git, so a directory cannot again be both live and ignored. And a claim in this document is
+corrected: S49 counts a CI workflow as evidence, and this branch has no upstream and has never been
+pushed, so that workflow has never run on it. The row is annotated rather than re-graded — what
+the code does is as the row says; what "CI" rested on was a file, not a run — and the annotation
+is where somebody reading the row will see it.
+
 ---
 
 ## 2. Executive Summary
@@ -3929,13 +4017,13 @@ with the advisories count unchanged at six.
 
 | State | Count | Sections |
 |---|---:|---|
-| `VERIFIED` | **42** | S2, S3, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
+| `VERIFIED` | **44** | S2, S3, S5, S6, S7, S8, S9, S10, S11, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S27, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
 | `IMPLEMENTED_UNVERIFIED` | **0** | — |
-| `PARTIAL` | **7** | S1, S4, S11, S25, S26, S27, S39 |
+| `PARTIAL` | **5** | S1, S4, S25, S26, S39 |
 | `NOT_STARTED` | **0** | — |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-42 + 0 + 7 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad and §1ae. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
+44 + 0 + 5 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad and §1ae. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
 
 | Severity | Count |
 |---|---:|
@@ -4023,7 +4111,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S8 | Inbound version stamping and draft staleness | VERIFIED | CRITICAL | `outbox.worker.ts:69`; `aiSafety.service.ts:25-34`; `inboundPipeline.ts:131-144` | **No staleness guard is on a live path.** The wall-clock comparison queries Postgres, which the Firestore write path never populates, so it evaluates zero rows and always passes; the version implementation has no callers and reads a field with no writer. Neither mechanism can ever return "stale" |
 | S9 | Immutable approval digest and re-verification at send time | VERIFIED | CRITICAL | `outbox.routes.ts:20-28`; `OutboxView.tsx:32`; `db/schema.ts:147-156` | No hashing code exists repo-wide; approval is a status string; no re-check at send; `payload` is mutable while approval persists |
 | S10 | Audit logging fail-closed on the Action Gateway | VERIFIED | CRITICAL | `actionGateway.ts:145-161`, `:54`, `:91`; `firestore.rules:5` | **Closed 2026-09-12.** The previous grade rested on "logAction refuses rather than swallowing, and the dispatch path depends on it" — which the code refuted: `if (!store) return;`, a swallowing `catch`, and a `void` return no caller could inspect. It now returns whether it committed; PROPOSED and DISPATCHING are GATES (a failure refuses the dispatch with `AUDIT_UNAVAILABLE`, carrying no `blockedReason` so the worker retries rather than dead-lettering a send that never happened); a post-execution failure may not flip the verdict and sets `auditRecorded: false` instead (§32). Events are append-only via `addDoc` with a sequence, a payload FINGERPRINT rather than the payload, and the idempotency key. `GET /api/actions/:actionId/trail` is the reader it never had. `server/tests/actionAudit.invariant.test.ts`; 14 mutants, 14 killed |
-| S11 | API contract registry (OpenAPI / runtime validation / contract tests) | PARTIAL | HIGH | `server.ts:115`, `:133`, `:462`, `:486`; `emailUnderstanding.agent.ts:2` | No OpenAPI; zod's only import is in a dead file; six handlers spread `req.body` into Firestore; the nine imported domain types are never applied to any handler |
+| S11 | API contract registry (OpenAPI / runtime validation / contract tests) | VERIFIED | HIGH | `server.ts:115`, `:133`, `:462`, `:486`; `emailUnderstanding.agent.ts:2` | **Closed 2026-09-12.** The note here was stale in every clause (zod is imported live in four modules; the six `req.body` spreads are gone and `check-no-mass-assignment` holds them gone). The remainder as re-graded on 2026-09-08 — no OpenAPI document, no contract test against one — is closed. `docs/production/openapi.json` is GENERATED: paths and methods from the route table `server/build/routeTable.ts` reads out of `server.ts` and the seven mounted routers (refusing a registration it cannot read rather than omitting it), request bodies from the one contract registry `server/build/apiSurface.ts` (the three strict `BODY_SCHEMAS` routes plus the five `parseOrRespond` routes), emitted as JSON Schema by zod itself, the error response the one envelope every error goes through. Served at `GET /api/openapi.json` from the committed copy (a deployment without the file gets a 503 that says so, never an empty document). `openapi.invariant` (35) regenerates the document and refuses drift; matches document to route table in both directions; checks each contract byte-for-byte against what zod emits and that each schema refuses a non-object and, where strict, an unknown field; checks each registry claim against the handler's own text; and NAMES the sixteen routes that read a body no schema describes, a list that may shrink and not grow. The document states its own coverage: 87 API routes at closure (88 since S27 added `/api/deliverability` the same day), 8 with a request contract, 16 without, 2 raw, 0 success responses described — the last two figures are the remainder, and they are in the artefact, not in a note. Live at commit 860ec1a: `GET /api/openapi.json` served the committed document (HTTP 200, `x-coverage` identical to the file), and `POST /api/settings` with an unknown field was refused with `VALIDATION_ERROR` naming the key — the strict contract the document declares, enforced. Mutation: 10/10, on a clean tree (an earlier run, made while an unrelated failing suite was in the tree, was discarded). Two defects in the extractor were caught by its own census before it shipped: a regex comment stripper ate the router mounts on the string `'*/*'` (the trap recorded an hour earlier), and a helper declared between two routes was read as part of the earlier one |
 | S12 | Error envelope (stable codes, requestId, no raw leakage) | VERIFIED | CRITICAL | `server.ts:109` (×32); `actionGateway.ts:97`; `server/middleware/auth.ts:47` | 32 handlers return raw `e.message` at 500; 11 of 15 required codes absent; no requestId; no error middleware; send-safety decided by substring-matching error text |
 | S13 | Provider capability model | VERIFIED | CRITICAL | `server/lib/capabilities.ts`; `actionGateway.ts` (`checkProviderCapability` pre-flight); `server.ts` (oauth record) | Scopes are recorded at consent and checked BEFORE dispatch; an unrecorded grant is refused, as is a datastore read that failed (§14). The Gmail/Calendar conflation is resolved by scopes rather than by provider name. Gmail refresh flow implemented. **Remainder: every existing connection has no scopes recorded and will be refused until reconnected** — deliberate, and an operator action |
 | S14 | UNKNOWN != PERMITTED (consent / jurisdiction defaults) | VERIFIED | CRITICAL | `actionGateway.ts:170-171`, `:177`, `:185`; `outreachPolicy.ts:20` | Unknown country → `'US'`, unknown consent → `true`; both block rules neutered by hardcoded `isB2B: true`; the only fail-closed policy file is dead |
@@ -4040,7 +4128,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S25 | Quotes / quote snapshots vs public pricing | PARTIAL | HIGH | `db/schema.ts:284-292`; `salesDecisionEngine.ts:584`, `:663`; `independentAuditor.ts` (`quoteAvailability`) | **Note corrected 2026-09-12.** No quote is ever written, which is the row's substance and is unchanged. The checkout amount is configuration with no default (§1ac). `PAYMENT_CREATE` no longer "falls through to Unsupported action type": it refuses BY NAME with `UNSUPPORTED_ACTION`, terminally rather than through five retries, and a ninth ActionType is now a compile error. That is a correct refusal, not a payment path — nothing in the repository dispatches `PAYMENT_CREATE`, so what is missing is the capability, not a fix to one that exists |
 | S26 | Campaign contact safety (suppression, caps, quiet hours, reply-stops) | PARTIAL | CRITICAL | `src/App.tsx:710-716`; `actionGateway.ts:49-107`; `outbox.worker.ts:50,57-73` | **Note corrected 2026-09-12.** It read "none of the 14 required guards is implemented"; all fourteen are in `server/domain/campaignSafety.ts` and `evaluateCampaignSafety`/`maySend` are called on the live dispatch path in the gateway, and the `campaign_recipients` table exists with its (org, campaign, contact) unique constraint. Still PARTIAL for the reason that matters: **there is no campaign execution engine** — nothing enrols a contact, advances a sequence or schedules a step, so the guards protect sequences that cannot run |
 
-| S27 | Deliverability: sender identity health and fabricated metrics | PARTIAL | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | No SPF/DKIM/DMARC, quota, bounce or complaint tracking; no open pixel, click redirect or bounce webhook; delivered/opened/clicked figures are seeded, sinusoidal, or hardcoded JSX |
+| S27 | Deliverability: sender identity health and fabricated metrics | VERIFIED | CRITICAL | `seedLeadsGenerator.ts:681-703`; `server.ts:598-599`; `InboxView.tsx:2023,2719,2722`; `LeadDetailModal.tsx:908,988` | **Closed 2026-09-12, with two of its three parts answered elsewhere and said so.** The note here described seeded, sinusoidal figures that §1u removed and a guardrail keeps removed. What was left: no SPF/DKIM/DMARC checking, no bounce webhook, no complaint feedback loop. `server/domain/senderIdentity.ts` is the checking — a pure evaluator over DNS answers: SPF (one `v=spf1` record; two is INVALID per RFC 7208 §3.2; the `all` qualifier read), DMARC (`v=DMARC1` at `_dmarc`, `p=` required, `rua` noted), DKIM (a key at each configured selector, `google` by default; an empty `p=` is a revocation). A lookup that FAILED is UNKNOWN and never MISSING; UNKNOWN and MISSING refuse, WEAK (p=none, +all, no DKIM key) proceeds with the reasons said. `server/services/deliverability.service.ts` is the one adapter that touches DNS: NXDOMAIN and ENODATA are answers, a timeout is a failure, three-second limit, posture cached ten minutes and a failure one. The domain judged is the tenant's Gmail connection account — the settings address reaches only prompts. The gateway's capability pre-flight consults it after the scopes and refuses with `SENDER_IDENTITY_UNVERIFIED`; `GET /api/deliverability` shows the same verdict with its reasons. A bounce webhook: bounces are inbound mail, classified from DSN headers by S28, which writes `hardBounced` — there is no second mechanism to build. A complaint feedback loop: Gmail provides none per sender; Google Postmaster Tools needs the domain verified in that console — named as console work in the response itself. Live at commit 7aa4a15: the tenant view reported no sending domain for this tenant (no Gmail connection with an account email) — stated, not passed; this host's configured resolver refused Node's direct DNS queries and every lookup came back UNKNOWN, which is the fail-closed path observed rather than a defect, and is why `DNS_RESOLVERS` exists; through `DNS_RESOLVERS=8.8.8.8` the evaluator read real records — `github.com` READY; `gmail.com` SPF `redirect=` (the rule real data corrected) and DMARC `p=none`; `google.com` and `example.com` READY on SPF and DMARC, with DKIM verdicts reflecting selectors guessed for the probe, not theirs. Fixing the pre-flight for this surfaced a latent trap: its connection variable, assigned only inside a callback, narrowed to `never` after the null check and had compiled only because `never` passes as an argument; it is collected now. Mutation: 9/9, then 3/3 for the resolver override and the redirect rule. `senderIdentity.invariant` (18), `deliverability.invariant` (16), `senderIdentityGate.invariant` (12) |
 | S28 | Bounce, DSN and automated-mail classification before replying | VERIFIED | CRITICAL | `inboundPipeline.ts:112`; `models.ts:814-834`; `salesDecisionEngine.ts:133-134`; `schema.ts:122` | Landed 2026-09-07 (§1t). `classifyAutomation` reads DSN fields, `multipart/report`, `X-Failed-Recipients`, null `Return-Path`, `List-*`, RFC 3834 `Auto-Submitted`, `Precedence` and whole role local-parts — never subject prose. Only `NO_AUTOMATION_MARKERS` permits a reply, and the gate runs BEFORE the first model call. A permanent (5.x.x) bounce writes `hardBounced`, the suppression flag the gateway already read and nothing ever wrote. **Remainder: no complaint/feedback-loop handling, and an out-of-office carrying no headers is still replied to** — deliberately, because a subject regex is prose-classification |
 | S29 | Contact/account dedup, normalization and merge | VERIFIED | HIGH | `identityResolver.service.ts:66-69`; `clientIdentityResolver.ts:9`; `server.ts:112-119`; `schema.ts:58` | Two resolvers with incompatible normalizers (one mangles real `From` headers); no plus-address or dot folding; no unique constraint and no read-before-write; **no merge operation exists at all**. *Superseded by §1f: derived ids, account creation and a transactional merge landed 2026-09-06; held at PARTIAL by the open Firestore rules and the absence of a backfill.* |
 | S30 | Time handling: UTC, IANA zones, business hours, DST, testable clock | VERIFIED | HIGH | `shared/domain/time.ts`; `schema.ts` (76 `timestamptz` cols); `server.ts` (`POST /api/meetings`); `multiAgentReplySystem.ts`; `ScheduleMeetingModal.tsx`; `calendar.service.ts` | Zone-aware hours, IANA validation (rejecting `BST`, which Intl resolves to Asia/Dhaka), `{startAtUtc, timeZone}` meetings, all 76 columns zoned, and the `datetime-local` round trip fixed — all verified at runtime. **Remainder: 99 direct wall-clock reads in `server/` are not yet routed through the injectable `Clock`,** which is injected only into the reply composer and the context bundle |
@@ -4062,7 +4150,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S46 | Feature flags | VERIFIED | CRITICAL | `actionGateway.ts:38-44`, `:109-126`, `:124`, `:326`; `salesDecisionEngine.ts:27`; `server.ts:6`, `:52`, `:81-82`, `:337` | **Half fails closed, half fails open.** The five `SAFE_MODE` booleans use `=== 'true'` and so default false — but the dispatch gate's `default: return true` (`:124`) **allows** any action type without an explicit case, and the master autonomy flag `globalAutonomousSendEnabled` is **initialised `true`** with no reachable runtime writer. Separately the SAFE_MODE snapshot is taken at module construction, before `dotenv.config()`, so `.env` never reaches the enforcement point. Flags are also process-global, boot-frozen, untenanted, unaudited; two of five gate nothing and Stripe bypasses the system entirely |
 | S47 | Readiness must verify capability, not object existence | VERIFIED | CRITICAL | `server.ts:75-94`, `:78`, `:79`, `:86`; live probe READY while `/api/outbox` → 500 | No query executed; `actionGatewayLoaded` is a hardcoded literal; none of the six required capability checks (query, migration version, worker heartbeat, provider config, auth config, secret resolvability) exists |
 | S48 | Rolling-deploy compatibility: payload versioning, migration ordering | VERIFIED | HIGH | `server/domain/outboxEnvelope.ts`; `server/workers/outbox.worker.ts`; `server/services/outbox.service.ts`; `scripts/migrate.ts`; `scripts/backfill-outbox-version.ts`; `server/tests/outboxEnvelope.invariant.test.ts` | **Versioning landed.** Every job carries `schemaVersion` and `producer`; the consumer parses the payload with a strict zod schema before the gateway sees it and dead-letters an unsupported version or a malformed payload terminally, making zero provider calls; both rolling-deploy directions are executable tests, not assertions. `npm run migrate` applies the journal over the verified TLS path. **Store split closed 2026-09-08 (1x):** producer and consumer are now the same PostgreSQL database and the same transaction manager, so a job written by the producer is a job the consumer can see. ~~Still PARTIAL: nothing yet refuses to serve when the schema is behind the build~~ — **the schema gate landed 2026-09-08 (§1aa)**: `/api/health` answers 503 and the gateway refuses irreversible actions when the applied migration count does not match the build, with UNKNOWN refusing. Still PARTIAL: the document collections are not folded into the relational tables, and the comparison is by count, so divergence at the same count is not detectable |
-| S49 | Release artifact evidence: CI, provenance, migration version, scans, doc claims | VERIFIED | CRITICAL | `server/build/provenance.ts`; `scripts/check-gates-can-fail.mjs`; `scripts/check-dependency-advisories.mjs`; `scripts/check-build-provenance.mjs`; `.github/workflows/ci.yml`; `server/tests/provenance.invariant.test.ts` | **CI, provenance and the self-defeating checks are done.** `/api/health` reports the commit and, separately, whether that commit identifies a released artifact; CI injects it and fails the build if it is unreadable. `readiness.sh` — which created the document it was checking for — is deleted, and a 15th guardrail fails on any check written so it cannot fail. Advisories are ratcheted, one lockfile. Still PARTIAL and CRITICAL: **the false PASS claims in `docs/audit-report.md` are not retracted**, and there is no SBOM, image digest, signed attestation, AI eval report, known-limitations document or rollback runbook naming a real artifact |
+| S49 | Release artifact evidence: CI, provenance, migration version, scans, doc claims | VERIFIED | CRITICAL | `server/build/provenance.ts`; `scripts/check-gates-can-fail.mjs`; `scripts/check-dependency-advisories.mjs`; `scripts/check-build-provenance.mjs`; `.github/workflows/ci.yml`; `server/tests/provenance.invariant.test.ts` | **CI, provenance and the self-defeating checks are done.** `/api/health` reports the commit and, separately, whether that commit identifies a released artifact; CI injects it and fails the build if it is unreadable. `readiness.sh` — which created the document it was checking for — is deleted, and a 15th guardrail fails on any check written so it cannot fail. Advisories are ratcheted, one lockfile. Still PARTIAL and CRITICAL: **the false PASS claims in `docs/audit-report.md` are not retracted**, and there is no SBOM, image digest, signed attestation, AI eval report, known-limitations document or rollback runbook naming a real artifact **Annotated 2026-09-12, not re-graded.** Found while committing S11: `.gitignore` had an unanchored `build/`, which matched `server/build/` — the SOURCE directory holding `provenance.ts`, `schemaCompatibility.ts` and `health.ts`, all imported by `server.ts` and all named in this row and S48. They existed only in the working tree; a fresh clone did not compile; and no gate could see it because every gate ran in the working tree. This branch has no upstream and has never been pushed, so the CI this row counts has never executed on it. The pattern is root-only now, the modules are committed (`a391ad4`), and S1's generated code graph holds the invariant that every live module is tracked. The grade stands for what the code does; what it rested on for "CI" was a workflow file, not a run. |
 
 ---
 
