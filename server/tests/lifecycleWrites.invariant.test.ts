@@ -99,9 +99,9 @@ describe('1. creation asks a question transitions cannot answer', () => {
    * to the creation object; the first status literal after it is the one being asserted.
    */
   const creations: { what: string; machine: EntityStateMachine; file: string; anchor: string }[] = [
-    { what: 'POST /api/campaigns', machine: CAMPAIGN, file: 'server.ts', anchor: 'const newCampaign = {' },
-    { what: 'POST /api/meetings', machine: MEETING, file: 'server.ts', anchor: 'id: "meet_" + Date.now(),' },
-    { what: 'POST /api/knowledge', machine: KNOWLEDGE_ITEM, file: 'server.ts', anchor: 'id: `kno_${Date.now()}`,' },
+    { what: 'POST /api/campaigns', machine: CAMPAIGN, file: 'server/routes/campaigns.routes.ts', anchor: 'const newCampaign = {' },
+    { what: 'POST /api/meetings', machine: MEETING, file: 'server/routes/meetings.routes.ts', anchor: 'id: "meet_" + Date.now(),' },
+    { what: 'POST /api/knowledge', machine: KNOWLEDGE_ITEM, file: 'server/routes/knowledge.routes.ts', anchor: 'id: `kno_${Date.now()}`,' },
   ];
 
   for (const { what, machine, file, anchor } of creations) {
@@ -157,10 +157,11 @@ describe('1. creation asks a question transitions cannot answer', () => {
     });
 
     it('the pipeline handler asks it and refuses on its answer', () => {
-      const source = strip('server.ts');
-      const start = source.indexOf('app.post("/api/pipeline"');
+      const source = strip('server/routes/pipeline.routes.ts');
+      const start = source.indexOf("pipelineRouter.post('/'");
       expect(start).toBeGreaterThan(-1);
-      const handler = source.slice(start, source.indexOf('\n  app.', start + 1));
+      const next = source.indexOf('\npipelineRouter.', start + 1);
+      const handler = source.slice(start, next === -1 ? source.length : next);
 
       expect(handler).toContain('creationState(OPPORTUNITY, input.stage)');
       expect(handler).toContain("sendError(req, res, 'VALIDATION_ERROR', creation.message)");
@@ -354,10 +355,10 @@ describe('4. the attribution gate is asymmetric', () => {
   it('and the route asks it with the directions the right way round', () => {
     // Comments stripped first: the handler's own comment quotes the old placeholder, and an
     // assertion that it is gone must not be satisfied by the sentence saying so.
-    const source = strip('server.ts');
-    const start = source.indexOf('"/api/inbox/circuit-breaker/toggle"');
+    const source = strip('server/routes/inbox.routes.ts');
+    const start = source.indexOf("'/circuit-breaker/toggle'");
     expect(start).toBeGreaterThan(-1);
-    const handler = source.slice(start, source.indexOf('\n  app.', start + 1));
+    const handler = source.slice(start, source.indexOf('\ninboxRouter.', start + 1));
 
     expect(handler).toContain("killSwitchGate(enabled ? 'RESUME' : 'PAUSE', req.user, isProduction)");
     expect(handler).toContain("sendError(req, res, 'ATTRIBUTION_REQUIRED'");

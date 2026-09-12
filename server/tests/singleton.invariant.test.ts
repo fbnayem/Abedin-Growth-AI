@@ -68,10 +68,10 @@ describe('2. the fields the writer stamps are never carried forward', () => {
 });
 
 describe('3. the handler composes the merge rather than replacing the document', () => {
-  const source = readFileSync('server.ts', 'utf8');
+  const source = readFileSync('server/lib/singletonRoutes.ts', 'utf8');
   const handler = source.slice(source.indexOf('async function writeSingleton'));
   const code = handler
-    .slice(0, handler.indexOf('\n  }'))
+    .slice(0, handler.indexOf('\n}'))
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 

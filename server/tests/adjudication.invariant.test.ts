@@ -912,6 +912,7 @@ describe('7. the code that used to be there is gone', () => {
       'server/agents/independentAuditor.ts',
       'server/agents/salesEngineTestMatrix.ts',
       'server.ts',
+      'server/routes/inbox.routes.ts',
     ]) {
       expect(readFileSync(path, 'utf8')).not.toContain('qualityControlAgent');
     }

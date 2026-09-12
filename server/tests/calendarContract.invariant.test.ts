@@ -458,7 +458,7 @@ describe('the adapter itself, driven against a stubbed transport', () => {
 describe('what the source may no longer contain', () => {
   const gateway = strip('server/gateway/actionGateway.ts');
   const calendar = strip('server/services/calendar.service.ts');
-  const server = strip('server.ts');
+  const server = strip('server/routes/meetings.routes.ts');
 
   it('the adapter declares the contract, so the compiler checks it', () => {
     expect(calendar).toContain('export class GoogleCalendarService implements CalendarProvider');

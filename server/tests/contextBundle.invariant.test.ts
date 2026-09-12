@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import {
   DEFAULTS,
   buildContextBundle,
@@ -317,8 +317,9 @@ describe('P1.8 — the defects this replaces are gone from the source', () => {
   it('the dead composer that held the only call site is gone', () => {
     const composer = readFileSync('server/agents/multiAgentReplySystem.ts', 'utf8');
     expect(composer).not.toContain('export async function executeMultiAgentReplyPipeline');
-    const server = readFileSync('server.ts', 'utf8');
-    expect(server).not.toContain('executeMultiAgentReplyPipeline');
+    for (const f of ['server.ts', ...readdirSync('server/routes').map((n) => `server/routes/${n}`)]) {
+      expect(readFileSync(f, 'utf8'), f).not.toContain('executeMultiAgentReplyPipeline');
+    }
   });
 
   it('the run log can record what the model was shown', () => {

@@ -57,7 +57,13 @@ const OWNERS: Record<string, string[]> = {
     'server/agents/pitchBattleAgent.ts',
     'server/agents/salesDecisionEngine.ts',
   ],
-  'server/gateway/actionGateway.ts': ['server.ts', 'server/workers/outbox.worker.ts'],
+  'server/gateway/actionGateway.ts': [
+    // Imports the fabricated-credential predicate; dispatches nothing.
+    'server/routes/integrations.routes.ts',
+    // The live booking path: CALENDAR_CREATE is dispatched from here.
+    'server/routes/meetings.routes.ts',
+    'server/workers/outbox.worker.ts',
+  ],
   'server/services/outbox.service.ts': [
     'server/gateway/actionGateway.ts',
     'server/routes/outbox.routes.ts',

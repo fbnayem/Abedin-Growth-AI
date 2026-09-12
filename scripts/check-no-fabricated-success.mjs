@@ -16,11 +16,16 @@
  * check that cannot tell a call site from a description of one is not a check — the P1.12
  * guardrail shipped with exactly that hole.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { relative } from 'node:path';
 
 const ROOT = process.cwd();
-const FILES = ['server.ts'];
+// S39 — the routes live in routers now; a check that read only server.ts would pass on an
+// empty file. Every router is scanned, and server.ts still, for the mounts.
+// A suite may point the scan at files of its own (CHECK_FILES=a,b) to prove the check can fail.
+const FILES = process.env.CHECK_FILES
+  ? process.env.CHECK_FILES.split(',')
+  : ['server.ts', ...readdirSync('server/routes').filter((f) => f.endsWith('.ts')).map((f) => `server/routes/${f}`)];
 
 function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
@@ -39,8 +44,20 @@ function stripComments(source) {
  * stub it exists to forbid; the block form matched only by accident of a different shape.
  * This is the same defect as the P1.5 contact guardrail and the P1.12 line-by-line scan.
  */
-const ROUTE = String.raw`app\.(?:post|put|patch|delete)\s*\(\s*["'\`][^"'\`]+["'\`]\s*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*`;
+const ROUTE = String.raw`(?:app|[A-Za-z]+Router)\.(?:post|put|patch|delete)\s*\(\s*["'\`][^"'\`]+["'\`]\s*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*`;
+const ANY_ROUTE = String.raw`(?:app|[A-Za-z]+Router)\.(?:get|post|put|patch|delete)\s*\(\s*["'\`][^"'\`]+["'\`]\s*,\s*(?:async\s*)?\([^)]*\)\s*=>\s*`;
 const SUCCESS_CALL = String.raw`res\s*\.\s*json\s*\(\s*\{\s*success\s*:\s*true[^}]*\}\s*\)`;
+/**
+ * S39 — a fixed answer is a fabricated result even when it does not say `success`.
+ *
+ * Eight handlers survived the P1.13 pass because their whole body was `res.json({ ... })` with
+ * every value a literal: `{ intentConfidence: 0.9 }`, `{ decision: "Proceed" }`, a placeholder
+ * sender identity. An operator reading 0.9 has no way to know no classifier ran. A body whose
+ * every value is a string, number or boolean literal is such an answer; one that names any
+ * identifier is computing something and is not matched.
+ */
+const LITERAL = String.raw`(?:"[^"]*"|'[^']*'|\d+(?:\.\d+)?|true|false|null)`;
+const LITERAL_ANSWER = String.raw`res\s*\.\s*json\s*\(\s*\{\s*(?:\w+\s*:\s*` + LITERAL + String.raw`\s*,?\s*)+\}\s*\)`;
 
 const PATTERNS = [
   {
@@ -50,6 +67,14 @@ const PATTERNS = [
   {
     label: 'handler block contains nothing but a success response',
     regex: new RegExp(ROUTE + String.raw`\{\s*` + SUCCESS_CALL + String.raw`\s*;?\s*\}`, 'gs'),
+  },
+  {
+    label: 'arrow body is a fixed answer (every value a literal)',
+    regex: new RegExp(ANY_ROUTE + LITERAL_ANSWER, 'gs'),
+  },
+  {
+    label: 'block body is a fixed answer (every value a literal)',
+    regex: new RegExp(ANY_ROUTE + String.raw`\{\s*` + LITERAL_ANSWER + String.raw`\s*;?\s*\}`, 'gs'),
   },
 ];
 

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CAMPAIGN, OPPORTUNITY, legalStates } from './stateMachines';
 
 /**
  * S11 — what a request body is allowed to contain, stated once.
@@ -151,10 +152,35 @@ export const companyBrainGenerateSchema = z
  * document generator, by anyone asking what the surface is. A contract that can only be
  * discovered by reading every handler is the situation this replaces.
  */
+/**
+ * S39 — a status or stage change names the state it wants and nothing else.
+ *
+ * The transition map decides whether the MOVE is legal; this decides whether the REQUEST is
+ * well-formed: the state is one the machine knows, the version (when sent in the body rather
+ * than If-Match) is a non-negative integer, and there is no other field — a body that also
+ * carried `name` or `enrolledCount` was previously ignored silently, which is how a caller
+ * comes to believe a field is writable here. Two routes serve each schema: `/status` and its
+ * older spelling `/toggle`, and PUT and POST on `/stage`.
+ */
+const stateChange = (field: string, states: string[]) =>
+  z
+    .object({
+      [field]: z.enum(states as [string, ...string[]]),
+      expectedVersion: z.number().int().nonnegative().optional(),
+    })
+    .strict();
+
+export const campaignStatusSchema = stateChange('status', legalStates(CAMPAIGN));
+export const opportunityStageSchema = stateChange('stage', legalStates(OPPORTUNITY));
+
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
   'POST /api/company-brain/generate': companyBrainGenerateSchema,
   'POST /api/settings': settingsSchema,
+  'POST /api/campaigns/:id/status': campaignStatusSchema,
+  'POST /api/campaigns/:id/toggle': campaignStatusSchema,
+  'PUT /api/pipeline/:id/stage': opportunityStageSchema,
+  'POST /api/pipeline/:id/stage': opportunityStageSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { blankComments, inlineRoutes, routeTable, openApiPath, type RouteEntry } from '../build/routeTable';
+import { blankComments, inlineRoutes, routeTable, openApiPath, handlerTextOf, type RouteEntry } from '../build/routeTable';
 import { REQUEST_CONTRACTS, CONTRACT_EVIDENCE } from '../build/apiSurface';
 import {
   buildOpenApiDocument,
@@ -163,16 +163,17 @@ describe('3. each contract in the document is what zod emits for the schema the 
 describe('4. a route the registry claims to validate really parses through its schema', () => {
   for (const route of Object.keys(REQUEST_CONTRACTS)) {
     it(`${route}`, () => {
-      const [method, expressPath] = route.split(' ');
-      const at = server.indexOf(`app.${method.toLowerCase()}("${expressPath}"`);
-      expect(at, `${route} is not registered inline`).toBeGreaterThan(-1);
-      const handler = server.slice(at, at + 2500);
+      // S39 — read from the file the route table says holds the registration.
+      const entry = table.find((r) => `${r.method} ${r.path}` === route);
+      expect(entry, `${route} is not registered`).toBeDefined();
+      const handler = handlerTextOf(entry!);
       expect(handler, `${route}: no evidence of the schema in the handler`).toMatch(CONTRACT_EVIDENCE[route]);
     });
   }
 
   it('the three contact routes share one validating helper, and it is the one the evidence names', () => {
-    expect(server).toMatch(/async function createContact\([\s\S]{0,400}parseOrRespond\(createContactSchema, req, res\)/);
+    const contacts = readFileSync('server/routes/contacts.routes.ts', 'utf8');
+    expect(contacts).toMatch(/async function createContact\([\s\S]{0,400}parseOrRespond\(createContactSchema, req, res\)/);
   });
 });
 
@@ -188,12 +189,10 @@ describe('5. the routes that read a body no schema describes are exactly these',
    */
   const RECORDED = [
     'POST /api/autonomy/:conversationId',
-    'POST /api/autopilot/settings',
     'POST /api/campaigns/generate-strategy',
     'POST /api/contacts/:survivorId/merge',
     'POST /api/csp-report',
     'POST /api/growth-command',
-    'POST /api/inbox/:id/classify',
     'POST /api/inbox/circuit-breaker/toggle',
     'POST /api/inbox/validate-phone-policy',
     'POST /api/integrations/gmail/token',

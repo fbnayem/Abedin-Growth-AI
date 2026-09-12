@@ -169,7 +169,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1303"
+        "x-source": "server/routes/reporting.routes.ts:96"
       }
     },
     "/api/autonomy": {
@@ -500,7 +500,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:892"
+        "x-source": "server/routes/autopilot.routes.ts:12"
       }
     },
     "/api/autopilot/settings": {
@@ -577,9 +577,8 @@
             "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
           }
         },
-        "x-body": "no-schema",
-        "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1932"
+        "x-body": "none",
+        "x-source": "server/routes/autopilot.routes.ts:28"
       }
     },
     "/api/autopilot/status": {
@@ -657,7 +656,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1923"
+        "x-source": "server/routes/autopilot.routes.ts:19"
       }
     },
     "/api/autopilot/toggle": {
@@ -735,7 +734,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1927"
+        "x-source": "server/routes/autopilot.routes.ts:23"
       }
     },
     "/api/campaigns": {
@@ -813,7 +812,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:813"
+        "x-source": "server/routes/campaigns.routes.ts:16"
       }
     },
     "/api/campaigns/generate-strategy": {
@@ -892,7 +891,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1561"
+        "x-source": "server/routes/campaigns.routes.ts:85"
       }
     },
     "/api/campaigns/{id}/status": {
@@ -908,6 +907,36 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "status": {
+                    "enum": [
+                      "ACTIVE",
+                      "COMPLETED",
+                      "DRAFT",
+                      "PAUSED"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "default": {
             "content": {
@@ -979,8 +1008,8 @@
             "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
           }
         },
-        "x-body": "none",
-        "x-source": "server.ts:874"
+        "x-body": "contract",
+        "x-source": "server/routes/campaigns.routes.ts:81"
       }
     },
     "/api/campaigns/{id}/toggle": {
@@ -996,6 +1025,36 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "status": {
+                    "enum": [
+                      "ACTIVE",
+                      "COMPLETED",
+                      "DRAFT",
+                      "PAUSED"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "status"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "default": {
             "content": {
@@ -1067,8 +1126,8 @@
             "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
           }
         },
-        "x-body": "none",
-        "x-source": "server.ts:875"
+        "x-body": "contract",
+        "x-source": "server/routes/campaigns.routes.ts:83"
       }
     },
     "/api/company-brain": {
@@ -1146,7 +1205,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:652"
+        "x-source": "server/routes/companyBrain.routes.ts:17"
       },
       "post": {
         "operationId": "post_api_company_brain",
@@ -1442,7 +1501,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:658"
+        "x-source": "server/routes/companyBrain.routes.ts:23"
       }
     },
     "/api/company-brain/generate": {
@@ -1577,7 +1636,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:699"
+        "x-source": "server/routes/companyBrain.routes.ts:37"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -1666,7 +1725,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:443"
+        "x-source": "server/routes/contacts.routes.ts:179"
       }
     },
     "/api/csp-report": {
@@ -1823,7 +1882,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1247"
+        "x-source": "server/routes/reporting.routes.ts:41"
       }
     },
     "/api/deliverability": {
@@ -1980,7 +2039,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1902"
+        "x-source": "server/routes/growthCommand.routes.ts:12"
       }
     },
     "/api/health": {
@@ -2058,7 +2117,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:263"
+        "x-source": "server/routes/health.routes.ts:55"
       }
     },
     "/api/inbox": {
@@ -2136,7 +2195,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:492"
+        "x-source": "server/routes/inbox.routes.ts:19"
       }
     },
     "/api/inbox/auto-reply-all": {
@@ -2214,7 +2273,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1031"
+        "x-source": "server/routes/inbox.routes.ts:52"
       }
     },
     "/api/inbox/circuit-breaker": {
@@ -2292,7 +2351,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1506"
+        "x-source": "server/routes/inbox.routes.ts:203"
       }
     },
     "/api/inbox/circuit-breaker/toggle": {
@@ -2371,7 +2430,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1115"
+        "x-source": "server/routes/inbox.routes.ts:80"
       }
     },
     "/api/inbox/cta-registry": {
@@ -2449,7 +2508,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1501"
+        "x-source": "server/routes/inbox.routes.ts:198"
       }
     },
     "/api/inbox/run-test-matrix": {
@@ -2527,7 +2586,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1539"
+        "x-source": "server/routes/inbox.routes.ts:235"
       }
     },
     "/api/inbox/sales-decision-engine/inspect": {
@@ -2605,7 +2664,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1110"
+        "x-source": "server/routes/inbox.routes.ts:69"
       }
     },
     "/api/inbox/validate-phone-policy": {
@@ -2684,7 +2743,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1488"
+        "x-source": "server/routes/inbox.routes.ts:187"
       }
     },
     "/api/inbox/{id}/auto-reply": {
@@ -2772,7 +2831,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1157"
+        "x-source": "server/routes/inbox.routes.ts:123"
       }
     },
     "/api/inbox/{id}/classify": {
@@ -2859,9 +2918,8 @@
             "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
           }
         },
-        "x-body": "no-schema",
-        "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:910"
+        "x-body": "none",
+        "x-source": "server/routes/inbox.routes.ts:45"
       }
     },
     "/api/inbox/{id}/follow-up": {
@@ -2949,7 +3007,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1188"
+        "x-source": "server/routes/inbox.routes.ts:156"
       }
     },
     "/api/inbox/{id}/generate-multi-agent-reply": {
@@ -3037,7 +3095,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1202"
+        "x-source": "server/routes/inbox.routes.ts:171"
       }
     },
     "/api/inbox/{id}/memory/refresh": {
@@ -3125,7 +3183,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1172"
+        "x-source": "server/routes/inbox.routes.ts:139"
       }
     },
     "/api/inbox/{id}/reply": {
@@ -3213,7 +3271,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:894"
+        "x-source": "server/routes/inbox.routes.ts:28"
       }
     },
     "/api/integrations/gmail/token": {
@@ -3292,7 +3350,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1401"
+        "x-source": "server/routes/integrations.routes.ts:77"
       }
     },
     "/api/investors": {
@@ -3370,7 +3428,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1355"
+        "x-source": "server/routes/contacts.routes.ts:349"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -3513,7 +3571,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:1364"
+        "x-source": "server/routes/contacts.routes.ts:358"
       }
     },
     "/api/investors/batch-generate": {
@@ -3591,7 +3649,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:762"
+        "x-source": "server/routes/contacts.routes.ts:253"
       }
     },
     "/api/knowledge": {
@@ -3669,7 +3727,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:526"
+        "x-source": "server/routes/knowledge.routes.ts:38"
       },
       "post": {
         "operationId": "post_api_knowledge",
@@ -3781,7 +3839,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:502"
+        "x-source": "server/routes/knowledge.routes.ts:14"
       }
     },
     "/api/leads": {
@@ -3859,7 +3917,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:281"
+        "x-source": "server/routes/contacts.routes.ts:17"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -4002,7 +4060,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:425"
+        "x-source": "server/routes/contacts.routes.ts:161"
       }
     },
     "/api/leads/batch-followup": {
@@ -4080,7 +4138,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1047"
+        "x-source": "server/routes/contacts.routes.ts:310"
       }
     },
     "/api/leads/batch-generate": {
@@ -4158,7 +4216,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:737"
+        "x-source": "server/routes/contacts.routes.ts:228"
       }
     },
     "/api/leads/research": {
@@ -4236,7 +4294,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:893"
+        "x-source": "server/routes/contacts.routes.ts:303"
       }
     },
     "/api/leads/{id}/email": {
@@ -4324,7 +4382,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1231"
+        "x-source": "server/routes/contacts.routes.ts:333"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -4412,7 +4470,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1062"
+        "x-source": "server/routes/contacts.routes.ts:326"
       }
     },
     "/api/linkedin-config": {
@@ -4490,7 +4548,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1095"
+        "x-source": "server/routes/integrations.routes.ts:55"
       },
       "post": {
         "operationId": "post_api_linkedin_config",
@@ -4566,7 +4624,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1096"
+        "x-source": "server/routes/integrations.routes.ts:62"
       }
     },
     "/api/linkedin/send-message": {
@@ -4644,7 +4702,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1063"
+        "x-source": "server/routes/integrations.routes.ts:15"
       }
     },
     "/api/logs": {
@@ -4722,7 +4780,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:535"
+        "x-source": "server/routes/reporting.routes.ts:13"
       }
     },
     "/api/meetings": {
@@ -4800,7 +4858,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1859"
+        "x-source": "server/routes/meetings.routes.ts:262"
       },
       "post": {
         "operationId": "post_api_meetings",
@@ -4877,7 +4935,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1705"
+        "x-source": "server/routes/meetings.routes.ts:108"
       }
     },
     "/api/meetings/brief": {
@@ -4955,7 +5013,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:968"
+        "x-source": "server/routes/meetings.routes.ts:15"
       }
     },
     "/api/meetings/{id}/process-payment": {
@@ -5043,7 +5101,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1007"
+        "x-source": "server/routes/meetings.routes.ts:44"
       }
     },
     "/api/meetings/{id}/send-recovery-email": {
@@ -5131,7 +5189,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1016"
+        "x-source": "server/routes/meetings.routes.ts:54"
       }
     },
     "/api/meetings/{id}/send-reminder": {
@@ -5219,7 +5277,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1216"
+        "x-source": "server/routes/meetings.routes.ts:70"
       }
     },
     "/api/meetings/{id}/sign-contract": {
@@ -5307,7 +5365,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:986"
+        "x-source": "server/routes/meetings.routes.ts:22"
       }
     },
     "/api/openapi.json": {
@@ -5895,7 +5953,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1376"
+        "x-source": "server/routes/contacts.routes.ts:364"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -6038,7 +6096,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:1385"
+        "x-source": "server/routes/contacts.routes.ts:373"
       }
     },
     "/api/partners/batch-generate": {
@@ -6116,7 +6174,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:787"
+        "x-source": "server/routes/contacts.routes.ts:278"
       }
     },
     "/api/pipeline": {
@@ -6194,7 +6252,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:563"
+        "x-source": "server/routes/pipeline.routes.ts:17"
       },
       "post": {
         "operationId": "post_api_pipeline",
@@ -6325,7 +6383,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:1638"
+        "x-source": "server/routes/pipeline.routes.ts:88"
       }
     },
     "/api/pipeline/{id}/stage": {
@@ -6341,6 +6399,46 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "stage": {
+                    "enum": [
+                      "CONTACTED",
+                      "DEMO_COMPLETED",
+                      "DEMO_SCHEDULED",
+                      "ENGAGED",
+                      "LOST",
+                      "MEETING_SCHEDULED",
+                      "NEGOTIATION",
+                      "NEW",
+                      "PILOT",
+                      "PROPOSAL",
+                      "PROPOSAL_SENT",
+                      "QUALIFIED",
+                      "UNSUBSCRIBED",
+                      "WON"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stage"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "default": {
             "content": {
@@ -6412,8 +6510,8 @@
             "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
           }
         },
-        "x-body": "none",
-        "x-source": "server.ts:966"
+        "x-body": "contract",
+        "x-source": "server/routes/pipeline.routes.ts:86"
       },
       "put": {
         "operationId": "put_api_pipeline_id_stage",
@@ -6427,6 +6525,46 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "stage": {
+                    "enum": [
+                      "CONTACTED",
+                      "DEMO_COMPLETED",
+                      "DEMO_SCHEDULED",
+                      "ENGAGED",
+                      "LOST",
+                      "MEETING_SCHEDULED",
+                      "NEGOTIATION",
+                      "NEW",
+                      "PILOT",
+                      "PROPOSAL",
+                      "PROPOSAL_SENT",
+                      "QUALIFIED",
+                      "UNSUBSCRIBED",
+                      "WON"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stage"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "default": {
             "content": {
@@ -6498,8 +6636,8 @@
             "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
           }
         },
-        "x-body": "none",
-        "x-source": "server.ts:965"
+        "x-body": "contract",
+        "x-source": "server/routes/pipeline.routes.ts:84"
       }
     },
     "/api/pitch-battle/simulate": {
@@ -6578,7 +6716,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:691"
+        "x-source": "server/routes/pitchBattle.routes.ts:12"
       }
     },
     "/api/readiness": {
@@ -6656,7 +6794,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:225"
+        "x-source": "server/routes/health.routes.ts:16"
       }
     },
     "/api/sender-identity": {
@@ -6734,7 +6872,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1079"
+        "x-source": "server/routes/integrations.routes.ts:32"
       },
       "post": {
         "operationId": "post_api_sender_identity",
@@ -6810,7 +6948,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1080"
+        "x-source": "server/routes/integrations.routes.ts:39"
       }
     },
     "/api/settings": {
@@ -6888,7 +7026,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:673"
+        "x-source": "server/routes/settings.routes.ts:13"
       },
       "post": {
         "operationId": "post_api_settings",
@@ -7024,7 +7162,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:679"
+        "x-source": "server/routes/settings.routes.ts:19"
       }
     },
     "/api/settings/autopilot": {
@@ -7102,7 +7240,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:969"
+        "x-source": "server/routes/settings.routes.ts:46"
       }
     },
     "/api/settings/token": {
@@ -7180,7 +7318,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:877"
+        "x-source": "server/routes/settings.routes.ts:30"
       }
     },
     "/api/signature/webhook": {
@@ -7270,7 +7408,7 @@
         },
         "x-body": "raw",
         "x-body-note": "Raw bytes: the handler verifies a provider signature over the exact body before reading it.",
-        "x-source": "server.ts:1954"
+        "x-source": "server/routes/webhooks.routes.ts:23"
       }
     },
     "/api/spend": {
@@ -7770,16 +7908,16 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:2026"
+        "x-source": "server/routes/webhooks.routes.ts:94"
       }
     }
   },
   "x-coverage": {
     "nonApiRoutesOmitted": 1,
     "rawBody": 2,
-    "readingBodyWithoutSchema": 16,
+    "readingBodyWithoutSchema": 14,
     "responsesDescribed": 0,
     "routes": 88,
-    "withRequestContract": 8
+    "withRequestContract": 12
   }
 }

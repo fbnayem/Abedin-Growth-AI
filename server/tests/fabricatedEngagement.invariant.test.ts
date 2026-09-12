@@ -34,7 +34,8 @@ import { readFileSync } from 'fs';
  */
 
 const seed = readFileSync('server/seedLeadsGenerator.ts', 'utf8');
-const server = readFileSync('server.ts', 'utf8');
+// S39 — the campaign and reporting routes, where the projections lived.
+const server = ['server/routes/campaigns.routes.ts', 'server/routes/reporting.routes.ts'].map((f) => readFileSync(f, 'utf8')).join('\n');
 const campaigns = readFileSync('src/pages/CampaignsView.tsx', 'utf8');
 const compare = readFileSync('src/pages/CampaignCompareModal.tsx', 'utf8');
 const models = readFileSync('shared/domain/models.ts', 'utf8');

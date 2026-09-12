@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { buildContextBundle, hashContext, type ContextKind } from '../domain/contextBundle';
 import type { StoredFact } from '../domain/facts';
 
@@ -194,7 +194,9 @@ describe('the dead composer is gone, and what it held has moved', () => {
 
   it('the function with two occurrences in the repository has none', () => {
     expect(composer).not.toContain('export async function executeMultiAgentReplyPipeline');
-    expect(readFileSync('server.ts', 'utf8')).not.toContain('executeMultiAgentReplyPipeline');
+    for (const f of ['server.ts', ...readdirSync('server/routes').map((n) => `server/routes/${n}`)]) {
+      expect(readFileSync(f, 'utf8'), f).not.toContain('executeMultiAgentReplyPipeline');
+    }
   });
 
   it('the validators it shared a file with are untouched — six other callers use them', () => {

@@ -33,6 +33,11 @@ export const CONTRACT_EVIDENCE: Readonly<Record<string, RegExp>> = {
   'POST /api/company-brain': /parsedBodyOr400\(req, res, 'POST \/api\/company-brain'\)/,
   'POST /api/company-brain/generate': /parsedBodyOr400\(req, res, 'POST \/api\/company-brain\/generate'\)/,
   'POST /api/settings': /parsedBodyOr400\(req, res, 'POST \/api\/settings'\)/,
+  // One handler serves both spellings, and one serves both verbs; the evidence is the same text.
+  'POST /api/campaigns/:id/status': /parsedBodyOr400\(req, res, 'POST \/api\/campaigns\/:id\/status'\)/,
+  'POST /api/campaigns/:id/toggle': /parsedBodyOr400\(req, res, 'POST \/api\/campaigns\/:id\/status'\)/,
+  'PUT /api/pipeline/:id/stage': /parsedBodyOr400\(req, res, 'PUT \/api\/pipeline\/:id\/stage'\)/,
+  'POST /api/pipeline/:id/stage': /parsedBodyOr400\(req, res, 'PUT \/api\/pipeline\/:id\/stage'\)/,
   'POST /api/knowledge': /parseOrRespond\(createKnowledgeItemSchema, req, res\)/,
   'POST /api/pipeline': /parseOrRespond\(createOpportunitySchema, req, res\)/,
   'POST /api/leads': /createContact\(req, res, /,

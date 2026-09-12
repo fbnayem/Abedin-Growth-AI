@@ -171,9 +171,9 @@ describe('3. no answer is no brain', () => {
 });
 
 describe('4. the route validates its input, and writes a stamped brain or nothing', () => {
-  const server = readFileSync('server.ts', 'utf8');
-  const at = server.indexOf('app.post("/api/company-brain/generate"');
-  const end = server.indexOf('app.post("/api/leads/batch-generate"', at);
+  const server = readFileSync('server/routes/companyBrain.routes.ts', 'utf8');
+  const at = server.indexOf("companyBrainRouter.post('/generate'");
+  const end = server.length;
   const handler = stripComments(server.slice(at, end));
 
   it('found the handler', () => {

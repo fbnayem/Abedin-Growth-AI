@@ -506,7 +506,7 @@ describe('P1.9 — time correctness', () => {
     });
 
     it('the meetings endpoint uses it', () => {
-      const server = readFileSync('server.ts', 'utf8')
+      const server = readFileSync('server/routes/meetings.routes.ts', 'utf8')
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/^\s*\/\/.*$/gm, '');
       expect(server).toContain('scheduledAt: toIsoOrNull(m.startAtUtc ?? m.scheduledTime)');
@@ -597,7 +597,7 @@ describe('P1.9 — time correctness', () => {
     });
 
     it('POST /api/meetings requires an instant with an offset and a real zone', () => {
-      const server = strip(readFileSync('server.ts', 'utf8'));
+      const server = strip(readFileSync('server/routes/meetings.routes.ts', 'utf8'));
       expect(server).toContain('startInstant = parseInstant(scheduledTime)');
       expect(server).toContain('const zoneRejection = timeZoneRejection(timeZone)');
       expect(server).toContain('isWithinBusinessHours(startInstant, DEFAULT_BUSINESS_HOURS)');
@@ -606,7 +606,7 @@ describe('P1.9 — time correctness', () => {
     });
 
     it('the meetings payload persists the zone', () => {
-      const server = strip(readFileSync('server.ts', 'utf8'));
+      const server = strip(readFileSync('server/routes/meetings.routes.ts', 'utf8'));
       expect(server).toContain('startAtUtc: new Date(startMs)');
       expect(server).toContain('timeZone: timeZone');
     });

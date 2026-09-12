@@ -436,7 +436,7 @@ describe('P1.11 — provider errors classified from structure', () => {
     });
 
     it('the OAuth record stores scopes and a refresh token', () => {
-      const server = strip(readFileSync('server.ts', 'utf8'));
+      const server = strip(readFileSync('server/routes/integrations.routes.ts', 'utf8'));
       expect(server).toContain('scopes: recordedScopes');
       expect(server).toContain('refreshToken:');
     });

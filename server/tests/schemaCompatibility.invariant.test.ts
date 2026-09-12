@@ -202,7 +202,7 @@ describe('3c. the health answer is a function of the schema state', () => {
 
 describe('4. it is wired where it matters, and only where it matters', () => {
   const gateway = readFileSync('server/gateway/actionGateway.ts', 'utf8');
-  const serverEntry = readFileSync('server.ts', 'utf8');
+  const serverEntry = readFileSync('server/routes/health.routes.ts', 'utf8');
 
   it('the gateway consults it before dispatching an irreversible action', () => {
     expect(gateway).toContain('schemaPermitsIrreversibleActions(');

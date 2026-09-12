@@ -13,10 +13,10 @@ Capability ownership is reported as *which live modules import the provider*, an
 
 | Entrypoint | Live modules reached |
 |---|---|
-| `server.ts` | 122 |
+| `server.ts` | 137 |
 | `src/main.tsx` | 62 |
 
-Live modules in total: **176**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
+Live modules in total: **192**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
 
 ## 3. Capability providers and their live importers
 
@@ -26,9 +26,9 @@ Live modules in total: **176**. Dead files: **0**. Operational-only modules: **1
 | Calendar | `server/services/calendar.service.ts` | `server/gateway/actionGateway.ts` |
 | Outbound HTTP (fetch with timeout) | `server/lib/httpClient.ts` | `server/gateway/actionGateway.ts`, `server/lib/providerError.ts`, `server/services/calendar.service.ts`, `server/services/gmail.service.ts` |
 | Model generation | `server/geminiClient.ts` | `server/agents/companyBrainAgent.ts`, `server/agents/conversationMemoryAgent.ts`, `server/agents/growthCommandAgent.ts`, `server/agents/pitchBattleAgent.ts`, `server/agents/salesDecisionEngine.ts` |
-| Document store | `server/store/index.ts` | `server.ts`, `server/build/schemaCompatibility.ts`, `server/gateway/actionGateway.ts`, `server/lib/concurrency.ts`, `server/lib/factStore.ts`, `server/lib/identityStore.ts`, `server/lib/runLog.ts`, `server/middleware/tenant.ts`, `server/services/actionTrail.service.ts`, `server/services/autonomyLock.service.ts`, `server/services/circuitBreaker.service.ts`, `server/services/deliverability.service.ts`, `server/services/draftIntegrity.service.ts`, `server/services/inboundPipeline.ts`, `server/services/outbox.service.ts`, `server/services/tenantSpend.service.ts`, `server/services/unsubscribe.service.ts`, `server/tenancy/organizations.ts`, `server/workers/outbox.worker.ts` |
+| Document store | `server/store/index.ts` | `server/build/schemaCompatibility.ts`, `server/gateway/actionGateway.ts`, `server/lib/concurrency.ts`, `server/lib/factStore.ts`, `server/lib/identityStore.ts`, `server/lib/runLog.ts`, `server/lib/singletonRoutes.ts`, `server/middleware/tenant.ts`, `server/routes/campaigns.routes.ts`, `server/routes/companyBrain.routes.ts`, `server/routes/contacts.routes.ts`, `server/routes/health.routes.ts`, `server/routes/inbox.routes.ts`, `server/routes/integrations.routes.ts`, `server/routes/knowledge.routes.ts`, `server/routes/meetings.routes.ts`, `server/routes/pipeline.routes.ts`, `server/routes/reporting.routes.ts`, `server/routes/webhooks.routes.ts`, `server/services/actionTrail.service.ts`, `server/services/autonomyLock.service.ts`, `server/services/circuitBreaker.service.ts`, `server/services/deliverability.service.ts`, `server/services/draftIntegrity.service.ts`, `server/services/inboundPipeline.ts`, `server/services/outbox.service.ts`, `server/services/tenantSpend.service.ts`, `server/services/unsubscribe.service.ts`, `server/tenancy/organizations.ts`, `server/workers/outbox.worker.ts` |
 | Relational database | `server/db/index.ts` | `server/dataStore.ts`, `server/routes/stripe.routes.ts`, `server/services/gmailHistorySync.service.ts`, `server/services/identityResolver.service.ts`, `server/services/inboundPipeline.ts`, `server/services/ledgers.service.ts`, `server/store/index.ts`, `server/workers/outbox.worker.ts` |
-| External side effects (the gateway) | `server/gateway/actionGateway.ts` | `server.ts`, `server/workers/outbox.worker.ts` |
+| External side effects (the gateway) | `server/gateway/actionGateway.ts` | `server/routes/integrations.routes.ts`, `server/routes/meetings.routes.ts`, `server/workers/outbox.worker.ts` |
 | Outbox queue | `server/services/outbox.service.ts` | `server/gateway/actionGateway.ts`, `server/routes/outbox.routes.ts`, `server/services/circuitBreaker.service.ts`, `server/services/inboundPipeline.ts`, `server/workers/outbox.worker.ts` |
 
 ## 4. Packages imported by live server modules
@@ -41,7 +41,7 @@ The server's dependency surface by importer: every package a live module outside
 | `cors` | `server.ts` |
 | `dotenv` | `server.ts`, `server/config/safeMode.ts` |
 | `drizzle-orm` | `server/dataStore.ts`, `server/db/index.ts`, `server/db/schema.ts`, `server/services/gmailHistorySync.service.ts`, `server/services/identityResolver.service.ts`, `server/services/inboundPipeline.ts`, `server/services/ledgers.service.ts`, `server/workers/outbox.worker.ts` |
-| `express` | `server.ts`, `server/lib/concurrency.ts`, `server/lib/errors.ts`, `server/lib/validation.ts`, `server/middleware/auth.ts`, `server/middleware/rateLimit.ts`, `server/middleware/securityHeaders.ts`, `server/middleware/tenant.ts`, `server/routes/actionTrail.routes.ts`, `server/routes/autonomy.routes.ts`, `server/routes/cspReport.routes.ts`, `server/routes/deliverability.routes.ts`, `server/routes/openapi.routes.ts`, `server/routes/outbox.routes.ts`, `server/routes/spend.routes.ts`, `server/routes/stripe.routes.ts`, `server/routes/unsubscribe.routes.ts`, `server/services/webhookVerification.service.ts`, `server/tenancy/orgScope.ts` |
+| `express` | `server.ts`, `server/lib/concurrency.ts`, `server/lib/errors.ts`, `server/lib/parsedBody.ts`, `server/lib/singletonRoutes.ts`, `server/lib/validation.ts`, `server/middleware/auth.ts`, `server/middleware/rateLimit.ts`, `server/middleware/securityHeaders.ts`, `server/middleware/tenant.ts`, `server/routes/actionTrail.routes.ts`, `server/routes/autonomy.routes.ts`, `server/routes/autopilot.routes.ts`, `server/routes/campaigns.routes.ts`, `server/routes/companyBrain.routes.ts`, `server/routes/contacts.routes.ts`, `server/routes/cspReport.routes.ts`, `server/routes/deliverability.routes.ts`, `server/routes/growthCommand.routes.ts`, `server/routes/health.routes.ts`, `server/routes/inbox.routes.ts`, `server/routes/integrations.routes.ts`, `server/routes/knowledge.routes.ts`, `server/routes/meetings.routes.ts`, `server/routes/openapi.routes.ts`, `server/routes/outbox.routes.ts`, `server/routes/pipeline.routes.ts`, `server/routes/pitchBattle.routes.ts`, `server/routes/reporting.routes.ts`, `server/routes/settings.routes.ts`, `server/routes/spend.routes.ts`, `server/routes/stripe.routes.ts`, `server/routes/unsubscribe.routes.ts`, `server/routes/webhooks.routes.ts`, `server/services/webhookVerification.service.ts`, `server/tenancy/orgScope.ts` |
 | `firebase-admin` | `server/firebase.ts` |
 | `pg` | `server/db/index.ts`, `server/store/index.ts` |
 | `stripe` | `server/routes/stripe.routes.ts` |
@@ -62,7 +62,7 @@ The server's dependency surface by importer: every package a live module outside
 | Module | Imported by (live) | Reached from |
 |---|---|---|
 | `server/autopilotRunner.ts` | 1 | server.ts |
-| `server/dataStore.ts` | 4 | server.ts |
+| `server/dataStore.ts` | 3 | server.ts |
 | `server/firebase.ts` | 1 | server.ts |
 | `server/geminiClient.ts` | 5 | server.ts |
 | `server/seedLeadsGenerator.ts` | 1 | server.ts |
@@ -71,14 +71,14 @@ The server's dependency surface by importer: every package a live module outside
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
-| `server/agents/clientIdentityResolver.ts` | 2 | server.ts |
+| `server/agents/clientIdentityResolver.ts` | 1 | server.ts |
 | `server/agents/companyBrainAgent.ts` | 1 | server.ts |
 | `server/agents/conversationMemoryAgent.ts` | 1 | server.ts |
 | `server/agents/growthCommandAgent.ts` | 1 | server.ts |
-| `server/agents/independentAuditor.ts` | 3 | server.ts |
+| `server/agents/independentAuditor.ts` | 2 | server.ts |
 | `server/agents/multiAgentReplySystem.ts` | 3 | server.ts |
 | `server/agents/pitchBattleAgent.ts` | 1 | server.ts |
-| `server/agents/salesDecisionEngine.ts` | 6 | server.ts |
+| `server/agents/salesDecisionEngine.ts` | 5 | server.ts |
 | `server/agents/salesEngineTestMatrix.ts` | 1 | server.ts |
 | `server/agents/trustedCtaRegistry.ts` | 4 | server.ts |
 
@@ -99,7 +99,7 @@ The server's dependency surface by importer: every package a live module outside
 |---|---|---|
 | `server/config/environment.ts` | 7 | server.ts |
 | `server/config/port.ts` | 1 | server.ts |
-| `server/config/safeMode.ts` | 4 | server.ts |
+| `server/config/safeMode.ts` | 5 | server.ts |
 
 ### server/db
 
@@ -133,7 +133,7 @@ The server's dependency surface by importer: every package a live module outside
 | `server/domain/replyLoop.ts` | 1 | server.ts |
 | `server/domain/senderIdentity.ts` | 2 | server.ts |
 | `server/domain/slo.ts` | 1 | server.ts |
-| `server/domain/stateMachines.ts` | 2 | server.ts |
+| `server/domain/stateMachines.ts` | 5 | server.ts |
 | `server/domain/threadResolution.ts` | 1 | server.ts |
 | `server/domain/unsubscribe.ts` | 4 | server.ts |
 
@@ -141,16 +141,16 @@ The server's dependency surface by importer: every package a live module outside
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
-| `server/gateway/actionGateway.ts` | 2 | server.ts |
+| `server/gateway/actionGateway.ts` | 3 | server.ts |
 
 ### server/lib
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
 | `server/lib/capabilities.ts` | 5 | server.ts |
-| `server/lib/concurrency.ts` | 2 | server.ts |
+| `server/lib/concurrency.ts` | 5 | server.ts |
 | `server/lib/emailKey.ts` | 3 | server.ts |
-| `server/lib/errors.ts` | 15 | server.ts |
+| `server/lib/errors.ts` | 31 | server.ts |
 | `server/lib/factStore.ts` | 1 | server.ts |
 | `server/lib/fields.ts` | 3 | server.ts |
 | `server/lib/httpClient.ts` | 4 | server.ts |
@@ -159,13 +159,15 @@ The server's dependency surface by importer: every package a live module outside
 | `server/lib/messageIdentity.ts` | 3 | server.ts |
 | `server/lib/mime.ts` | 3 | server.ts |
 | `server/lib/modelCallLog.ts` | 3 | server.ts |
+| `server/lib/parsedBody.ts` | 4 | server.ts |
 | `server/lib/promptAssembly.ts` | 3 | server.ts |
 | `server/lib/providerError.ts` | 6 | server.ts |
 | `server/lib/providerId.ts` | 2 | server.ts |
 | `server/lib/reconciliation.ts` | 2 | server.ts |
 | `server/lib/runLog.ts` | 1 | server.ts |
 | `server/lib/singleton.ts` | 1 | server.ts |
-| `server/lib/validation.ts` | 2 | server.ts |
+| `server/lib/singletonRoutes.ts` | 2 | server.ts |
+| `server/lib/validation.ts` | 4 | server.ts |
 
 ### server/middleware
 
@@ -184,7 +186,6 @@ The server's dependency surface by importer: every package a live module outside
 | `server/policies/claimGrounding.ts` | 1 | server.ts |
 | `server/policies/modelPricing.ts` | 2 | server.ts |
 | `server/policies/outreachPolicy.ts` | 1 | server.ts |
-| `server/policies/policyEngine.ts` | 1 | server.ts |
 | `server/policies/version.ts` | 1 | server.ts |
 | `server/policies/workflowBudgets.ts` | 2 | server.ts |
 
@@ -200,13 +201,28 @@ The server's dependency surface by importer: every package a live module outside
 |---|---|---|
 | `server/routes/actionTrail.routes.ts` | 1 | server.ts |
 | `server/routes/autonomy.routes.ts` | 1 | server.ts |
+| `server/routes/autopilot.routes.ts` | 1 | server.ts |
+| `server/routes/campaigns.routes.ts` | 1 | server.ts |
+| `server/routes/companyBrain.routes.ts` | 1 | server.ts |
+| `server/routes/contacts.routes.ts` | 1 | server.ts |
 | `server/routes/cspReport.routes.ts` | 1 | server.ts |
 | `server/routes/deliverability.routes.ts` | 1 | server.ts |
+| `server/routes/growthCommand.routes.ts` | 1 | server.ts |
+| `server/routes/health.routes.ts` | 1 | server.ts |
+| `server/routes/inbox.routes.ts` | 1 | server.ts |
+| `server/routes/integrations.routes.ts` | 1 | server.ts |
+| `server/routes/knowledge.routes.ts` | 1 | server.ts |
+| `server/routes/meetings.routes.ts` | 1 | server.ts |
 | `server/routes/openapi.routes.ts` | 1 | server.ts |
 | `server/routes/outbox.routes.ts` | 1 | server.ts |
+| `server/routes/pipeline.routes.ts` | 1 | server.ts |
+| `server/routes/pitchBattle.routes.ts` | 1 | server.ts |
+| `server/routes/reporting.routes.ts` | 1 | server.ts |
+| `server/routes/settings.routes.ts` | 1 | server.ts |
 | `server/routes/spend.routes.ts` | 1 | server.ts |
 | `server/routes/stripe.routes.ts` | 1 | server.ts |
 | `server/routes/unsubscribe.routes.ts` | 1 | server.ts |
+| `server/routes/webhooks.routes.ts` | 1 | server.ts |
 
 ### server/services
 
@@ -234,13 +250,13 @@ The server's dependency surface by importer: every package a live module outside
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
-| `server/store/index.ts` | 19 | server.ts |
+| `server/store/index.ts` | 30 | server.ts |
 
 ### server/tenancy
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
-| `server/tenancy/orgScope.ts` | 23 | server.ts |
+| `server/tenancy/orgScope.ts` | 33 | server.ts |
 | `server/tenancy/organizations.ts` | 2 | server.ts |
 
 ### server/workers
@@ -257,7 +273,7 @@ The server's dependency surface by importer: every package a live module outside
 | `shared/domain/enums.ts` | 1 | server.ts, main.tsx |
 | `shared/domain/growthCommand.ts` | 5 | server.ts, main.tsx |
 | `shared/domain/meetingRecovery.ts` | 1 | main.tsx |
-| `shared/domain/models.ts` | 18 | server.ts, main.tsx |
+| `shared/domain/models.ts` | 17 | server.ts, main.tsx |
 | `shared/domain/pricing.ts` | 12 | server.ts, main.tsx |
 | `shared/domain/quote.ts` | 6 | server.ts |
 | `shared/domain/time.ts` | 6 | server.ts, main.tsx |
@@ -274,7 +290,7 @@ The server's dependency surface by importer: every package a live module outside
 |---|---|---|
 | `src/App.tsx` | 1 | main.tsx |
 | `src/main.tsx` | 0 | main.tsx |
-| `src/types.ts` | 39 | server.ts, main.tsx |
+| `src/types.ts` | 38 | main.tsx |
 
 ### src/components
 

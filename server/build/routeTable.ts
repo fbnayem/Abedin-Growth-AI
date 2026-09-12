@@ -87,6 +87,12 @@ function lineAt(text: string, index: number): number {
 }
 
 const METHODS = 'get|post|put|patch|delete';
+/**
+ * A handler reads a body if it touches `req.body`, or hands it to one of the two validators —
+ * which read `req.body` on its behalf. Until 2026-09-12 only the first counted, so a route that
+ * validated everything it read was reported as reading nothing.
+ */
+const READS_BODY = /\breq\.body\b|\bparsedBodyOr400\(|\bparseOrRespond\(/;
 
 /** Exported for the suite: the refusal on an unreadable registration is a behaviour, not a comment. */
 export function inlineRoutes(server: string, rawPaths: Set<string>): RouteEntry[] {
@@ -111,30 +117,38 @@ export function inlineRoutes(server: string, rawPaths: Set<string>): RouteEntry[
       path: m[2],
       source: 'server.ts',
       line: lineAt(server, start),
-      readsBody: /\breq\.body\b/.test(handlerText(server, start, nextRegistration)),
+      readsBody: READS_BODY.test(handlerText(server, start, nextRegistration, '  ')),
       rawBody: rawPaths.has(m[2]),
     };
   });
 }
 
 /**
- * The text of ONE handler. An inline arrow ends at the registration's own `});` at two-space
- * indent — not at the next registration, because helper functions declared between two routes
- * would otherwise be read as part of the earlier one. A named handler (`app.post(path, fn)`)
- * is followed to `function fn(` and read to its closing brace at the same indent.
+ * The text of ONE handler. An inline arrow ends at the registration's own `});` at the
+ * registration's indent (two spaces inside `startServer`, none in a router file) — not at the
+ * next registration, because helper functions declared between two routes would otherwise be
+ * read as part of the earlier one. A named handler (`app.post(path, fn)`) is followed to its
+ * declaration — `function fn(` or `const fn = async (` — and read to its closing brace at the
+ * same indent.
+ *
+ * The `const fn = async (` form was not followed until 2026-09-12: `setCampaignStatus` and
+ * `setOpportunityStage` are arrows, so the four routes they serve were read as their one
+ * registration line, which does not mention `req.body`, and reported as reading no body.
  */
-function handlerText(server: string, start: number, nextRegistration: number): string {
-  const registration = server.slice(start, server.indexOf('\n', start));
+function handlerText(code: string, start: number, nextRegistration: number, indent: string): string {
+  const registration = code.slice(start, code.indexOf('\n', start));
   const named = /,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\);\s*$/.exec(registration);
   if (named) {
-    const decl = new RegExp(`(?:async\\s+)?function\\s+${named[1]}\\s*\\(`).exec(server);
+    const decl = new RegExp(
+      `(?:(?:async\\s+)?function\\s+${named[1]}\\s*\\(|const\\s+${named[1]}\\s*=\\s*(?:async\\s*)?\\()`
+    ).exec(code);
     if (!decl) return registration;
-    const bodyEnd = server.indexOf('\n  }\n', decl.index);
-    return server.slice(decl.index, bodyEnd === -1 ? server.length : bodyEnd + 4);
+    const bodyEnd = code.indexOf(`\n${indent}}`, decl.index);
+    return code.slice(decl.index, bodyEnd === -1 ? code.length : bodyEnd + indent.length + 2);
   }
-  const close = server.indexOf('\n  });', start);
-  const end = close === -1 || close > nextRegistration ? nextRegistration : close + 6;
-  return server.slice(start, end);
+  const close = code.indexOf(`\n${indent}});`, start);
+  const end = close === -1 || close > nextRegistration ? nextRegistration : close + indent.length + 4;
+  return code.slice(start, end);
 }
 
 function rawBodyPaths(server: string): Set<string> {
@@ -194,7 +208,7 @@ function routerRoutes(mount: { prefix: string; router: string }, root: string): 
       path: mount.prefix + sub,
       source: file,
       line: lineAt(code, start),
-      readsBody: /\breq\.body\b/.test(code.slice(start, end)),
+      readsBody: READS_BODY.test(handlerText(code, start, end, '')),
       // A router may parse raw on the route itself (the Stripe webhook does): the registration
       // line carries `express.raw(` and the body the handler reads is the bytes the provider signed.
       rawBody: /express\.raw\(/.test(registrationLine),
@@ -217,6 +231,25 @@ export function routeTable(root = '.'): RouteEntry[] {
     seen.add(key);
   }
   return entries.sort((a, b) => (a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path)));
+}
+
+/**
+ * The text of a route's handler, read the way the table read it — for a suite that checks a
+ * claim (a contract, a refusal) against the handler rather than against the file around it.
+ * Since S39 the handler may sit in a router and may be a named arrow declared above its
+ * registration; a suite slicing forward from the registration line would miss it.
+ */
+export function handlerTextOf(entry: RouteEntry, root = '.'): string {
+  const code = blankComments(readFileSync(join(root, entry.source), 'utf8').replace(/\r\n/g, '\n'));
+  const lines = code.split('\n');
+  const start = lines.slice(0, entry.line - 1).join('\n').length + (entry.line > 1 ? 1 : 0);
+  const inline = entry.source === 'server.ts';
+  const next = new RegExp(`${inline ? 'app' : '[A-Za-z]+Router'}\\.(${METHODS})\\(`, 'g');
+  // From the END of the registration line: a search from one character in re-finds the same
+  // registration, since `[A-Za-z]+Router` also matches its own tail.
+  next.lastIndex = code.indexOf('\n', start);
+  const following = next.exec(code);
+  return handlerText(code, start, following ? following.index : code.length, inline ? '  ' : '');
 }
 
 /** `/api/x/:id/y` -> `/api/x/{id}/y`, and the parameter names in order. */

@@ -7,6 +7,7 @@ import {
   settingsSchema,
   validateBody,
 } from '../domain/apiContracts';
+import { routeTable, handlerTextOf } from '../build/routeTable';
 
 /**
  * S11 — WHAT A REQUEST BODY IS ALLOWED TO CONTAIN.
@@ -25,7 +26,14 @@ import {
  * by operator surfaces that trust them.
  */
 
-const source = readFileSync('server.ts', 'utf8');
+// S39 — the contract routes live in their routers; server.ts only mounts them. Each handler
+// is read from the file that holds it, at the registration the route table found.
+const table = routeTable();
+const registration = (route: string): string => {
+  const entry = table.find((r) => `${r.method} ${r.path}` === route);
+  if (!entry) throw new Error(`${route} is not registered`);
+  return handlerTextOf(entry);
+};
 
 // ===========================================================================
 describe('1. an unexpected field is refused, not dropped', () => {
@@ -189,17 +197,13 @@ describe('4. settings cannot be used to start the system', () => {
 describe('5. the routes use the registry', () => {
   it('every route in the registry is a route the server defines', () => {
     for (const route of Object.keys(BODY_SCHEMAS)) {
-      const [, path] = route.split(' ');
-      expect(source).toContain(`"${path}"`);
+      expect(table.map((r) => `${r.method} ${r.path}`), route).toContain(route);
     }
   });
 
   it('the two handlers that used to spread req.body now validate first', () => {
     for (const route of ['POST /api/company-brain', 'POST /api/settings']) {
-      const [, path] = route.split(' ');
-      const at = source.indexOf(`app.post("${path}"`);
-      expect(at).toBeGreaterThan(-1);
-      const handler = source.slice(at, at + 1200);
+      const handler = registration(route);
       expect(handler).toContain(`parsedBodyOr400(req, res, '${route}')`);
       expect(handler).toContain('if (body === null) return;');
     }
@@ -207,9 +211,8 @@ describe('5. the routes use the registry', () => {
 
   /** And they write the parsed value, not the request body. */
   it('neither handler passes req.body to the writer any more', () => {
-    for (const path of ['/api/company-brain', '/api/settings']) {
-      const at = source.indexOf(`app.post("${path}"`);
-      const handler = source.slice(at, at + 1200);
+    for (const route of ['POST /api/company-brain', 'POST /api/settings']) {
+      const handler = registration(route);
       const code = handler.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
       expect(code).not.toMatch(/writeSingleton\([^)]*req\.body/);
       expect(code).toMatch(/writeSingleton\(req, res, '[a-z_]+', body\)/);

@@ -313,7 +313,7 @@ describe('4. a dropped email is no longer reported as success', () => {
 
 // ===========================================================================
 describe('5. the log endpoint can actually return a log', () => {
-  const server = stripped('server.ts');
+  const server = stripped('server/routes/reporting.routes.ts');
 
   it('it orders by the field the log shape has', () => {
     // Firestore EXCLUDES documents lacking the ordered field, so ordering by `timestamp` —
