@@ -59,6 +59,7 @@ import { mergeSingletonBody } from "./server/lib/singleton";
 import { actionTrailRouter } from "./server/routes/actionTrail.routes";
 import { spendRouter } from "./server/routes/spend.routes";
 import { openapiRouter } from "./server/routes/openapi.routes";
+import { deliverabilityRouter } from "./server/routes/deliverability.routes";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
 import { simulatePitchBattle } from './server/agents/pitchBattleAgent';
@@ -214,6 +215,8 @@ for (const aiPath of [
   app.use("/api/spend", spendRouter);
   // S11 — the API described by the server that serves it; generated, committed, drift-checked.
   app.use("/api/openapi.json", openapiRouter);
+  // S27 — the sending domain's SPF/DKIM/DMARC posture, the one the gateway consults before a send.
+  app.use("/api/deliverability", deliverabilityRouter);
   app.use("/api/unsubscribe", unsubscribeRouter);
   app.use(CSP_REPORT_PATH, cspReportRouter);
 

@@ -169,7 +169,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1300"
+        "x-source": "server.ts:1303"
       }
     },
     "/api/autonomy": {
@@ -500,7 +500,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:889"
+        "x-source": "server.ts:892"
       }
     },
     "/api/autopilot/settings": {
@@ -579,7 +579,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1929"
+        "x-source": "server.ts:1932"
       }
     },
     "/api/autopilot/status": {
@@ -657,7 +657,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1920"
+        "x-source": "server.ts:1923"
       }
     },
     "/api/autopilot/toggle": {
@@ -735,7 +735,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1924"
+        "x-source": "server.ts:1927"
       }
     },
     "/api/campaigns": {
@@ -813,7 +813,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:810"
+        "x-source": "server.ts:813"
       }
     },
     "/api/campaigns/generate-strategy": {
@@ -892,7 +892,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1558"
+        "x-source": "server.ts:1561"
       }
     },
     "/api/campaigns/{id}/status": {
@@ -980,7 +980,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:871"
+        "x-source": "server.ts:874"
       }
     },
     "/api/campaigns/{id}/toggle": {
@@ -1068,7 +1068,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:872"
+        "x-source": "server.ts:875"
       }
     },
     "/api/company-brain": {
@@ -1146,7 +1146,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:649"
+        "x-source": "server.ts:652"
       },
       "post": {
         "operationId": "post_api_company_brain",
@@ -1442,7 +1442,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:655"
+        "x-source": "server.ts:658"
       }
     },
     "/api/company-brain/generate": {
@@ -1577,7 +1577,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:696"
+        "x-source": "server.ts:699"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -1666,7 +1666,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:440"
+        "x-source": "server.ts:443"
       }
     },
     "/api/csp-report": {
@@ -1823,7 +1823,85 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1244"
+        "x-source": "server.ts:1247"
+      }
+    },
+    "/api/deliverability": {
+      "get": {
+        "operationId": "get_api_deliverability",
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "none",
+        "x-source": "server/routes/deliverability.routes.ts:16"
       }
     },
     "/api/growth-command": {
@@ -1902,7 +1980,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1899"
+        "x-source": "server.ts:1902"
       }
     },
     "/api/health": {
@@ -1980,7 +2058,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:260"
+        "x-source": "server.ts:263"
       }
     },
     "/api/inbox": {
@@ -2058,7 +2136,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:489"
+        "x-source": "server.ts:492"
       }
     },
     "/api/inbox/auto-reply-all": {
@@ -2136,7 +2214,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1028"
+        "x-source": "server.ts:1031"
       }
     },
     "/api/inbox/circuit-breaker": {
@@ -2214,7 +2292,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1503"
+        "x-source": "server.ts:1506"
       }
     },
     "/api/inbox/circuit-breaker/toggle": {
@@ -2293,7 +2371,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1112"
+        "x-source": "server.ts:1115"
       }
     },
     "/api/inbox/cta-registry": {
@@ -2371,7 +2449,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1498"
+        "x-source": "server.ts:1501"
       }
     },
     "/api/inbox/run-test-matrix": {
@@ -2449,7 +2527,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1536"
+        "x-source": "server.ts:1539"
       }
     },
     "/api/inbox/sales-decision-engine/inspect": {
@@ -2527,7 +2605,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1107"
+        "x-source": "server.ts:1110"
       }
     },
     "/api/inbox/validate-phone-policy": {
@@ -2606,7 +2684,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1485"
+        "x-source": "server.ts:1488"
       }
     },
     "/api/inbox/{id}/auto-reply": {
@@ -2694,7 +2772,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1154"
+        "x-source": "server.ts:1157"
       }
     },
     "/api/inbox/{id}/classify": {
@@ -2783,7 +2861,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:907"
+        "x-source": "server.ts:910"
       }
     },
     "/api/inbox/{id}/follow-up": {
@@ -2871,7 +2949,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1185"
+        "x-source": "server.ts:1188"
       }
     },
     "/api/inbox/{id}/generate-multi-agent-reply": {
@@ -2959,7 +3037,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1199"
+        "x-source": "server.ts:1202"
       }
     },
     "/api/inbox/{id}/memory/refresh": {
@@ -3047,7 +3125,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1169"
+        "x-source": "server.ts:1172"
       }
     },
     "/api/inbox/{id}/reply": {
@@ -3135,7 +3213,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:891"
+        "x-source": "server.ts:894"
       }
     },
     "/api/integrations/gmail/token": {
@@ -3214,7 +3292,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1398"
+        "x-source": "server.ts:1401"
       }
     },
     "/api/investors": {
@@ -3292,7 +3370,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1352"
+        "x-source": "server.ts:1355"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -3435,7 +3513,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:1361"
+        "x-source": "server.ts:1364"
       }
     },
     "/api/investors/batch-generate": {
@@ -3513,7 +3591,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:759"
+        "x-source": "server.ts:762"
       }
     },
     "/api/knowledge": {
@@ -3591,7 +3669,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:523"
+        "x-source": "server.ts:526"
       },
       "post": {
         "operationId": "post_api_knowledge",
@@ -3703,7 +3781,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:499"
+        "x-source": "server.ts:502"
       }
     },
     "/api/leads": {
@@ -3781,7 +3859,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:278"
+        "x-source": "server.ts:281"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -3924,7 +4002,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:422"
+        "x-source": "server.ts:425"
       }
     },
     "/api/leads/batch-followup": {
@@ -4002,7 +4080,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1044"
+        "x-source": "server.ts:1047"
       }
     },
     "/api/leads/batch-generate": {
@@ -4080,7 +4158,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:734"
+        "x-source": "server.ts:737"
       }
     },
     "/api/leads/research": {
@@ -4158,7 +4236,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:890"
+        "x-source": "server.ts:893"
       }
     },
     "/api/leads/{id}/email": {
@@ -4246,7 +4324,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1228"
+        "x-source": "server.ts:1231"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -4334,7 +4412,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1059"
+        "x-source": "server.ts:1062"
       }
     },
     "/api/linkedin-config": {
@@ -4412,7 +4490,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1092"
+        "x-source": "server.ts:1095"
       },
       "post": {
         "operationId": "post_api_linkedin_config",
@@ -4488,7 +4566,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1093"
+        "x-source": "server.ts:1096"
       }
     },
     "/api/linkedin/send-message": {
@@ -4566,7 +4644,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1060"
+        "x-source": "server.ts:1063"
       }
     },
     "/api/logs": {
@@ -4644,7 +4722,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:532"
+        "x-source": "server.ts:535"
       }
     },
     "/api/meetings": {
@@ -4722,7 +4800,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1856"
+        "x-source": "server.ts:1859"
       },
       "post": {
         "operationId": "post_api_meetings",
@@ -4799,7 +4877,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:1702"
+        "x-source": "server.ts:1705"
       }
     },
     "/api/meetings/brief": {
@@ -4877,7 +4955,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:965"
+        "x-source": "server.ts:968"
       }
     },
     "/api/meetings/{id}/process-payment": {
@@ -4965,7 +5043,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1004"
+        "x-source": "server.ts:1007"
       }
     },
     "/api/meetings/{id}/send-recovery-email": {
@@ -5053,7 +5131,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1013"
+        "x-source": "server.ts:1016"
       }
     },
     "/api/meetings/{id}/send-reminder": {
@@ -5141,7 +5219,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1213"
+        "x-source": "server.ts:1216"
       }
     },
     "/api/meetings/{id}/sign-contract": {
@@ -5229,7 +5307,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:983"
+        "x-source": "server.ts:986"
       }
     },
     "/api/openapi.json": {
@@ -5817,7 +5895,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1373"
+        "x-source": "server.ts:1376"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -5960,7 +6038,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:1382"
+        "x-source": "server.ts:1385"
       }
     },
     "/api/partners/batch-generate": {
@@ -6038,7 +6116,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:784"
+        "x-source": "server.ts:787"
       }
     },
     "/api/pipeline": {
@@ -6116,7 +6194,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:560"
+        "x-source": "server.ts:563"
       },
       "post": {
         "operationId": "post_api_pipeline",
@@ -6247,7 +6325,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:1635"
+        "x-source": "server.ts:1638"
       }
     },
     "/api/pipeline/{id}/stage": {
@@ -6335,7 +6413,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:963"
+        "x-source": "server.ts:966"
       },
       "put": {
         "operationId": "put_api_pipeline_id_stage",
@@ -6421,7 +6499,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:962"
+        "x-source": "server.ts:965"
       }
     },
     "/api/pitch-battle/simulate": {
@@ -6500,7 +6578,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:688"
+        "x-source": "server.ts:691"
       }
     },
     "/api/readiness": {
@@ -6578,7 +6656,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:222"
+        "x-source": "server.ts:225"
       }
     },
     "/api/sender-identity": {
@@ -6656,7 +6734,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1076"
+        "x-source": "server.ts:1079"
       },
       "post": {
         "operationId": "post_api_sender_identity",
@@ -6732,7 +6810,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:1077"
+        "x-source": "server.ts:1080"
       }
     },
     "/api/settings": {
@@ -6810,7 +6888,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:670"
+        "x-source": "server.ts:673"
       },
       "post": {
         "operationId": "post_api_settings",
@@ -6946,7 +7024,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server.ts:676"
+        "x-source": "server.ts:679"
       }
     },
     "/api/settings/autopilot": {
@@ -7024,7 +7102,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:966"
+        "x-source": "server.ts:969"
       }
     },
     "/api/settings/token": {
@@ -7102,7 +7180,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server.ts:874"
+        "x-source": "server.ts:877"
       }
     },
     "/api/signature/webhook": {
@@ -7192,7 +7270,7 @@
         },
         "x-body": "raw",
         "x-body-note": "Raw bytes: the handler verifies a provider signature over the exact body before reading it.",
-        "x-source": "server.ts:1951"
+        "x-source": "server.ts:1954"
       }
     },
     "/api/spend": {
@@ -7692,7 +7770,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server.ts:2023"
+        "x-source": "server.ts:2026"
       }
     }
   },
@@ -7701,7 +7779,7 @@
     "rawBody": 2,
     "readingBodyWithoutSchema": 16,
     "responsesDescribed": 0,
-    "routes": 87,
+    "routes": 88,
     "withRequestContract": 8
   }
 }

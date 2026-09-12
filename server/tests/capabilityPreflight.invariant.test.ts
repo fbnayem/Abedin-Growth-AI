@@ -75,6 +75,11 @@ vi.mock('../services/gmail.service', () => ({
   GmailService: class {},
 }));
 
+// S27 — the sender-identity gate runs inside the pre-flight after the scopes; this suite is about
+// the scopes, so the posture is READY here and the gate has its own suite (senderIdentityGate).
+vi.mock('../services/deliverability.service', () => ({
+  senderPostureFor: async () => ({ posture: { verdict: 'READY', reasons: [] }, checkedAt: '', cached: false }),
+}));
 vi.mock('../store', () => ({
   get store() {
     return storeAvailable ? {} : null;
@@ -137,7 +142,7 @@ describe('P1.11 — the capability pre-flight actually runs and actually refuses
   });
 
   it('a connection with the send scope passes', async () => {
-    oauthDocs = [{ provider: 'gmail', scopes: [SEND_SCOPE], status: 'ACTIVE', expiresAt: null }];
+    oauthDocs = [{ provider: 'gmail', scopes: [SEND_SCOPE], status: 'ACTIVE', expiresAt: null, accountEmail: 'ops@example.co.uk' }];
     expect(await preflight(gateway)).toBeNull();
   });
 
@@ -158,7 +163,7 @@ describe('P1.11 — the capability pre-flight actually runs and actually refuses
   });
 
   it('Google’s space-delimited scope string is understood', async () => {
-    oauthDocs = [{ provider: 'gmail', scope: `${READ_SCOPE} ${SEND_SCOPE}`, status: 'ACTIVE' }];
+    oauthDocs = [{ provider: 'gmail', scope: `${READ_SCOPE} ${SEND_SCOPE}`, status: 'ACTIVE', accountEmail: 'ops@example.co.uk' }];
     expect(await preflight(gateway)).toBeNull();
   });
 

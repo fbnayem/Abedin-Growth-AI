@@ -12,6 +12,8 @@ import { orgPath, isValidOrgId } from '../tenancy/orgScope';
 import { classifyThrown, requiresReconciliation, type ProviderErrorKind } from '../lib/providerError';
 import { FABRICATED_PROVIDER_ID, isFabricatedProviderId } from '../lib/providerId';
 import { assertCapability, CapabilityError, normalizeScopes, type Capability } from '../lib/capabilities';
+import { senderPostureFor } from '../services/deliverability.service';
+import { domainOfAddress, posturePermitsSending } from '../domain/senderIdentity';
 import { assertTimeZone, isWithinBusinessHours, parseInstant, DEFAULT_BUSINESS_HOURS, systemClock, type Clock } from '../../shared/domain/time';
 import { outboundMessageId } from '../lib/messageIdentity';
 import { calendarService } from '../services/calendar.service';
@@ -92,6 +94,8 @@ export interface ActionResult {
      * produces ZERO create requests, so this code is returned instead of an event id.
      */
     | 'CALENDAR_CONFLICT'
+    // S27 — the connection's domain has no SPF/DMARC, or they could not be looked up.
+    | 'SENDER_IDENTITY_UNVERIFIED'
     /**
      * S31/§14 — free/busy was asked and the answer could not be read (a calendar the
      * credential cannot see returns per-calendar `errors` inside a 200). Unknown availability
@@ -566,19 +570,24 @@ export class ActionGateway {
           where('organizationId', '==', request.organizationId)
         )
       );
-      let connection: { provider: string; organizationId: string; scopes: string[] | null; status: string | null; expiresAt: any } | null = null;
+      // Collected rather than assigned inside the closure: control flow cannot see an assignment
+      // made in a callback, so a `let` here narrowed to `never` after the null check below.
+      const found: { provider: string; organizationId: string; scopes: string[] | null; status: string | null; expiresAt: any; accountEmail: string | null }[] = [];
       snap.forEach((d) => {
         const data: any = d.data();
         const isGoogle = String(data.provider ?? '').toLowerCase() === 'gmail';
         if (!isGoogle) return;
-        connection = {
+        found.push({
           provider,
           organizationId: request.organizationId,
           scopes: normalizeScopes(data.scopes ?? data.scope),
           status: data.status ?? null,
           expiresAt: data.expiresAt?.toDate?.() ?? data.expiresAt ?? null,
-        };
+          accountEmail: typeof data.accountEmail === 'string' ? data.accountEmail : null,
+        });
       });
+      // The last Gmail connection wins, as it always did.
+      const connection = found.length > 0 ? found[found.length - 1] : null;
 
       if (connection === null) {
         return {
@@ -589,6 +598,18 @@ export class ActionGateway {
       }
 
       assertCapability(connection, capability, new Date());
+
+      // S27 — SENDER IDENTITY, AFTER THE SCOPES AND BEFORE THE NETWORK.
+      //
+      // A connection may hold the send scope and still send from a domain no receiver can
+      // authenticate. The domain judged is this connection's account — the settings address
+      // reaches only prompts. MISSING is refused; UNKNOWN (the records could not be looked
+      // up) is refused too, because unknown is not permission (§14); WEAK proceeds with a
+      // warning. GET /api/deliverability shows the same verdict with its reasons.
+      if (request.actionType === ActionType.EMAIL_SEND) {
+        const refusal = await this.checkSenderIdentity(connection.accountEmail);
+        if (refusal !== null) return refusal;
+      }
       return null;
     } catch (e: any) {
       if (e instanceof CapabilityError) {
@@ -607,6 +628,36 @@ export class ActionGateway {
         error: 'Could not verify provider scopes, so the grant is unknown. Refusing to send.',
       };
     }
+  }
+
+  /** Null when the sending domain may be believed, or the refusal to return. */
+  private async checkSenderIdentity(accountEmail: string | null): Promise<ActionResult | null> {
+    const domain = domainOfAddress(accountEmail);
+    if (domain === null) {
+      const reason =
+        'The connected Gmail account has no usable domain, so its sender identity cannot be checked. Refusing to send.';
+      console.warn(`[ActionGateway] EMAIL_SEND refused: ${reason}`);
+      return { success: false, errorCode: 'SENDER_IDENTITY_UNVERIFIED', error: reason };
+    }
+    let identity: Awaited<ReturnType<typeof senderPostureFor>>;
+    try {
+      identity = await senderPostureFor(domain);
+    } catch (e: any) {
+      const reason = `Sender identity for ${domain} could not be checked (${String(e?.message ?? e)}). Refusing to send.`;
+      console.warn(`[ActionGateway] EMAIL_SEND refused: ${reason}`);
+      return { success: false, errorCode: 'SENDER_IDENTITY_UNVERIFIED', error: reason };
+    }
+    if (!posturePermitsSending(identity.posture)) {
+      const reason =
+        `Sender identity for ${domain} is ${identity.posture.verdict}: ${identity.posture.reasons.join('; ')}. ` +
+        'See GET /api/deliverability.';
+      console.warn(`[ActionGateway] EMAIL_SEND refused: ${reason}`);
+      return { success: false, errorCode: 'SENDER_IDENTITY_UNVERIFIED', error: reason };
+    }
+    if (identity.posture.verdict === 'WEAK') {
+      console.warn(`[ActionGateway] Sender identity for ${domain} is WEAK: ${identity.posture.reasons.join('; ')}`);
+    }
+    return null;
   }
 
   private checkFeatureFlag(actionType: ActionType): boolean {
