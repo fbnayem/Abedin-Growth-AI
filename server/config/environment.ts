@@ -26,6 +26,41 @@ export const isProduction = config.env === 'production';
 export const isTest = config.env === 'test';
 export const isDevelopment = config.env === 'development';
 
+/**
+ * S37 — per-tenant model spend ceilings, in USD cents (the provider's currency; see
+ * server/policies/modelPricing.ts), per UTC day and per UTC month.
+ *
+ * The defaults are deliberately LOW — five dollars a day, fifty a month — so that a deployment
+ * has to decide its budget rather than inherit an unbounded one. Zero is legal and means what
+ * it says: no model spend. A malformed value refuses at startup, as PORT does, because a limit
+ * that silently parsed to NaN would compare as never exceeded (§14).
+ */
+export interface TenantSpendLimits {
+  readonly dailyCents: number;
+  readonly monthlyCents: number;
+}
+
+function centsFromEnv(key: string, fallback: number): number {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  if (!/^\d{1,9}$/.test(raw.trim())) {
+    throw new Error(
+      `${key} must be a whole number of USD cents (0 or more); received ${JSON.stringify(raw)}.`
+    );
+  }
+  return Number(raw.trim());
+}
+
+export function tenantSpendLimits(): TenantSpendLimits {
+  return {
+    dailyCents: centsFromEnv('TENANT_MODEL_SPEND_DAILY_LIMIT_CENTS', 500),
+    monthlyCents: centsFromEnv('TENANT_MODEL_SPEND_MONTHLY_LIMIT_CENTS', 5000),
+  };
+}
+
+// Evaluated once at load so a malformed limit stops the process here, not at the first reply.
+tenantSpendLimits();
+
 if (isProduction && config.demoMode) {
   throw new Error("CRITICAL SAFETY ERROR: DEMO_MODE cannot be true in production!");
 }

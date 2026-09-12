@@ -27,6 +27,7 @@ const modelCall = (over: Partial<ModelCallRecord> = {}): ModelCallRecord => ({
   promptTokens: 100,
   outputTokens: 50,
   totalTokens: 150,
+  thoughtsTokens: 40,
   durationMs: 40,
   failures: [],
   promptHash: 'a'.repeat(64),
@@ -131,12 +132,28 @@ describe('nothing is invented', () => {
     expect(buildRunLog(input()).confidence).toBeNull();
   });
 
-  it('cost is null with the reason beside it, never zero', () => {
-    const row = buildRunLog(input());
-    expect(row.costMinor).toBeNull();
-    expect(row.currency).toBeNull();
-    // A zero would read as "this run was free" — the fabricated £0.01 in different clothes.
-    expect(row.costEnforcement).toContain('NOT enforced');
+  it("cost is the known sum in the provider's currency, and says when it is a ceiling (S37)", () => {
+    const tracker = new BudgetTracker();
+    tracker.recordModelCall(150, 3, false);
+    tracker.recordModelCall(200, 5, true);
+    const row = buildRunLog(input({ budget: tracker.snapshot() }));
+    expect(row.costMinor).toBe(8);
+    expect(row.currency).toBe('USD');
+    expect(row.costIsUpperBound).toBe(true);
+    expect(row.costIsPartial).toBe(false);
+    // The sentence that used to be here ("NOT enforced: no price table exists") is gone with
+    // the table, not replaced by a zero.
+    expect(row).not.toHaveProperty('costEnforcement');
+  });
+
+  it('an unpriced call makes the cost partial; it is never written as zero-and-complete', () => {
+    const tracker = new BudgetTracker();
+    tracker.recordModelCall(150, 3, false);
+    tracker.recordModelCall(null, null, false);
+    const row = buildRunLog(input({ budget: tracker.snapshot() }));
+    expect(row.costMinor).toBe(3);
+    expect(row.costIsPartial).toBe(true);
+    expect(row.unpricedCalls).toBe(1);
   });
 
   it('a partial token total is marked partial', () => {

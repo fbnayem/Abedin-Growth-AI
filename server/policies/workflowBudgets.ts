@@ -3,7 +3,11 @@ export interface WorkflowBudget {
   maxModelCallsPerReply: number;
   maxRetriesPerAgent: number;
   maxTokensPerReplyWorkflow: number;
-  maxCostPerReply: number;
+  /**
+   * USD cents, the provider's currency (see modelPricing.ts). This was `maxCostPerReply: 0.10`
+   * — a float, in dollars, that nothing compared against anything (S37).
+   */
+  maxCostPerReplyMinor: number;
   maxDecisionLatencyMs: number;
 }
 
@@ -12,7 +16,7 @@ export const defaultWorkflowBudget: WorkflowBudget = {
   maxModelCallsPerReply: 3,
   maxRetriesPerAgent: 2,
   maxTokensPerReplyWorkflow: 8000,
-  maxCostPerReply: 0.10,
+  maxCostPerReplyMinor: 10,
   maxDecisionLatencyMs: 30000 // 30 seconds
 };
 
@@ -21,7 +25,8 @@ export const defaultWorkflowBudget: WorkflowBudget = {
  *
  * `tokens` is a LOWER BOUND whenever `unmeasuredCalls > 0`: it is the sum of what the provider
  * reported, and calls the provider said nothing about contribute nothing to it. Reading it as
- * a total when calls went unmeasured is the mistake this type exists to prevent.
+ * a total when calls went unmeasured is the mistake this type exists to prevent. `costMinor`
+ * carries the same caveat under `costIsPartial`.
  */
 export interface BudgetSnapshot {
   steps: number;
@@ -34,10 +39,17 @@ export interface BudgetSnapshot {
   tokensArePartial: boolean;
   elapsedMs: number;
   /**
-   * Why the cost ceiling is not enforced, or null if it is. Non-null means `maxCostPerReply`
-   * is currently a number in a config file and nothing else.
+   * USD cents this reply is KNOWN to have cost, from the provider's prices. A lower bound when
+   * `costIsPartial`; a ceiling rather than a price when `costIsUpperBound`.
    */
-  costEnforcement: string | null;
+  costMinor: number;
+  costCurrency: 'USD';
+  /** True when a call could not be priced, so `costMinor` is incomplete. */
+  costIsPartial: boolean;
+  /** True when a call was priced conservatively (unlisted model, output inferred from a total). */
+  costIsUpperBound: boolean;
+  /** Calls the provider reported too little usage to price. */
+  unpricedCalls: number;
 }
 
 /**
@@ -67,22 +79,35 @@ export interface BudgetSnapshot {
  * the call is counted as UNMEASURED rather than as zero — "this call cost nothing" is a
  * stronger claim than we can make, and it fails in the permissive direction (§14).
  *
- * COST IS NOT ENFORCED, AND SAYS SO
- * ---------------------------------
- * Turning tokens into pounds needs a per-model price table. The five models this system fails
- * over between are priced differently and I have no authoritative figures for them, so writing
- * a table would be inventing the numbers the fabricated £0.01 already invented. `maxCostPerReply`
- * therefore remains in the config and `costEnforcement` states, at runtime, that nothing
- * enforces it — rather than a cost meter that silently reads zero forever (§2).
+ * COST, AND THE TWO PLACES AN UNKNOWN IS TREATED DIFFERENTLY (S37)
+ * ----------------------------------------------------------------
+ * Until S37 the cost ceiling was a float in a config file and a sentence in every snapshot
+ * saying so, because no price table existed and writing one meant inventing figures. The
+ * table exists now (modelPricing.ts, from the provider's published page, dated), so each call
+ * arrives here with a price in cents, and `maxCostPerReplyMinor` binds.
  *
- * `maxModelCallsPerReply` is the ceiling that actually binds today, and it binds on a real
- * count.
+ * A call the provider did not report enough usage to price is handled in two places, and not
+ * the same way, on purpose:
+ *
+ *   AT THE REPLY, here, it is PARTIAL: it adds nothing to `costMinor`, `costIsPartial` says so,
+ *   and the ceiling is compared against the known sum. Inflating an unknown into a breach would
+ *   be inventing the number the fabricated £0.01 invented — the same rule the token ceiling
+ *   already follows, and `observability.invariant` pins.
+ *
+ *   IN THE TENANT LEDGER (tenantSpend.service.ts), where the money accumulates and the daily
+ *   and monthly limits are enforced, it is charged the WHOLE per-reply ceiling and the window is
+ *   marked an upper bound. A provider that stops reporting usage then runs the tenant into its
+ *   limit at the fastest rate the policy allows, and stops — visibly. `ledgerChargeFor` is that
+ *   rule, and it lives here because it is policy.
  */
 export class BudgetTracker {
   private steps = 0;
   private modelCalls = 0;
   private tokens = 0;
   private unmeasuredCalls = 0;
+  private costMinor = 0;
+  private costIsUpperBound = false;
+  private unpricedCalls = 0;
   private startTime = Date.now();
 
   constructor(private budget: WorkflowBudget = defaultWorkflowBudget) {}
@@ -97,14 +122,21 @@ export class BudgetTracker {
    *
    * `tokensUsed` is `number | null`, and null is REQUIRED to mean "the provider did not say" —
    * callers must not substitute 0. The old signature took a plain number, which is why a
-   * literal could be passed and never questioned.
+   * literal could be passed and never questioned. `costMinor` follows the same rule: null means
+   * the call could not be priced (see modelPricing.ts), never that it was free.
    */
-  recordModelCall(tokensUsed: number | null) {
+  recordModelCall(tokensUsed: number | null, costMinor: number | null = null, costIsUpperBound = false) {
     this.modelCalls++;
     if (typeof tokensUsed === 'number' && Number.isFinite(tokensUsed) && tokensUsed >= 0) {
       this.tokens += tokensUsed;
     } else {
       this.unmeasuredCalls++;
+    }
+    if (typeof costMinor === 'number' && Number.isInteger(costMinor) && costMinor >= 0) {
+      this.costMinor += costMinor;
+      if (costIsUpperBound) this.costIsUpperBound = true;
+    } else {
+      this.unpricedCalls++;
     }
     this.checkBudget();
   }
@@ -117,18 +149,13 @@ export class BudgetTracker {
       unmeasuredCalls: this.unmeasuredCalls,
       tokensArePartial: this.unmeasuredCalls > 0,
       elapsedMs: Date.now() - this.startTime,
-      costEnforcement: BudgetTracker.COST_NOT_ENFORCED,
+      costMinor: this.costMinor,
+      costCurrency: 'USD',
+      costIsPartial: this.unpricedCalls > 0,
+      costIsUpperBound: this.costIsUpperBound,
+      unpricedCalls: this.unpricedCalls,
     };
   }
-
-  /**
-   * Stated once, here, so every reader of a snapshot gets the same sentence and nobody has to
-   * infer from a zero that the meter is off.
-   */
-  static readonly COST_NOT_ENFORCED =
-    'maxCostPerReply is NOT enforced: converting provider tokens to pounds needs a per-model ' +
-    'price table for the five models this client fails over between, and no authoritative ' +
-    'figures for them exist in this repository. maxModelCallsPerReply is the ceiling that binds.';
 
   private checkBudget() {
     if (this.steps > this.budget.maxAgentStepsPerReply) throw new Error("BUDGET_EXCEEDED: maxAgentStepsPerReply");
@@ -136,6 +163,25 @@ export class BudgetTracker {
     // Compared against REPORTED tokens only. Unmeasured calls cannot push this over, which is
     // why `tokensArePartial` exists rather than this quietly standing in for a real total.
     if (this.tokens > this.budget.maxTokensPerReplyWorkflow) throw new Error("BUDGET_EXCEEDED: maxTokensPerReplyWorkflow");
+    // Likewise against PRICED cost only. The ledger is where an unpriced call is charged.
+    if (this.costMinor > this.budget.maxCostPerReplyMinor) throw new Error("BUDGET_EXCEEDED: maxCostPerReplyMinor");
     if ((Date.now() - this.startTime) > this.budget.maxDecisionLatencyMs) throw new Error("BUDGET_EXCEEDED: maxDecisionLatencyMs");
   }
+}
+
+/**
+ * What one run adds to the tenant ledger (S37). The known cost, plus the whole per-reply ceiling
+ * for every call that could not be priced — so a run of unpriced calls is charged the most it
+ * was permitted to cost, and the ledger can only ever over-count, never under.
+ */
+export function ledgerChargeFor(
+  snapshot: BudgetSnapshot,
+  budget: WorkflowBudget = defaultWorkflowBudget
+): { costMinor: number; costIsUpperBound: boolean; tokens: number; calls: number } {
+  return {
+    costMinor: snapshot.costMinor + snapshot.unpricedCalls * budget.maxCostPerReplyMinor,
+    costIsUpperBound: snapshot.costIsUpperBound || snapshot.unpricedCalls > 0,
+    tokens: snapshot.tokens,
+    calls: snapshot.modelCalls,
+  };
 }

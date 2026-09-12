@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { BudgetTracker, defaultWorkflowBudget } from '../policies/workflowBudgets';
+import { BudgetTracker, defaultWorkflowBudget, ledgerChargeFor } from '../policies/workflowBudgets';
 import {
   isCollecting,
   readUsage,
@@ -25,6 +25,7 @@ const call = (over: Partial<ModelCallRecord> = {}): ModelCallRecord => ({
   promptTokens: 100,
   outputTokens: 50,
   totalTokens: 150,
+  thoughtsTokens: null,
   durationMs: 12,
   failures: [],
   promptHash: null,
@@ -101,13 +102,30 @@ describe('1. the budget counts what was spent, not a literal', () => {
     expect(tracker.snapshot().tokens).toBe(0);
   });
 
-  it('the cost ceiling states that it is NOT enforced, instead of reading zero forever', () => {
-    // §2: converting tokens to pounds needs a per-model price table that does not exist here.
-    // Silence would look like "nothing was spent"; the fabricated £0.01 was the same lie.
-    const s = new BudgetTracker().snapshot();
-    expect(s.costEnforcement).toBeTruthy();
-    expect(s.costEnforcement).toContain('NOT enforced');
-    expect(s).not.toHaveProperty('cost');
+  it('the cost ceiling is enforced from the price table, in cents (S37)', () => {
+    // The sentence that sat here ("NOT enforced: no price table exists") was true when written
+    // and is gone with the table. A reply that spends past its ceiling is refused.
+    const t = new BudgetTracker();
+    t.recordModelCall(100, 4, false);
+    t.recordModelCall(100, 6, false);
+    expect(t.snapshot().costMinor).toBe(defaultWorkflowBudget.maxCostPerReplyMinor);
+    expect(() => t.recordModelCall(100, 1, false)).toThrow(/BUDGET_EXCEEDED: maxCostPerReplyMinor/);
+    expect(t.snapshot()).not.toHaveProperty('costEnforcement');
+  });
+
+  it('an unpriced call is partial at the reply and charged the whole ceiling in the ledger', () => {
+    // Two places, two rules, on purpose: no invented breach where the reply is decided; the
+    // most it was permitted to cost where the money accumulates.
+    const u = new BudgetTracker();
+    u.recordModelCall(null, null, false);
+    expect(() => u.recordModelCall(null, null, false)).not.toThrow();
+    expect(u.snapshot()).toMatchObject({ costMinor: 0, costIsPartial: true, unpricedCalls: 2 });
+    expect(ledgerChargeFor(u.snapshot())).toEqual({
+      costMinor: 2 * defaultWorkflowBudget.maxCostPerReplyMinor,
+      costIsUpperBound: true,
+      tokens: 0,
+      calls: 2,
+    });
   });
 
   it('the fabricated constants are gone from the pipeline', () => {
@@ -220,6 +238,7 @@ describe('3. provider usage is read without inventing numbers', () => {
         promptTokens: null,
         outputTokens: null,
         totalTokens: null,
+        thoughtsTokens: null,
       });
     }
   });
@@ -229,13 +248,14 @@ describe('3. provider usage is read without inventing numbers', () => {
       promptTokens: null,
       outputTokens: null,
       totalTokens: 300,
+      thoughtsTokens: null,
     });
   });
 
   it('a complete usage object is read exactly', () => {
     expect(
-      readUsage({ promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150 })
-    ).toEqual({ promptTokens: 100, outputTokens: 50, totalTokens: 150 });
+      readUsage({ promptTokenCount: 100, candidatesTokenCount: 50, totalTokenCount: 150, thoughtsTokenCount: 20 })
+    ).toEqual({ promptTokens: 100, outputTokens: 50, totalTokens: 150, thoughtsTokens: 20 });
   });
 
   it('a zero the provider actually reported is kept as zero', () => {

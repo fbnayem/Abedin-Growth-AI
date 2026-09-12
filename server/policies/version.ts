@@ -14,11 +14,15 @@
  * (context bundles, thread resolution, ledgers) is not policy and is not listed. Prompt
  * templates are versioned separately, beside each template.
  */
-export const POLICY_VERSION = 1;
+// 2 — S37: the per-reply cost ceiling is integer cents and enforced from the provider's price
+//     table; an unpriced call is partial at the reply and charged the whole ceiling in the
+//     tenant ledger. Version 1 had a float in dollars that nothing compared.
+export const POLICY_VERSION = 2;
 
 export const POLICY_SOURCES = [
   'server/domain/adjudication.ts',
   'server/policies/workflowBudgets.ts',
+  'server/policies/modelPricing.ts',
   'server/config/safeMode.ts',
   'server/domain/automatedMail.ts',
   'server/domain/attachmentPolicy.ts',

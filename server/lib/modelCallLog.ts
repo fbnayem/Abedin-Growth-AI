@@ -53,6 +53,8 @@ export interface ModelCallRecord {
   promptTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  /** Thinking tokens, reported separately by the provider and billed as output (S37). */
+  thoughtsTokens: number | null;
   durationMs: number;
   /** One line per failed candidate, so a silent failover is legible after the fact. */
   failures: string[];
@@ -126,17 +128,19 @@ export function readUsage(usage: unknown): {
   promptTokens: number | null;
   outputTokens: number | null;
   totalTokens: number | null;
+  thoughtsTokens: number | null;
 } {
   const pick = (value: unknown): number | null =>
     typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 
   if (usage === null || typeof usage !== 'object') {
-    return { promptTokens: null, outputTokens: null, totalTokens: null };
+    return { promptTokens: null, outputTokens: null, totalTokens: null, thoughtsTokens: null };
   }
   const u = usage as Record<string, unknown>;
   return {
     promptTokens: pick(u.promptTokenCount),
     outputTokens: pick(u.candidatesTokenCount),
     totalTokens: pick(u.totalTokenCount),
+    thoughtsTokens: pick(u.thoughtsTokenCount),
   };
 }

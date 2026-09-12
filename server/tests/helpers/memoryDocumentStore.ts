@@ -32,9 +32,16 @@ class MemoryDocumentStore {
    */
   beforeTransactionRead: (() => void) | null = null;
 
+  /** When set, every transaction throws with this message before its body runs — the datastore failing. */
+  failTransactionsWith: string | null = null;
+  /** When set, every plain read throws with this message — the datastore unreadable. */
+  failReadsWith: string | null = null;
+
   reset(): void {
     this.docs = {};
     this.beforeTransactionRead = null;
+    this.failTransactionsWith = null;
+    this.failReadsWith = null;
   }
 
   /** Every document under one collection path, keyed by id. */
@@ -90,7 +97,10 @@ function buildModule(m: MemoryDocumentStore) {
     limit: (value: number) => ({ kind: 'limit', value }),
     orderBy: () => ({ kind: 'orderBy' }),
 
-    getDoc: async (ref: any) => snapshot(pathOf(ref), ref),
+    getDoc: async (ref: any) => {
+      if (m.failReadsWith !== null) throw new Error(m.failReadsWith);
+      return snapshot(pathOf(ref), ref);
+    },
     getDocs: async (q: any) => {
       const prefix = q.collectionPath + '/';
       const docs = Object.entries(m.collection(q.collectionPath))
@@ -115,6 +125,7 @@ function buildModule(m: MemoryDocumentStore) {
     },
 
     runTransaction: async (_db: unknown, fn: any) => {
+      if (m.failTransactionsWith !== null) throw new Error(m.failTransactionsWith);
       const pendingSet: Record<string, StoredDoc> = {};
       const pendingUpdate: Record<string, StoredDoc> = {};
       const result = await fn({

@@ -1,4 +1,6 @@
-import { BudgetTracker } from '../policies/workflowBudgets';
+import { BudgetTracker, ledgerChargeFor } from '../policies/workflowBudgets';
+import { costOfCall } from '../policies/modelPricing';
+import { tenantSpendGate, recordTenantSpend } from './tenantSpend.service';
 import { withModelCallCollector, type ModelCallRecord } from '../lib/modelCallLog';
 import { runLogFieldsFor, writeRunLog } from '../lib/runLog';
 import { buildContextBundle, type ContextKind } from '../domain/contextBundle';
@@ -242,7 +244,10 @@ export class InboundPipeline {
           // This CAN throw BUDGET_EXCEEDED, deliberately: a ceiling that only reports after
           // the work is finished is not a ceiling. The throw surfaces inside the pipeline and
           // is caught below as a failure outcome, which is where it belongs.
-          budgetTracker.recordModelCall(call.totalTokens);
+          // S37 — priced here, from the provider's table, on the record the provider produced.
+          // An unpriced call is partial at the reply and charged the ceiling in the ledger.
+          const cost = costOfCall(call);
+          budgetTracker.recordModelCall(call.totalTokens, cost.costMinor, cost.upperBound);
         },
       },
       () => this.runPipeline(email, organizationId, budgetTracker, modelCalls)
@@ -257,6 +262,7 @@ export class InboundPipeline {
     //
     // Nothing wrote one of these before: `/api/logs` read a collection with no producer, and
     // the PostgreSQL table with the right columns had never had a row inserted.
+    const spend = budgetTracker.snapshot();
     if (isValidOrgId(organizationId)) {
       // The status mapping lives in runLog.ts as a pure function, not inline here. As four
       // lines in this method it was untestable, and mutating it to record a FAILED run as
@@ -279,9 +285,20 @@ export class InboundPipeline {
         contextIds: outcome.contextIds ?? null,
         durationMs: Date.now() - startedAt,
         modelCalls,
-        budget: budgetTracker.snapshot(),
+        budget: spend,
         now: new Date().toISOString(),
       });
+
+      // S37 — the tenant ledger, from the same snapshot the run log carries, in one transaction
+      // per run. Only runs that called a model are charged; a bounce classified without one
+      // spends nothing and writes nothing. A failed write is loud and remembered: the gate
+      // refuses further model calls in this process until a write succeeds.
+      if (spend.modelCalls > 0) {
+        const recorded = await recordTenantSpend(organizationId, ledgerChargeFor(spend));
+        if (recorded.ok === false) {
+          console.error(`[InboundPipeline] ${email?.id ?? 'unknown'}: ${recorded.reason}`);
+        }
+      }
     } else {
       // Refusing rather than writing under a default tenant: a run log is tenant-scoped data,
       // and an unattributable one would be filed under somebody (§1).
@@ -475,6 +492,26 @@ export class InboundPipeline {
           modelCalls,
           conversationId,
           messageId,
+        };
+      }
+
+      // S37 — THE TENANT'S SPEND, BEFORE THE FIRST MODEL CALL.
+      //
+      // Here and not at the top: the steps above touch no model, and a tenant over budget must
+      // still have its inbound mail stored and threaded — a refusal to spend is not a refusal
+      // to listen. Everything from here on can spend. The gate fails closed when the ledger
+      // cannot be read, and while a spend write in this process has failed and not since
+      // succeeded (see tenantSpend.service.ts).
+      const spendGate = await tenantSpendGate(organizationId);
+      if (spendGate.allowed === false) {
+        console.error(`[InboundPipeline] ${email.id}: refusing to call a model. ${spendGate.reason}`);
+        return {
+          ok: false,
+          stage: 'BUDGET',
+          detail: spendGate.reason,
+          modelCalls,
+          conversationId,
+          messageId: email.id,
         };
       }
 

@@ -22,7 +22,10 @@ import { POLICY_SOURCES, POLICY_VERSION } from '../policies/version';
 const RECORDED: Record<string, string> = {
   'composeAutonomousSalesReply@1': '71f58fefb7de3c21',
   'conversationMemoryAgent@1': '36ac0b7cfd16f9e3',
+  // policy@1 stays recorded: it is what runs before S37 were governed by, and a row saying
+  // policyVersion 1 must remain answerable.
   'policy@1': 'b34d34da5829493c',
+  'policy@2': '6156e38d29cd11f1',
 };
 
 const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n');

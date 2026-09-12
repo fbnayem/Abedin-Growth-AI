@@ -57,6 +57,7 @@ import { resolvePort } from "./server/config/port";
 import { stringField } from "./server/lib/fields";
 import { mergeSingletonBody } from "./server/lib/singleton";
 import { actionTrailRouter } from "./server/routes/actionTrail.routes";
+import { spendRouter } from "./server/routes/spend.routes";
 
 import { processGrowthCommand } from './server/agents/growthCommandAgent';
 import { simulatePitchBattle } from './server/agents/pitchBattleAgent';
@@ -209,6 +210,7 @@ for (const aiPath of [
   app.use("/api/autonomy", autonomyRouter);
   // S10 — the audit trail had one writer and no reader anywhere in the repository.
   app.use("/api/actions", actionTrailRouter);
+  app.use("/api/spend", spendRouter);
   app.use("/api/unsubscribe", unsubscribeRouter);
   app.use(CSP_REPORT_PATH, cspReportRouter);
 

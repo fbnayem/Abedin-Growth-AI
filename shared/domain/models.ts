@@ -750,12 +750,17 @@ export interface AIRunLog {
   tokensArePartial?: boolean;
   unmeasuredCalls?: number;
   /**
-   * Null, and it says why in `costEnforcement`. Converting tokens to pounds needs a per-model
-   * price table that does not exist in this repository; a zero here would read as "free".
+   * S37 — USD cents, from the provider's published prices (server/policies/modelPricing.ts),
+   * in the provider's currency. The KNOWN sum: `costIsPartial` says a call could not be priced,
+   * `costIsUpperBound` says a call was priced conservatively. Never a placeholder, never a zero
+   * standing in for an unknown; the tenant ledger charges an unpriced call the whole per-reply
+   * ceiling instead.
    */
-  costMinor?: number | null;
-  currency?: string | null;
-  costEnforcement?: string | null;
+  costMinor?: number;
+  currency?: 'USD' | null;
+  costIsPartial?: boolean;
+  costIsUpperBound?: boolean;
+  unpricedCalls?: number;
 }
 
 export interface AutopilotCycleLog {

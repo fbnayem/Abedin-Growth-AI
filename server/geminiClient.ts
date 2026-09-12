@@ -264,6 +264,7 @@ export async function generateJsonOrAbstain<T = any>(
     promptTokens: null,
     outputTokens: null,
     totalTokens: null,
+    thoughtsTokens: null,
     durationMs: Date.now() - startedAt,
     failures: [...failures],
     promptHash,

@@ -174,11 +174,14 @@ export function buildRunLog(input: RunLogInput): AIRunLog {
     reportedTokens: input.budget.tokens,
     tokensArePartial: input.budget.tokensArePartial,
     unmeasuredCalls: input.budget.unmeasuredCalls,
-    // Null rather than 0, with the reason travelling beside it. A zero here would be read as
-    // "this run was free", which is the fabricated £0.01 wearing different clothes.
-    costMinor: null,
-    currency: null,
-    costEnforcement: input.budget.costEnforcement,
+    // S37 — from the provider's prices, in the provider's currency. The known sum, with the two
+    // flags that say when it is not the whole story. The sentence that sat here ("NOT enforced:
+    // no price table exists") was true when written and is gone with the table.
+    costMinor: input.budget.costMinor,
+    currency: input.budget.costCurrency,
+    costIsPartial: input.budget.costIsPartial,
+    costIsUpperBound: input.budget.costIsUpperBound,
+    unpricedCalls: input.budget.unpricedCalls,
     // S22 — the rules this run was decided under. A constant, not an input: every run in a
     // process is governed by the same policy, and the test that pins the constant to the policy
     // sources is what makes the number mean something.
