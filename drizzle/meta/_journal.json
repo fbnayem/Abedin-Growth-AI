@@ -50,6 +50,20 @@
       "when": 1788813103141,
       "tag": "0006_document_store",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789172316228,
+      "tag": "0007_backfill_valid_from",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789172415849,
+      "tag": "0008_drop_ai_run_logs",
+      "breakpoints": true
     }
   ]
 }

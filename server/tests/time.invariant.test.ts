@@ -584,7 +584,8 @@ describe('P1.9 — time correctness', () => {
       // 76 -> 78: `documents.created_at` and `documents.updated_at`, added when the
       // Firestore collections moved into PostgreSQL. Both are timestamptz, which is the
       // property this ratchet exists to hold; the number moves, the rule does not.
-      expect(total).toBe(78);
+      // 78 -> 77: `ai_run_logs.created_at` left with its table (dropped by 0008; S22, S5).
+      expect(total).toBe(77);
       expect(zoned).toBe(total);
       expect(schema).not.toMatch(/timestamp\('[a-z0-9_]+'\)/);
     });

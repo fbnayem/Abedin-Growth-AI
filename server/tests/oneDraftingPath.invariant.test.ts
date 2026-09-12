@@ -174,10 +174,15 @@ describe('the manifest reaches the run log (§21)', () => {
     expect(args).not.toMatch(/contextHash: null,/);
   });
 
-  it('the schema columns the writer fills actually exist', () => {
-    const schema = readFileSync('server/db/schema.ts', 'utf8');
-    for (const column of ['context_hash', 'context_ids', 'prompt_hash', 'model']) {
-      expect(schema, column).toContain(column);
+  it('the fields the writer fills exist on the row it writes', () => {
+    // A document row, not the relational table (dropped by 0008 — it never had a writer).
+    const row = readFileSync('shared/domain/models.ts', 'utf8');
+    const start = row.indexOf('export interface AIRunLog {');
+    const shape = row.slice(start, row.indexOf('\n}\n', start));
+    const writer = readFileSync('server/lib/runLog.ts', 'utf8');
+    for (const field of ['contextHash', 'contextIds', 'promptHashes', 'models']) {
+      expect(shape, field).toContain(`${field}?:`);
+      expect(writer, field).toMatch(new RegExp(`^\\s+${field}: `, 'm'));
     }
   });
 });

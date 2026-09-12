@@ -460,75 +460,14 @@ export const oauthConnections = pgTable(
   ]
 );
 
-/**
- * RETIRED. THE LIVE RUN LOG IS `server/lib/runLog.ts`, IN THE DOCUMENT STORE (S22).
- *
- * WHY IT IS DEAD
- * --------------
- * This table had the right columns and never a single writer — an endpoint, a shape and a schema
- * that had never met (see the header of runLog.ts). The writer that closed that, in §1p, writes
- * the document collection `ai_run_logs` under the tenant path, and `/api/logs` reads the same.
- * Since the document store moved onto this PostgreSQL instance (§1x) the two have been one
- * database, so this is not "the relational copy": it is a second, empty table with the same
- * columns as the live one.
- *
- * WHY IT IS STILL HERE, AND UNTIL WHEN
- * -----------------------------------
- * Unlike `outbox_messages` above, there are no rows to preserve — nothing ever inserted one. It
- * is kept only until S5 drops it with a migration that carries a rollback, because a DROP whose
- * reverse is written and tested is exactly the expand/contract demonstration S5 is missing, and
- * an ad hoc drop here would spend that opportunity. When that migration lands, this declaration
- * goes with it.
- *
- * WHAT GUARDS IT UNTIL THEN
- * -------------------------
- * The columns being identical to the live log's is what makes it dangerous: a developer who
- * greps for `promptHash` finds this, inserts into it, and `/api/logs` never sees the row.
- * `deadSchema.invariant.test.ts` fails if anything inserts into, reads from, or so much as
- * IMPORTS this symbol outside this file. `dataStore.ts` imported it and used only an in-memory
- * array of the same name, seeded with fabricated SUCCESS rows that nothing read; both are gone.
+/*
+ * `ai_run_logs` was declared here from 0001 to 0007 and never had a writer: the run log has been
+ * written to the document collection of the same name since §1p (server/lib/runLog.ts). It was
+ * RETIRED in S22 and guarded by deadSchema.invariant until S5 could drop it properly — migration
+ * 0008 is the contract step, and drizzle/down/0008_*.down.sql is the reverse that recreates it.
+ * The guard now holds the symbol absent rather than retired.
  */
-export const aiRunLogs = pgTable(
-  'ai_run_logs',
-  {
-    id: varchar('id', { length: 255 }).primaryKey(),
-    organizationId: varchar('organization_id', { length: 255 }).references(() => organizations.id).notNull(),
-    agentType: varchar('agent_type', { length: 50 }).notNull(),
-    actionType: varchar('action_type', { length: 50 }),
-    summary: text('summary'),
-    status: varchar('status', { length: 50 }),
 
-    /**
-     * P1.8 — What the model was actually shown, and what it cost (§21).
-     *
-     * Without these a bad reply cannot be explained. "Why did it say that?" has no answer
-     * when the prompt was assembled by concatenating whatever happened to be in scope and
-     * then discarded. `contextIds` is the manifest from buildContextBundle: every record that
-     * went in, addressable, so the exact input can be reconstructed afterwards.
-     *
-     * `promptHash` and `contextHash` are separate on purpose. The same context can produce a
-     * different prompt if the template changes, and the same prompt can be built from
-     * different context if selection changes — telling those two apart is the difference
-     * between "we changed the wording" and "we showed it different facts".
-     */
-    model: varchar('model', { length: 100 }),
-    promptHash: varchar('prompt_hash', { length: 64 }),
-    contextHash: varchar('context_hash', { length: 64 }),
-    contextIds: text('context_ids'),
-    promptTokens: integer('prompt_tokens'),
-    completionTokens: integer('completion_tokens'),
-    /** Cost in minor units, so a fraction of a penny cannot drift a total (see P1.7). */
-    costMinor: integer('cost_minor'),
-    currency: varchar('currency', { length: 3 }),
-
-    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
-  },
-  // Per-tenant cost and usage attribution is impossible without organization_id; that it was
-  // missing is part of why S46 (budgets) has nothing to enforce against. The reproducibility
-  // fields above landed with P1.8; what remains for P3.5 is the prompt VERSION (the template
-  // identity, as distinct from the hash of one rendering of it).
-  (t) => [index('ai_run_logs_org_idx').on(t.organizationId, t.createdAt)]
-);
 
 export const customerCommitments = pgTable(
   'customer_commitments',

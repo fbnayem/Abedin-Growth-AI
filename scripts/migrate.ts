@@ -66,7 +66,8 @@ if (!url) {
   );
   const unaccounted = tablesNoMigrationCreates(
     standing.rows.map((r) => r.name as string),
-    tablesCreatedByMigrations('drizzle').tables
+    // S5 — everCreated: a table a pending migration is about to drop is accounted for.
+    tablesCreatedByMigrations('drizzle').everCreated
   );
   if (unaccounted.length > 0) {
     console.error(

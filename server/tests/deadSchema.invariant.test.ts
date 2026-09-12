@@ -321,8 +321,14 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
  */
 const RETIRED = [
   { symbol: 'outboxMessages', table: 'outbox_messages', live: 'server/services/outbox.service.ts' },
-  { symbol: 'aiRunLogs', table: 'ai_run_logs', live: 'server/lib/runLog.ts' },
 ] as const;
+
+/**
+ * Retired, then DROPPED. `ai_run_logs` sat in this list from S22 until S5 wrote migration 0008 —
+ * the contract step, with a reverse that recreates it. What is held now is stronger than
+ * "retired": the symbol exists nowhere, and a migration drops the table.
+ */
+const DROPPED = [{ symbol: 'aiRunLogs', table: 'ai_run_logs', by: 'drizzle/0008_drop_ai_run_logs.sql' }] as const;
 
 describe('3. the retired tables do not acquire a writer, a reader, or an importer', () => {
   for (const { symbol, table, live } of RETIRED) {
@@ -359,6 +365,15 @@ describe('3. the retired tables do not acquire a writer, a reader, or an importe
       const note = schema.slice(0, declaration).slice(-2500);
       expect(note).toContain('RETIRED');
       expect(note).toContain(live.split('/').pop()!);
+    });
+  }
+
+  for (const { symbol, table, by } of DROPPED) {
+    it(`${table} is declared nowhere and dropped by ${by}`, () => {
+      const mention = new RegExp('\b' + symbol + '\b');
+      const anywhere = SOURCES.filter(({ code }) => mention.test(code)).map(({ path }) => path);
+      expect(anywhere, `${symbol} is still declared or referenced`).toEqual([]);
+      expect(readFileSync(by, 'utf8')).toMatch(new RegExp('DROP TABLE "' + table + '"'));
     });
   }
 

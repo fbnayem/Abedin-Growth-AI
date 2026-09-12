@@ -96,7 +96,9 @@ say(`    ok — ${manifest.tables.length} tables, ${manifest.totalRows} rows, ta
  * re-runnable that worked exactly once, and said nothing, because its verification only runs
  * after the step that failed.
  */
-const APP_TABLES = tablesCreatedByMigrations('drizzle').tables;
+// S5 — everCreated, not tables: a database one migration behind still holds the table the
+// pending migration drops, and a rebuild from nothing must drop that table too.
+const APP_TABLES = tablesCreatedByMigrations('drizzle').everCreated;
 
 /**
  * Tables the backup holds that no migration creates. Not fatal — a migration is allowed to have

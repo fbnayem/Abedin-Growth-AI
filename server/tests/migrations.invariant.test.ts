@@ -123,8 +123,12 @@ describe('1. the latest migration describes exactly what schema.ts declares', ()
     expect(latest.get('messages')?.has('html_as_text')).toBe(true);
     expect(latest.get('messages')?.has('sanitized_html_body')).toBe(false);
     expect(latest.get('meetings')?.has('start_at_utc')).toBe(true);
-    expect(latest.get('ai_run_logs')?.has('prompt_hash')).toBe(true);
-    expect(latest.get('ai_run_logs')?.has('context_hash')).toBe(true);
+    // ai_run_logs gained these in 0005 and was dropped by 0008 (S22, S5): the columns are checked
+    // on the last rung that holds the table, and the top rung is checked to have let it go.
+    const lastWithTable = snapshotSchema(snapshotFor(7));
+    expect(lastWithTable.get('ai_run_logs')?.has('prompt_hash')).toBe(true);
+    expect(lastWithTable.get('ai_run_logs')?.has('context_hash')).toBe(true);
+    expect(latest.has('ai_run_logs')).toBe(false);
   });
 });
 

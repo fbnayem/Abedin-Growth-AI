@@ -19,6 +19,7 @@
     "verify": "npm run lint && npm run guardrails && npm test",
     "migrate": "tsx scripts/migrate.ts",
     "db:verify": "tsx scripts/db-verify.ts",
+    "db:rollback": "tsx scripts/db-rollback.ts",
     "store:verify": "tsx scripts/store-verify.ts",
     "db:grants": "tsx scripts/db-grants.ts",
     "db:tls-pin": "tsx scripts/db-tls-pin.ts"
@@ -46,6 +47,7 @@
     "zod": "^4.5.2"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",

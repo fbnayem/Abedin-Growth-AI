@@ -322,9 +322,16 @@ describe('P1.8 — the defects this replaces are gone from the source', () => {
   });
 
   it('the run log can record what the model was shown', () => {
-    const schema = readFileSync('server/db/schema.ts', 'utf8');
-    for (const column of ['prompt_hash', 'context_hash', 'context_ids', 'prompt_tokens', 'completion_tokens', 'model']) {
-      expect(schema, column).toContain(column);
+    // The row is a document (server/lib/runLog.ts), typed in shared/domain/models.ts. The
+    // relational table that once carried these columns never had a writer and was dropped by
+    // migration 0008 (S22, S5); asserting them on schema.ts would be asserting a table nothing
+    // wrote to.
+    const row = readFileSync('shared/domain/models.ts', 'utf8');
+    const start = row.indexOf('export interface AIRunLog {');
+    expect(start).toBeGreaterThan(-1);
+    const shape = row.slice(start, row.indexOf('\n}\n', start));
+    for (const field of ['promptHashes', 'contextHash', 'contextIds', 'reportedTokens', 'models']) {
+      expect(shape, field).toContain(field);
     }
   });
 });

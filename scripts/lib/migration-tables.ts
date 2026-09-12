@@ -86,6 +86,14 @@ export interface MigrationTables {
   readonly tables: readonly string[];
   /** What each file did, for a caller that wants to say where a table came from. */
   readonly createdIn: ReadonlyMap<string, string>;
+  /**
+   * Every table any migration has EVER created, sorted, including ones a later migration drops
+   * (S5: 0008 drops ai_run_logs). This is the set to check a standing database against — a
+   * database one migration behind still holds the table the pending migration removes, and that
+   * table is accounted for, not foreign. It is also the set db-apply must drop to rebuild from
+   * nothing, or the replay of 0001 meets a table that already exists.
+   */
+  readonly everCreated: readonly string[];
 }
 
 /**
@@ -98,6 +106,7 @@ export interface MigrationTables {
 export function tablesCreatedByMigrations(dir = 'drizzle'): MigrationTables {
   const standing = new Set<string>();
   const createdIn = new Map<string, string>();
+  const everCreated = new Set<string>();
 
   for (const file of migrationFilesInOrder(dir)) {
     const sql = readFileSync(join(dir, file), 'utf8');
@@ -139,6 +148,7 @@ export function tablesCreatedByMigrations(dir = 'drizzle'): MigrationTables {
       }
       standing.add(name);
       createdIn.set(name, file);
+      everCreated.add(name);
     }
     for (const m of drops) {
       const name = unquote(m[1]);
@@ -161,7 +171,7 @@ export function tablesCreatedByMigrations(dir = 'drizzle'): MigrationTables {
     }
   }
 
-  return { tables: [...standing].sort(), createdIn };
+  return { tables: [...standing].sort(), createdIn, everCreated: [...everCreated].sort() };
 }
 
 /**
