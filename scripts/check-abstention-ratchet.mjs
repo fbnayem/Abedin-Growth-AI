@@ -35,7 +35,10 @@ import { join, relative } from 'node:path';
  */
 // 10 -> 9, 2026-09-12: companyBrainAgent converted. Its fallback was a hand-written brain,
 // stored as though generated whenever no model answered.
-const BASELINE = 9;
+// 9 -> 1, 2026-09-12: eight sites left with the dead agents the derived code graph named (S1):
+// campaign, meeting, investor, lead-scoring and partner agents, and the second inbound
+// pipeline's three. None was reachable, so none of the eight substitutes was ever served.
+const BASELINE = 1;
 
 const SCAN_ROOTS = ['server', 'src', 'shared'];
 const SCAN_FILES = ['server.ts'];

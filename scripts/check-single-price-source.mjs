@@ -53,10 +53,6 @@ const ALLOWED = [
     reason: 'Competitor cost comparison in pitch copy, not our price.',
   },
   {
-    file: 'server/agents/campaignAgent.ts',
-    reason: 'Campaign subject-line ROI claim, not a price.',
-  },
-  {
     file: 'server/agents/conversationMemoryAgent.ts',
     reason: 'Few-shot example text inside a prompt. Tracked for the P1.10 migration.',
   },
@@ -82,12 +78,6 @@ const ALLOWED = [
       'Estimated lost-revenue figures in recovery copy. ROI claims, not prices — and ' +
       'ungrounded ones: they are computed from "average dental clinic metrics" that no source ' +
       'in this repository provides. Tracked for P1.8.',
-  },
-  {
-    file: 'src/components/ObjectionMatrixResolver.tsx',
-    reason:
-      'Average patient appointment fees (£120-£200) used in an ROI comparison. The clinic ' +
-      "customer's own prices. Every figure of OURS in this file renders from the price book.",
   },
   {
     file: 'src/components/SequenceCadenceViewer.tsx',

@@ -1107,9 +1107,9 @@ export interface MeetingReadinessResult {
  * drifting by the compiler, so it would have gone on describing an auditor that no longer
  * exists until someone believed it.
  *
- * `specialistsConsulted` went with it. It described four specialist agents; one exists
- * (technical.agent.ts) and its only call site is inside pipeline.service.ts, a second
- * inbound pipeline nothing imports.
+ * `specialistsConsulted` went with it. It described four specialist agents; one existed
+ * (technical.agent.ts), reached by nothing once its caller went, and it was deleted with
+ * the rest of the dead set when the code graph became derived (S1, 2026-09-12).
  */
 
 export interface CircuitBreakerState {

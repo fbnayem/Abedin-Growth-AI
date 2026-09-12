@@ -20,10 +20,14 @@
     "migrate": "tsx scripts/migrate.ts",
     "db:verify": "tsx scripts/db-verify.ts",
     "db:rollback": "tsx scripts/db-rollback.ts",
+    "db:apply": "tsx scripts/db-apply.ts",
     "openapi": "tsx scripts/generate-openapi.ts",
+    "code-graph": "tsx scripts/generate-code-graph.ts",
     "store:verify": "tsx scripts/store-verify.ts",
     "db:grants": "tsx scripts/db-grants.ts",
-    "db:tls-pin": "tsx scripts/db-tls-pin.ts"
+    "db:tls-pin": "tsx scripts/db-tls-pin.ts",
+    "outbox:backfill-version": "tsx scripts/backfill-outbox-version.ts",
+    "org:claim": "node scripts/set-org-claim.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

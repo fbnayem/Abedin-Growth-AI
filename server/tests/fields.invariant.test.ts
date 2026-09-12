@@ -148,17 +148,4 @@ describe('5. a union the system can check at runtime', () => {
     expect(memberOf(INVESTOR_STAGES, 'seed', 'PRE_SEED')).toBe('PRE_SEED');
     expect(memberOf(INVESTOR_STAGES, ' SEED ', 'PRE_SEED')).toBe('PRE_SEED');
   });
-
-  it('the three discovery agents validate model output instead of asserting it', () => {
-    const sites: [string, string][] = [
-      ['server/agents/investorAgent.ts', 'memberOf(INVESTOR_STATUSES, item.status'],
-      ['server/agents/partnerAgent.ts', 'memberOf(PARTNER_STATUSES, item.status'],
-      ['server/agents/leadScoringAgent.ts', 'memberOf(LEAD_STATUSES, item.status'],
-    ];
-    for (const [path, needle] of sites) {
-      const code = strip(path);
-      expect(code, path).toContain(needle);
-      expect(code, path).not.toMatch(/status: \(item\.status as any\)/);
-    }
-  });
 });

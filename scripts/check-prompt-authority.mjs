@@ -36,8 +36,14 @@ import { join, relative } from 'node:path';
  *     into the instruction inside two double quotes.
  *   - conversationMemoryAgent.extractAndSynthesizeMemory — interpolated the ENTIRE conversation
  *     transcript, and runs on every inbound message with no feature flag.
+ *
+ * 2026-09-12: eight legacy sites left with the dead agents the derived code graph named (S1) —
+ * campaign, meeting, investor, lead-scoring and partner agents, and the second inbound pipeline's
+ * understanding, composer and technical agents; none was reachable, so none was ever migrated.
+ * pitchBattleAgent, which had built its own SDK client and was invisible here, now calls through
+ * geminiClient in the separated form. Two remain.
  */
-const BASELINE = 10;
+const BASELINE = 2;
 
 /**
  * The model-call functions whose options this scans.

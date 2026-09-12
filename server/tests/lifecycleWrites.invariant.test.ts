@@ -102,7 +102,6 @@ describe('1. creation asks a question transitions cannot answer', () => {
     { what: 'POST /api/campaigns', machine: CAMPAIGN, file: 'server.ts', anchor: 'const newCampaign = {' },
     { what: 'POST /api/meetings', machine: MEETING, file: 'server.ts', anchor: 'id: "meet_" + Date.now(),' },
     { what: 'POST /api/knowledge', machine: KNOWLEDGE_ITEM, file: 'server.ts', anchor: 'id: `kno_${Date.now()}`,' },
-    { what: 'campaignAgent', machine: CAMPAIGN, file: 'server/agents/campaignAgent.ts', anchor: 'agentName: "campaignAgent",' },
   ];
 
   for (const { what, machine, file, anchor } of creations) {
