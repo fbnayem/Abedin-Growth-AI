@@ -3846,6 +3846,40 @@ The third part — cost recorded as `null` — is not reproducibility. It is the
 table S37 needs, and the row says so rather than counting a null as closed.
 
 Mutation: 4/4 for the retirement, 8/8 for the versions. Gate: 76 suites, 1,944 tests.
+### S37 — cost control: a price table that is the provider's, and a budget per tenant
+
+Two of the row's four complaints had closed in earlier sections; two had not. There was no price
+table, so the run log's `costMinor` was `null` with a sentence explaining why — true, and the
+only honest alternative to inventing figures, which the fabricated `£0.01` it replaced had done.
+And nothing bounded a tenant: `BudgetTracker` bounds one reply, so a thousand inbound messages
+were a thousand independently bounded replies and the sum was nobody's number.
+
+The table is copied from the provider's published pricing page — dated, sourced, USD cents per
+million tokens — and the tests pin what the table promises rather than what it says: thinking
+tokens are billed as output from the count the provider reports separately; a call rounds up to
+a whole cent; an unlisted model (the client's `gemini-flash-latest` alias is one) is charged at
+the dearest listed rate and marked an upper bound; the long-context and dated tiers come from
+the call's own prompt size and time, not from a flag. The figures will change, and when they do
+the table is re-read from the same page and the date moves.
+
+The tenant budget is two running totals under the tenant's path, UTC day and UTC month, written
+in one serializable transaction per run beside the run log, and read by a gate placed
+immediately before the first model call — after the store-dependent steps, because a refusal to
+spend is not a refusal to listen. The gate fails closed twice: when the ledger cannot be read,
+and while a spend write in this process has failed and not since succeeded. A call the provider
+did not report enough usage to price is treated differently in the two places on purpose — at
+the reply it is partial and does not fake a breach, the rule `observability.invariant` had
+already pinned for tokens; in the ledger, where the money accumulates, it is charged the whole
+per-reply ceiling, so a provider that stops reporting usage runs the tenant into its limit at the
+fastest rate the policy allows and then stops, visibly, at stage BUDGET.
+
+This changed the budget policy, so `POLICY_VERSION` moved to 2 and the previous fingerprint
+stays recorded under 1 — the mechanism §1ae's S22 entry describes, used for the first time by the
+next row along. `GET /api/spend` shows the totals against the limits. Found while here and left
+as found: `getModelForCategory` sends FAST, SMART and DEEP to the same pro-priced model.
+
+Mutation: 12/12. Gate: 78 suites, 1,983 tests.
+
 ---
 
 ## 2. Executive Summary
@@ -3854,13 +3888,13 @@ Mutation: 4/4 for the retirement, 8/8 for the versions. Gate: 76 suites, 1,944 t
 
 | State | Count | Sections |
 |---|---:|---|
-| `VERIFIED` | **40** | S2, S3, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
+| `VERIFIED` | **41** | S2, S3, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
 | `IMPLEMENTED_UNVERIFIED` | **0** | — |
-| `PARTIAL` | **9** | S1, S4, S5, S11, S25, S26, S27, S37, S39 |
+| `PARTIAL` | **8** | S1, S4, S5, S11, S25, S26, S27, S39 |
 | `NOT_STARTED` | **0** | — |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-40 + 0 + 9 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad and §1ae. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
+41 + 0 + 8 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad and §1ae. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
 
 | Severity | Count |
 |---|---:|
@@ -3975,7 +4009,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S34 | CSV / spreadsheet formula injection on export | VERIFIED | HIGH | `src/utils/exportUtils.ts:39-40`, `:18`; `LeadsView.tsx:198`; `server.ts:112-119` | Only `"` is doubled; no neutralisation of `=`, `+`, `-`, `@`, tab or CR; columns derived from `Object.keys(data[0])`, so attacker-injected keys become columns |
 | S35 | Frontend HTML safety / rendering untrusted provider HTML | VERIFIED | HIGH | zero `dangerouslySetInnerHTML` in `src/`; `inboundPipeline.ts:65`; `db/schema.ts:116`; `index.html`; `gmailWorkspaceService.ts:44,71,161` | Landed 2026-09-07 (§1t). The absence of a sink is now an enforced control: `check-no-html-sink` (the 11th guardrail) fails on `dangerouslySetInnerHTML`, `innerHTML =`, `insertAdjacentHTML`, `document.write` and on the return of the name `sanitizedHtmlBody`. Provider HTML reaches every reader as TEXT (`htmlToText`, which drops script CONTENT rather than flattening it) and the raw form is stored under a name that says it is untrusted. No HTML sanitizer was written, on purpose: a hand-rolled one that emits HTML is a known way to ship the hole it claims to close. ~~**Remainder: still no CSP, and the Gmail send token is still in `localStorage`.** Severity is HIGH, not MEDIUM: the stored-XSS sink would exfiltrate the live Gmail **send** credential sitting in `localStorage`~~ **CORRECTED 2026-09-08 (§1z) — both halves of that remainder were wrong.** A CSP now exists (`server/middleware/securityHeaders.ts`), set on every response before any route can answer. And the token was **already** out of `localStorage` when this row was written: it moved to memory-only in `b94c7d4` on 2026-09-06, and this row is from `a99ce83` on 2026-09-07 — an outstanding remainder that had been closed the day before, used here to justify the severity. **Severity stays HIGH**, on the corrected ground: a script injected into this origin can still read the in-memory token out of the running page and exfiltrate every rendered inbox message. Persistence was never the only route |
 | S36 | Rate limits and quotas | VERIFIED | CRITICAL | `package.json:16-37`; `server.ts:58,60-67,337`; `auth.ts:17-21`; `geminiClient.ts:113-143` | No limiter of any kind; anonymous callers admitted as `preview_uid`; expensive Gemini endpoints share the same (absent) protection as reads; no 429 anywhere |
-| S37 | AI and provider cost control | PARTIAL | CRITICAL | `workflowBudgets.ts:10-17` vs `aiSafety.service.ts:13-20`; `inboundPipeline.ts:117`; `salesDecisionEngine.ts:35-40` | Two conflicting budget definitions; the one call site feeds hardcoded literals so no limit can trip; no per-tenant/daily/monthly budget; the cost breaker is never tripped by any code |
+| S37 | AI and provider cost control | VERIFIED | CRITICAL | `workflowBudgets.ts:10-17` vs `aiSafety.service.ts:13-20`; `inboundPipeline.ts:117`; `salesDecisionEngine.ts:35-40` | **Closed 2026-09-12.** The four things this row named: the second budget definition was deleted with `aiSafety.service.ts` (§1ab); the hardcoded literals were replaced by provider-reported usage (§1u); and the two that remained are closed here. `server/policies/modelPricing.ts` is the price table that did not exist — copied from the provider's published page, dated (page 2026-09-11, read 2026-09-12), USD cents per million tokens, thinking billed as output from the separately reported count, rounded UP per call, an unlisted model charged at the dearest listed rate as an upper bound (`gemini-flash-latest` is one of the client's failover candidates and is not on the page). The per-reply ceiling is integer cents and binds. `server/services/tenantSpend.service.ts` is the budget per TENANT per UTC day and month that never existed: two running totals under the tenant path, written in one transaction per run beside the run log, read by a gate placed immediately before the first model call — after the store-dependent steps, so a tenant over budget still has its mail stored and threaded. The gate fails closed when the ledger cannot be read and while a spend write has failed and not since succeeded. A call the provider did not report enough usage to price is PARTIAL at the reply (no invented breach, the rule `observability.invariant` already pinned for tokens) and charged the whole per-reply ceiling in the ledger, so a provider that stops reporting usage runs the tenant into its limit at the fastest rate the policy allows and stops, visibly. Limits are configuration with deliberately low defaults ($5/day, $50/month), zero legal, malformed refused at boot; `GET /api/spend` shows the totals against them. `POLICY_VERSION` 2 — the fingerprint mechanism's first use. Residuals, named: the figures are the provider's and must be re-read when the page changes (the tests pin the table's shape and arithmetic, not its numbers); the degraded flag is process-local, so a second replica keeps spending until its own write fails or the durable limit stops it; and `getModelForCategory` sends FAST, SMART and DEEP to the same pro-priced model, so the category labels have no effect on cost — a routing decision left to the product, recorded here. Mutation: 12/12. `modelPricing.invariant` (17), `tenantSpend.invariant` (18), `observability.invariant` and `runLog.invariant` updated |
 | S38 | Recovery console / safe operator tooling | VERIFIED | CRITICAL | `outbox.routes.ts:13,20-38`; `server.ts:337` vs `:560`; `killSwitch.controller.ts:15`; live probe `GET /api/outbox` → 500 | **There is no operator tooling — there is operator-tooling-shaped UI.** The console reads a store the queue does not live in; the kill switch is a stub that returns no `circuitBreaker` field, so the panel crashes; there is no retry, requeue or dead-letter of any kind; operator actions are unaudited and unauthenticated |
 | S39 | Monolith: ~75 route registrations against empty decomposition folders | PARTIAL | CRITICAL | `server.ts:309-344`, `:760-826`, `:62`, `:193-195` | ~70 of ~75 endpoints inline; controller and repository layers are 100% dead; ~30 hardcoded success stubs; zero request validation; webhooks registered only in the production branch |
 | S40 | Dependency direction: UI imports server agents, cycles, domain→infrastructure | VERIFIED | HIGH | `src/App.tsx:60`; `server.ts:50`; `dataStore.ts:26` ↔ `multiAgentReplySystem.ts:3`; `inboundPipeline.ts:6,53` | **Closed 2026-09-12.** `AICommandResult` and `AICommandPlanStep` moved to `shared/domain/growthCommand.ts`, so the four React modules that imported a server agent to name them no longer do. No file under `src/` imports from `server/` — asserted over every `.ts`/`.tsx` in the tree by `server/tests/uiTypes.invariant.test.ts`, with the rule proved against the four imports it was written for. Only esbuild eliding an unused value import had kept `@google/genai` and its API-key read out of the browser bundle |
