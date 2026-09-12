@@ -3880,6 +3880,47 @@ as found: `getModelForCategory` sends FAST, SMART and DEEP to the same pro-price
 
 Mutation: 12/12. Gate: 78 suites, 1,983 tests.
 
+### S5 — migrations: a rollback that is demonstrated, and a backfill that is exercised
+
+The row said it plainly: zero rollback migrations, no test exercises a backfill, expand/contract
+is a claim. drizzle's migrator is forward-only and the tooling here was a rebuild-from-migrations
+script — correct, and not a rollback.
+
+Every migration now has a reverse under `drizzle/down/`, written as the statement-by-statement
+inverse of its up in reverse order. The seven historical reverses were generated once from the up
+text and committed as SQL a reader can check; the two new ones were written by hand. What keeps
+them honest is not that they exist. `scripts/lib/migration-reverse.ts` reads both files as
+catalogue effects and refuses a reverse that does not invert its up — with `DROP TABLE` understood
+to take the table's constraints and indexes with it, so a reverse that recreates them by name is
+not "extra" and one that drops them explicitly before the table is not either. The rollback
+script runs nothing before that check passes, runs as the owner role, one migration per
+transaction with the migrator's journal row removed in the same transaction, is a dry run unless
+confirmed, and refuses a data-dropping reverse without `--allow-data-loss` — after printing the
+row counts of the tables it names, so the decision is made with the number in view.
+
+The demonstration is `migrationRollback.invariant`, on PGlite: a real PostgreSQL engine in the
+test process, no server, no credential, no live table. It climbs all nine ups, photographing the
+catalogue — tables, columns, constraints, indexes — at each rung; descends every down and
+requires each rung's photograph back, exactly; climbs again to show a rollback is not a dead
+end; and checks that drizzle's own migrator arrives at the same top rung as the file-by-file
+applier, so the test's instrument is the deployment's. Structure first, engine second: the
+mutant that drops the index from 0008's reverse passes the structural check (the CASCADE
+absorbs it) and fails the engine, which is why both exist.
+
+The backfill is 0007. 0002 added `valid_from` to nine bitemporal tables and nothing has written it
+since, so every historical row said nothing about when it became valid. 0007 sets it to
+`created_at` where NULL — the most conservative start a record can vouch for — and its reverse
+nulls exactly what it filled, exact only because no application code writes that column there,
+which the suite asserts by name rather than assumes. The ladder seeds rows before rung seven and
+watches them fill and empty. 0008 is the contract step S22 left here: `ai_run_logs` dropped, its
+reverse recreating table, key and index, and `everCreated` added to the drop-set helper so a
+database one migration behind is read as behind, not as holding a foreign table.
+
+On the live instance, as the owner role, at commit 7646af3: `ai_run_logs` held 0 rows — the premise confirmed before anything moved; `npm run migrate` took the database from 7 to 9 (0007 filled `valid_from` on the two organisation rows that had none; 0008 dropped the table); `npm run db:rollback -- --steps=1` planned in a dry run and, confirmed, recreated table, key and index and took the journal to 8; `npm run migrate` re-applied 0008 to 9. An up, a down and an up on the real database, with a dry run before the confirm.
+
+Mutation: 8/9, then 4/4 once the surviving gate became a function. Gate: 79 suites, 2,002 tests. A new dev dependency, `@electric-sql/pglite`,
+with the advisories count unchanged at six.
+
 ---
 
 ## 2. Executive Summary
@@ -3888,13 +3929,13 @@ Mutation: 12/12. Gate: 78 suites, 1,983 tests.
 
 | State | Count | Sections |
 |---|---:|---|
-| `VERIFIED` | **41** | S2, S3, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
+| `VERIFIED` | **42** | S2, S3, S5, S6, S7, S8, S9, S10, S12, S13, S14, S15, S16, S17, S18, S19, S20, S21, S22, S23, S24, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S40, S41, S42, S43, S44, S45, S46, S47, S48, S49 |
 | `IMPLEMENTED_UNVERIFIED` | **0** | — |
-| `PARTIAL` | **8** | S1, S4, S5, S11, S25, S26, S27, S39 |
+| `PARTIAL` | **7** | S1, S4, S11, S25, S26, S27, S39 |
 | `NOT_STARTED` | **0** | — |
 | `NOT_ASSESSED` | **0** | all 49 sections are present in the assessment data |
 
-41 + 0 + 8 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad and §1ae. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
+42 + 0 + 7 + 0 = **49 rows**. *(Recomputed 2026-09-12 — see §1ad and §1ae. S10 moved to VERIFIED because the audit gate it was graded on now exists; S40 because `src/` no longer imports from `server/` at all; S6 because every status write on its eight entities now asks the map. The 2026-09-08 figures are in §1ac.)*
 
 | Severity | Count |
 |---|---:|
@@ -3976,7 +4017,7 @@ Approval is a single status flip: `db.update(outboxMessages).set({ status: 'PEND
 | S2 | Proof-based status: test inventory, runner, CI | VERIFIED | CRITICAL | `package.json:12-13`; `server/tests/adversarial.test.ts:29-41`; `server/tests/pipeline.test.ts:16-19`; no `.github` | Zero assertions repo-wide; no test runner; no CI; the one runnable test reports 4/4 unconditionally |
 | S3 | A message cannot become SENT without a real provider result | VERIFIED | CRITICAL | `server/workers/outbox.worker.ts:99-100`; `actionGateway.ts:204-207`; `server.ts:511,519` | `|| 'sim_' + Date.now()` fabricates provider ids; two paths return success with no network call; no reconciliation; no retry; unlocked claim |
 | S4 | Tenant integrity at database level | PARTIAL | CRITICAL | `server/tenancy/orgScope.ts`; `server/middleware/tenant.ts`; `server/db/schema.ts`; `firestore.rules:5` | **P1.1/P1.2 landed.** Request-scoped tenant from a signed claim; all 13 tables carry `organization_id NOT NULL`; all 5 composite uniques declared; by-id access 404s on a foreign id; 86 executable invariants. Still PARTIAL: `firestore.rules` remains `allow read, write: if true`, so the *datastore* enforces nothing and every control is bypassable by going direct; the PostgreSQL constraints have no writer |
-| S5 | Migration safety: expand/contract, rollback, backfill, tests | PARTIAL | HIGH | `drizzle/0005_catch_up_to_schema.sql`; `scripts/db-apply.ts`; `scripts/db-verify.ts`; `scripts/lib/migration-tables.ts`; `server/db/tls.ts`; `scripts/check-tls-verification.mjs`; `server/tests/migrations.invariant.test.ts`; `server/tests/databaseTls.invariant.test.ts` | **Advanced, not closed.** Migrations now describe `schema.ts` (0005: 2 renames, 76 timestamptz conversions with `AT TIME ZONE`, 11 added columns) and 29 invariants hold them there; drizzle's migrator is wired behind `scripts/db-apply.ts` with a mandatory backup, a pre-drop precondition and catalogue verification; `scripts/db-verify.ts` re-asks from cold. Still PARTIAL: zero down migrations and no up→down→up test; zero `CREATE INDEX`; the 0002 bitemporal columns are still NULL on every historical row; TLS verification is on and enforced by a 14th guardrail, though PINNED rather than CA-verified until the Cloud SQL server CA is supplied |
+| S5 | Migration safety: expand/contract, rollback, backfill, tests | VERIFIED | HIGH | `drizzle/0005_catch_up_to_schema.sql`; `scripts/db-apply.ts`; `scripts/db-verify.ts`; `scripts/lib/migration-tables.ts`; `server/db/tls.ts`; `scripts/check-tls-verification.mjs`; `server/tests/migrations.invariant.test.ts`; `server/tests/databaseTls.invariant.test.ts` | **Closed 2026-09-12.** Every migration has a reverse under `drizzle/down/`, written as the statement-by-statement inverse of its up (the seven historical ones generated once from the up text and committed as reviewable SQL; 0007 and 0008 by hand). `scripts/lib/migration-reverse.ts` reduces both files to catalogue effects and refuses a reverse that does not invert its up, CASCADE understood; `scripts/db-rollback.ts` runs a reverse as the owner role only after that check, one migration per transaction with the migrator's journal row removed alongside, dry run unless confirmed, and refuses a data-dropping reverse without `--allow-data-loss` after printing the row counts it would drop. `migrationRollback.invariant` climbs all nine ups on an in-process PostgreSQL (PGlite — no server, no credential, no live table), photographs the catalogue at each rung, descends every down and requires each rung's photograph back, then climbs again; and checks drizzle's own migrator reaches the same top rung. The backfill the row said no test exercised is 0007 (`valid_from` on the nine bitemporal tables, NULL on every historical row since 0002): rows go in before it, are filled by it, and are emptied by its reverse — which is exact only because no application code writes `valid_from` there, a premise the suite asserts by name. 0008 is the contract step S22 deferred here: `ai_run_logs` dropped, its reverse recreating table, key and index; `everCreated` in the drop-set helper keeps a database one migration behind from reading as foreign. On the live instance, as the owner role, at commit 7646af3: `ai_run_logs` held 0 rows — the premise confirmed before anything moved; `npm run migrate` took the database from 7 to 9 (0007 filled `valid_from` on the two organisation rows that had none; 0008 dropped the table); `npm run db:rollback -- --steps=1` planned in a dry run and, confirmed, recreated table, key and index and took the journal to 8; `npm run migrate` re-applied 0008 to 9. An up, a down and an up on the real database, with a dry run before the confirm. The row's "zero `CREATE INDEX`" was stale (0003 creates seventeen). Residual, named: TLS to the instance is PINNED rather than CA-verified until `DATABASE_CA_CERT_FILE` is supplied — console-only, as before. Mutation: 8/9, then 4/4 once the surviving gate became a function. `migrationRollback.invariant` (24) |
 | S6 | State machines: campaign, outbox, meeting, payment, opportunity, autopilot, knowledge | VERIFIED | CRITICAL | `server.ts:303`, `:318`, `:782`, `:744`; `salesDecisionEngine.ts:275-291` | **Closed 2026-09-12, in four passes.** The note here said "no transition map anywhere"; `stateMachines.ts` had eight. What was true is that the map was not the only way through. (1) `POST /api/campaigns` created campaigns ACTIVE — an arrived-at state — and no `isInitialState` existed to ask; campaigns are born DRAFT, activated in one click. (2) The kill switch cancelled queued jobs with its own `updateDoc` on a query snapshot; a first fix asked `assertTransition` there and claimed a race protection it did not have. It now goes through the outbox's transactional `cancelJob`, refused rows are counted and returned, and attribution is a state rather than the string `'unattributed'`. (3) Inside `outbox.service.ts`, under a comment saying every transition asked the map, four did not — and the lease reaper wrote from a snapshot with no transaction, so a slow worker's PROCESSED job could return to PENDING and be sent twice. All four ask the map inside a transaction; a late completion records itself truthfully (`PENDING -> PROCESSED`, `lateProviderMessageId`). (4) `POST /api/pipeline` honoured any KNOWN stage as a starting point, so an opportunity could be created WON under a comment saying otherwise — and the console's modal could not create one at all: it sent `currency: "£"` to a schema requiring three letters. `creationState` refuses a non-entry stage; the modal sends none and `GBP`; the board gains the NEW column it lacked. Every status write on the eight machines' entities now asks the map or is a pinned initial state — `lifecycleWrites.invariant` (29) and `outboxTransitions.invariant` (21, with a structural rule naming all eight outbox writers). Mutation: 4/6, then 9/10 (one equivalent, recorded), 10/10, and 6/6. Residuals, named: the datastore does not enforce the map (no CHECK or trigger); lease expiry is not proof of death, so a re-sent reaped job is detectable by Message-ID rather than prevented; the board renders 6 of 16 opportunity stages |
 | S7 | Optimistic concurrency (version / ETag / conditional write) | VERIFIED | HIGH | `server/db/schema.ts:287`; `server.ts:176-181`, `:193-198`, `:297-307` | No `version` column on any table; zero `runTransaction`/`writeBatch`/`increment`; no 409 anywhere; blind whole-document `setDoc` overwrites |
 | S8 | Inbound version stamping and draft staleness | VERIFIED | CRITICAL | `outbox.worker.ts:69`; `aiSafety.service.ts:25-34`; `inboundPipeline.ts:131-144` | **No staleness guard is on a live path.** The wall-clock comparison queries Postgres, which the Firestore write path never populates, so it evaluates zero rows and always passes; the version implementation has no callers and reads a field with no writer. Neither mechanism can ever return "stale" |
