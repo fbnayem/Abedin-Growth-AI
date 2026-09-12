@@ -549,6 +549,13 @@ export const objectionLedger = pgTable(
   (t) => [index('objection_ledger_org_conversation_idx').on(t.organizationId, t.conversationId)]
 );
 
+/**
+ * RETIRED (S25, 2026-09-12). Declared for quotes and never written; its contact foreign key
+ * points at the relational `contacts` table, and the API's contacts are documents. The live
+ * records are documents under `organizations/<org>/quotes`, keyed by the customer's normalised
+ * email and written by server/services/quote.service.ts. Do not write here; a row here is read
+ * by nothing.
+ */
 export const quoteSnapshots = pgTable(
   'quote_snapshots',
   {

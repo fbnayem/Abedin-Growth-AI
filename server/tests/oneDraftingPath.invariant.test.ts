@@ -132,7 +132,9 @@ describe('the live pipeline builds the bundle from real sources', () => {
   it('sources with no reader at all are declared unavailable rather than passed as empty', () => {
     // Commitments, quotes and company facts have no reachable reader on this path. Passing
     // `[]` for them would claim "there are none".
-    expect(pipeline).toMatch(/unavailable: \[\.\.\.unavailable, 'OUTSTANDING_COMMITMENT', 'QUOTE', 'COMPANY_FACT'\]/);
+    // S25 — quotes have a reader now, so QUOTE is unavailable only when the lookup did not run;
+    // the other two are still declared, not passed as empty.
+    expect(pipeline).toMatch(/unavailable: \[\s*\.\.\.unavailable,\s*'OUTSTANDING_COMMITMENT',\s*\.\.\.\(quoteLookup\.availability === 'LOADED' \? \[\] : \['QUOTE' as const\]\),\s*'COMPANY_FACT',\s*\]/);
   });
 
   it('ledger rows go through the adapter, which had zero callers', () => {
@@ -143,7 +145,7 @@ describe('the live pipeline builds the bundle from real sources', () => {
   });
 
   it('the bundle is passed to the planner, not built and discarded', () => {
-    expect(pipeline).toMatch(/contextBundle,\s*\n\s*\}\);/);
+    expect(pipeline).toMatch(/composeAutonomousSalesReply\(\{[\s\S]{0,1500}?contextBundle,[\s\S]{0,900}?\}\);/);
   });
 });
 

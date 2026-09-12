@@ -15,6 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { GmailMessage } from './gmail.service';
 import { outboxService } from './outbox.service';
 import { incrementInboundVersion, computeApprovalDigest } from './draftIntegrity.service';
+import { lookupQuotesForReply } from './quote.service';
 import { isValidOrgId } from '../tenancy/orgScope';
 // Import agents (we will build/refactor these)
 import { IdentityResolverService } from './identityResolver.service';
@@ -422,6 +423,12 @@ export class InboundPipeline {
       // 1. Identity Resolution
       const identityService = new IdentityResolverService();
       const identity = await identityService.resolve(email.from, organizationId);
+      // S25 — the customer's quotes, looked up by the address they wrote from, or the reason
+      // they could not be. Passed down as LOADED or NOT_LOOKED_UP; never as an empty list.
+      const quoteLookup = await lookupQuotesForReply(organizationId, email.from);
+      if (quoteLookup.availability === 'NOT_LOOKED_UP') {
+        console.warn(`[InboundPipeline] quotes not looked up for this sender: ${quoteLookup.reason}`);
+      }
 
       if (!identity.contactId) {
         console.log("Could not resolve contact. Dropping message or creating lead.");
@@ -749,9 +756,14 @@ export class InboundPipeline {
         // Not loaded on this path yet, and said so rather than passed as empty: neither has a
         // reachable reader here, so claiming "there are none" would be an invention.
         outstandingCommitments: adapted.outstandingCommitments,
-        quotes: [],
+        quotes: quoteLookup.availability === 'LOADED' ? quoteLookup.quotes : [],
         companyFacts: [],
-        unavailable: [...unavailable, 'OUTSTANDING_COMMITMENT', 'QUOTE', 'COMPANY_FACT'],
+        unavailable: [
+          ...unavailable,
+          'OUTSTANDING_COMMITMENT',
+          ...(quoteLookup.availability === 'LOADED' ? [] : ['QUOTE' as const]),
+          'COMPANY_FACT',
+        ],
         now: new Date().toISOString(),
       });
 
@@ -791,6 +803,13 @@ export class InboundPipeline {
         buyingStage: BuyingStage.DISCOVERY,
         rawInboundText: email.textBody || email.htmlAsText || '',
         contextBundle,
+        // S25 — the quote in force, if the lookup ran; a failed lookup is a reader that throws,
+        // which the composer treats as "refuse to draft pricing", not as "no quote".
+        activeQuote: quoteLookup.availability === 'LOADED' ? quoteLookup.activeQuote : null,
+        readQuotes: async () => {
+          if (quoteLookup.availability === 'LOADED') return quoteLookup.quotes;
+          throw new Error(quoteLookup.reason);
+        },
       });
 
       // 7a. S23 — ABSTENTION IS NOT SUPPRESSION.
@@ -868,7 +887,8 @@ export class InboundPipeline {
         emailUnderstanding: understanding,
         nextBestAction: nbaResult,
         conversationId,
-        quoteAvailability: 'NOT_LOOKED_UP',
+        quote: quoteLookup.availability === 'LOADED' ? quoteLookup.activeQuote : null,
+        quoteAvailability: quoteLookup.availability,
       });
 
       const auditReason =

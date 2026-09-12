@@ -28,6 +28,7 @@ import {
 import { LedgerService } from '../services/ledgers.service';
 import { type ContextBundle } from '../domain/contextBundle';
 import { pricingContextFor, type Quote } from '../../shared/domain/quote';
+import { quotesForEmail } from '../services/quote.service';
 import { systemClock, type Clock } from '../../shared/domain/time';
 const ledgerService = new LedgerService();
 
@@ -842,9 +843,11 @@ export async function composeAutonomousSalesReply(input: {
       "No contact id resolved for this sender, so their quote history could not be read.";
   } else {
     try {
+      // S25 — the default reads the quote documents by the sender's address; the contact id is
+      // kept in the signature for the callers and suites that inject a reader.
       const readQuotes =
         input.readQuotes ??
-        ((organizationId: string, id: string) => ledgerService.getQuotes(organizationId, id));
+        ((organizationId: string, _id: string) => quotesForEmail(organizationId, input.identity.email ?? ''));
       const quotes = await readQuotes(input.organizationId, contactId);
       if (quotes.length > 0) {
         dynamicFacts += "Active Quote: " + JSON.stringify(quotes) + "\n";

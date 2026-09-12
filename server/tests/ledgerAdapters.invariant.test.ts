@@ -355,12 +355,13 @@ describe('P1.8 remainder — ledger adapters', () => {
         'getUnresolvedCommitments',
         'getOpenQuestions',
         'getUnresolvedObjections',
-        'getQuotes',
+        // `getQuotes` left with the retired quote_snapshots table (S25); quotes are documents,
+        // read by server/services/quote.service.ts and keyed by the customer's email.
       ]) {
         expect(source).toMatch(new RegExp(`${method}\\(\\s*organizationId: string`));
       }
-      // Four tables, four filters. None of them had one.
-      expect((source.match(/\.organizationId, organizationId\)/g) || []).length).toBe(4);
+      // Three tables, three filters (four, until the quote reader moved to the document store).
+      expect((source.match(/\.organizationId, organizationId\)/g) || []).length).toBe(3);
     });
 
     it('question and objection reads exclude superseded rows', () => {

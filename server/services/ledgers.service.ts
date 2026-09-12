@@ -28,7 +28,7 @@
  */
 
 import { db } from '../db/index';
-import { customerCommitments, questionLedger, objectionLedger, quoteSnapshots } from '../db/schema';
+import { customerCommitments, questionLedger, objectionLedger } from '../db/schema';
 import { eq, and, or, isNull, gt } from 'drizzle-orm';
 
 export class LedgerService {
@@ -86,13 +86,6 @@ export class LedgerService {
       );
   }
 
-  async getQuotes(organizationId: string, contactId: string) {
-    if (!organizationId || !contactId) return [];
-    return db
-      .select()
-      .from(quoteSnapshots)
-      .where(
-        and(eq(quoteSnapshots.organizationId, organizationId), eq(quoteSnapshots.contactId, contactId))
-      );
-  }
+  // S25 — `getQuotes` read the retired `quote_snapshots` table; quotes are documents now, read
+  // by server/services/quote.service.ts.
 }

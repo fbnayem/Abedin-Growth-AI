@@ -303,7 +303,9 @@ describe('P1.8 — the defects this replaces are gone from the source', () => {
     // It now points at the pipeline that actually runs.
     const pipeline = strip(readFileSync('server/services/inboundPipeline.ts', 'utf8'));
     expect(pipeline).toContain('buildContextBundle({');
-    expect(pipeline).toMatch(/contextBundle,\s*\n\s*\}\);/);
+    // S25 — the composer call carries the quote lookup after the bundle now; the bundle is
+    // still the argument of the call that runs, and the call still closes.
+    expect(pipeline).toMatch(/composeAutonomousSalesReply\(\{[\s\S]{0,1500}?contextBundle,[\s\S]{0,900}?\}\);/);
   });
 
   it('...and the planner renders it into the prompt rather than accepting and ignoring it', () => {

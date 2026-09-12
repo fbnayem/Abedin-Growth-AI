@@ -322,6 +322,7 @@ describe('2. the shadow pipeline and its fake suppression stay deleted', () => {
 const RETIRED = [
   { symbol: 'outboxMessages', table: 'outbox_messages', live: 'server/services/outbox.service.ts' },
   { symbol: 'campaignRecipients', table: 'campaign_recipients', live: 'server/services/campaignEngine.service.ts' },
+  { symbol: 'quoteSnapshots', table: 'quote_snapshots', live: 'server/services/quote.service.ts' },
 ] as const;
 
 /**

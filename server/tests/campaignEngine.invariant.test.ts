@@ -443,7 +443,7 @@ describe('5. stops: a person who is suppressed, or who has answered, leaves the 
     try {
       const report = await runCampaignTick(ORG, deps, NOW, 'test');
       expect(report.dispatched).toEqual([]);
-      expect(report.errors).toEqual([{ recipientId: 'c1__ada', message: 'store down' }]);
+      expect(report.errors.map((e) => e.message)).toEqual(['store down']);
     } finally {
       memory.failReadsWith = null;
     }

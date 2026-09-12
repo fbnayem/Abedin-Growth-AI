@@ -102,6 +102,9 @@ function buildModule(m: MemoryDocumentStore) {
       return snapshot(pathOf(ref), ref);
     },
     getDocs: async (q: any) => {
+      // A read that fails fails whichever shape it takes: a lookup that reads a collection must
+      // report the failure the same way one that reads a document does.
+      if (m.failReadsWith !== null) throw new Error(m.failReadsWith);
       const prefix = q.collectionPath + '/';
       const docs = Object.entries(m.collection(q.collectionPath))
         .filter(([, data]) => q.filters.every((f: any) => (data as any)[f.field] === f.value))

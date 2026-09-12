@@ -44,6 +44,7 @@ import { meetingsRouter } from "./server/routes/meetings.routes";
 import { integrationsRouter } from "./server/routes/integrations.routes";
 import { growthCommandRouter } from "./server/routes/growthCommand.routes";
 import { webhooksRouter } from "./server/routes/webhooks.routes";
+import { quotesRouter } from "./server/routes/quotes.routes";
 
 import express, { Request, Response } from "express";
 import path from "path";
@@ -186,6 +187,7 @@ for (const aiPath of [
   app.use("/api", integrationsRouter);
   app.use("/api/growth-command", growthCommandRouter);
   app.use("/api", webhooksRouter);
+  app.use("/api/quotes", quotesRouter);
 
   // Vite middleware for development / static serving in production
   if (process.env.NODE_ENV !== "production") {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CAMPAIGN, OPPORTUNITY, legalStates } from './stateMachines';
 import { timeZoneRejection } from '../../shared/domain/time';
+import { PRICE_BOOK } from '../../shared/domain/pricing';
 
 /**
  * S11 — what a request body is allowed to contain, stated once.
@@ -200,6 +201,29 @@ export const contactTimeZoneSchema = z
   })
   .strict();
 
+/**
+ * S25 — a quote names tiers and components; it never carries an amount. The price is read
+ * from the book by the service, so a body cannot state a price the book does not hold.
+ */
+export const createQuoteSchema = z
+  .object({
+    lineItems: z
+      .array(
+        z
+          .object({
+            tierId: z.enum(PRICE_BOOK.map((t) => t.id) as [string, ...string[]]),
+            component: z.enum(['monthly', 'setupFee']),
+            quantity: z.number().int().min(1).max(1000),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(20),
+    validUntil: z.string().datetime({ offset: true }),
+    conversationId: z.string().min(1).max(255).optional(),
+  })
+  .strict();
+
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
   'POST /api/company-brain/generate': companyBrainGenerateSchema,
@@ -210,6 +234,7 @@ export const BODY_SCHEMAS = {
   'POST /api/pipeline/:id/stage': opportunityStageSchema,
   'POST /api/campaigns/:id/recipients': enrolRecipientsSchema,
   'POST /api/contacts/:id/time-zone': contactTimeZoneSchema,
+  'POST /api/contacts/:id/quotes': createQuoteSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

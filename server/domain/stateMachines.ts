@@ -1,3 +1,4 @@
+import { QUOTE_TRANSITIONS } from '../../shared/domain/quote';
 /**
  * P1.4 — STATE MACHINES.
  *
@@ -275,6 +276,17 @@ export const CAMPAIGN_RECIPIENT: EntityStateMachine = {
  * back into an active stage after the person has opted out, because every stage below it is
  * one that permits contact.
  */
+/**
+ * S25 — quotes. The transitions are the shared ones (`shared/domain/quote.ts`), so the console
+ * and the server agree on what a quote may do; this names them as an entity the map is asked
+ * about, like every other status write.
+ */
+export const QUOTE: EntityStateMachine = {
+  name: 'quote',
+  initial: ['DRAFT'],
+  transitions: QUOTE_TRANSITIONS,
+};
+
 export const OPPORTUNITY: EntityStateMachine = {
   name: 'opportunity stage',
   initial: ['NEW'],

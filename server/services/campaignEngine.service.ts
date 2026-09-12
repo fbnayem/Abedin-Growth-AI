@@ -477,17 +477,23 @@ export async function runCampaignTick(
   }
 
   const campaignsById = new Map<string, Record<string, unknown>>();
-  const campaignSnap = await getDocs(query(collection(store, orgPath(orgId, 'campaigns'))));
-  campaignSnap.forEach((d) => {
-    const data = d.data() as Record<string, unknown>;
-    campaignsById.set(String(data.id ?? d.id), data);
-  });
+  const all: RecipientDoc[] = [];
+  try {
+    const campaignSnap = await getDocs(query(collection(store, orgPath(orgId, 'campaigns'))));
+    campaignSnap.forEach((d) => {
+      const data = d.data() as Record<string, unknown>;
+      campaignsById.set(String(data.id ?? d.id), data);
+    });
+    const recipientSnap = await getDocs(query(recipientsCollection(orgId)));
+    recipientSnap.forEach((d) => all.push(readRecipient(d.data())));
+  } catch (e: unknown) {
+    // A tick that cannot read is a tick that did nothing, and says so: an empty report would
+    // read as "nothing was due".
+    report.errors.push({ recipientId: '-', message: messageOf(e) });
+    return report;
+  }
   report.campaigns.total = campaignsById.size;
   report.campaigns.active = [...campaignsById.values()].filter((c) => c.status === 'ACTIVE').length;
-
-  const all: RecipientDoc[] = [];
-  const recipientSnap = await getDocs(query(recipientsCollection(orgId)));
-  recipientSnap.forEach((d) => all.push(readRecipient(d.data())));
   const ctx: TickContext = { now, campaignsById, all, limits, dispatchedToday: { count: 0, byDomain: new Map() } };
   const contactCache = new Map<string, Record<string, unknown> | null>();
   const contactOf = async (contactId: string) => {

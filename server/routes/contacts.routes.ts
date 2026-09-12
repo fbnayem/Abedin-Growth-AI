@@ -8,6 +8,8 @@ import { accountDomain, plusAddressTag, suggestedBaseAddress } from '../lib/iden
 import { sendCaught, sendError } from '../lib/errors';
 import { parsedBodyOr400 } from '../lib/parsedBody';
 import { expectedVersionFrom, mutateWithVersion, sendMutationOutcome, sendVersionRequired, versionOf } from '../lib/concurrency';
+import { createQuote, quotesForEmail } from '../services/quote.service';
+import { attributionFor } from '../domain/operatorAction';
 
 /**
  * S39 — Contacts: leads, investors, partners, and the merge.
@@ -370,6 +372,41 @@ contactsRouter.post('/contacts/:id/time-zone', async (req: Request, res: Respons
       timeZoneStatedAt: new Date().toISOString(),
     }));
     return sendMutationOutcome(req, res, outcome);
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * S25 — a quote for this contact, priced from the book. DRAFT until submitted and approved;
+ * nothing is stated to a customer from a draft. The email the quote is found by is the
+ * contact's, never the body's.
+ */
+contactsRouter.post('/contacts/:id/quotes', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/contacts/:id/quotes');
+    if (body === null) return;
+    const snap = await getDoc(doc(store, orgPath(orgScope(req), 'contacts'), req.params.id));
+    if (!snap.exists()) return sendError(req, res, 'NOT_FOUND', 'No such contact.');
+    const contact = snap.data() as Record<string, unknown>;
+    if (typeof contact.email !== 'string') return sendError(req, res, 'VALIDATION_ERROR', 'This contact has no email address to quote to.', { status: 422 });
+    const outcome = await createQuote(
+      orgScope(req),
+      { email: contact.email, contactId: req.params.id, conversationId: body.conversationId ?? null, lineItems: body.lineItems, validUntil: body.validUntil },
+      attributionFor(req.user)
+    );
+    if (outcome.ok === false) {
+      return sendError(req, res, outcome.code === 'STORE_UNAVAILABLE' ? 'STORE_UNAVAILABLE' : 'VALIDATION_ERROR', outcome.message);
+    }
+    res.status(201).json(outcome.quote);
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+contactsRouter.get('/contacts/:id/quotes', async (req: Request, res: Response) => {
+  try {
+    const snap = await getDoc(doc(store, orgPath(orgScope(req), 'contacts'), req.params.id));
+    if (!snap.exists()) return sendError(req, res, 'NOT_FOUND', 'No such contact.');
+    const contact = snap.data() as Record<string, unknown>;
+    const quotes = typeof contact.email === 'string' ? await quotesForEmail(orgScope(req), contact.email) : [];
+    res.json({ contactId: req.params.id, count: quotes.length, quotes });
   } catch (e: any) { sendCaught(req, res, e); }
 });
 

@@ -217,6 +217,9 @@ describe('4. the premise the 0007 reverse rests on holds', () => {
     // nothing else sets valid_from on these tables. Every mention outside the schema is listed
     // here; a new one must be examined against the reverse before it is added.
     const KNOWN = new Set([
+      // S25 — a quote's own validity window (`validFrom`/`validUntil` on a document), not the
+      // bitemporal column on the relational tables; the service writes no relational row.
+      'server/services/quote.service.ts',
       'server/domain/contextBundle.ts', // reads a quote's validFrom into a bundle
       'server/domain/facts.ts', // document-store facts, not the relational tables
       'server/domain/ledgerAdapters.ts', // reads row.validFrom

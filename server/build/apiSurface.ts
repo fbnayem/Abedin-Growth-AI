@@ -40,6 +40,7 @@ export const CONTRACT_EVIDENCE: Readonly<Record<string, RegExp>> = {
   'POST /api/pipeline/:id/stage': /parsedBodyOr400\(req, res, 'PUT \/api\/pipeline\/:id\/stage'\)/,
   'POST /api/campaigns/:id/recipients': /parsedBodyOr400\(req, res, 'POST \/api\/campaigns\/:id\/recipients'\)/,
   'POST /api/contacts/:id/time-zone': /parsedBodyOr400\(req, res, 'POST \/api\/contacts\/:id\/time-zone'\)/,
+  'POST /api/contacts/:id/quotes': /parsedBodyOr400\(req, res, 'POST \/api\/contacts\/:id\/quotes'\)/,
   'POST /api/knowledge': /parseOrRespond\(createKnowledgeItemSchema, req, res\)/,
   'POST /api/pipeline': /parseOrRespond\(createOpportunitySchema, req, res\)/,
   'POST /api/leads': /createContact\(req, res, /,
