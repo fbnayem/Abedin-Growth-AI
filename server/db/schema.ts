@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, varchar, integer, boolean, jsonb, unique, index, primaryKey } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { pgTable, text, timestamp, varchar, integer, boolean, jsonb, unique, index, primaryKey, check, pgPolicy } from 'drizzle-orm/pg-core';
+import { relations, sql } from 'drizzle-orm';
 
 /**
  * P1.2 — TENANT COLUMNS AND COMPOSITE UNIQUES.
@@ -601,5 +601,23 @@ export const documents = pgTable(
     primaryKey({ columns: [t.path, t.id] }),
     index('documents_org_idx').on(t.organizationId),
     index('documents_path_idx').on(t.path),
+    // S4 — `org_id` is the tenant the path names, or null for a top-level collection, and the
+    // database holds that rather than trusting the writer: the same rule as `tenantOf` in
+    // server/store/index.ts, in SQL.
+    check(
+      'documents_org_matches_path',
+      sql`org_id IS NOT DISTINCT FROM (CASE WHEN split_part(path, '/', 1) = 'organizations' AND split_part(path, '/', 3) <> '' THEN split_part(path, '/', 2) ELSE NULL END)`
+    ),
+    // S4 — a connection sees, and may write, only the tenant it has NAMED through `app.org_id`
+    // (set by the store, per statement, from the path), plus the tenantless documents. A
+    // connection that names no tenant sees no tenant. Row security is FORCED by the migration
+    // so the owning role is subject to it too; the application role is neither owner nor
+    // superuser, which db-verify checks.
+    pgPolicy('documents_tenant', {
+      for: 'all',
+      to: 'public',
+      using: sql`org_id IS NULL OR org_id = current_setting('app.org_id', true)`,
+      withCheck: sql`org_id IS NULL OR org_id = current_setting('app.org_id', true)`,
+    }),
   ]
-);
+).enableRLS();

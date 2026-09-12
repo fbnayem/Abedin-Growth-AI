@@ -107,7 +107,24 @@ async function catalogue(db: PGlite): Promise<string> {
   const indexes = await db.query<Record<string, unknown>>(
     `SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname = 'public' ORDER BY 1, 2`
   );
-  return JSON.stringify({ tables: tables.rows, columns: columns.rows, constraints: constraints.rows, indexes: indexes.rows });
+  // S4 — policies and the row-security flags are part of the shape a rollback must restore.
+  const policies = await db.query<Record<string, unknown>>(
+    `SELECT polrelid::regclass::text AS table_name, polname, polcmd, pg_get_expr(polqual, polrelid) AS using_expr,
+            pg_get_expr(polwithcheck, polrelid) AS check_expr
+       FROM pg_policy WHERE polrelid IN (SELECT oid FROM pg_class WHERE relnamespace = 'public'::regnamespace) ORDER BY 1, 2`
+  );
+  const rowSecurity = await db.query<Record<string, unknown>>(
+    `SELECT relname AS table_name, relrowsecurity AS enabled, relforcerowsecurity AS forced
+       FROM pg_class WHERE relkind = 'r' AND relnamespace = 'public'::regnamespace ORDER BY 1`
+  );
+  return JSON.stringify({
+    tables: tables.rows,
+    columns: columns.rows,
+    constraints: constraints.rows,
+    indexes: indexes.rows,
+    policies: policies.rows,
+    rowSecurity: rowSecurity.rows,
+  });
 }
 
 async function apply(db: PGlite, sql: string): Promise<void> {
@@ -140,9 +157,18 @@ describe('2. up the ladder and down again, on a real engine', () => {
       if (TAGS[i] === '0007_backfill_valid_from') await expectBackfilled(db);
     }
     expect(tableCount(rung[TAGS.length - 1])).toBeGreaterThan(15);
-    // 0008 is the contract step: the table S22 retired is gone at the top rung.
-    expect(rung[TAGS.length - 1]).not.toContain('"ai_run_logs"');
-    expect(rung[TAGS.length - 2]).toContain('"ai_run_logs"');
+    // 0008 is the contract step: the table S22 retired is gone from that rung up.
+    const drop = TAGS.indexOf('0008_drop_ai_run_logs');
+    expect(rung[drop]).not.toContain('"ai_run_logs"');
+    expect(rung[drop - 1]).toContain('"ai_run_logs"');
+    // 0009 is row security (S4): the CHECK, the policy and the flags are there from that rung up
+    // and nowhere below it — the catalogue reads pg_policy and the relrowsecurity flags too.
+    const rls = TAGS.indexOf('0009_tenant_row_security');
+    expect(rung[rls]).toContain('documents_org_matches_path');
+    expect(rung[rls]).toContain('"documents_tenant"');
+    expect(rung[rls]).toContain('{"table_name":"documents","enabled":true,"forced":true}');
+    expect(rung[rls - 1]).not.toContain('documents_tenant');
+    expect(rung[rls - 1]).toContain('{"table_name":"documents","enabled":false,"forced":false}');
   }, 120_000);
 
   it("THE INVARIANT — every down lands the catalogue exactly where the previous rung's up left it", async () => {

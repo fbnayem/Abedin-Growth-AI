@@ -23,6 +23,9 @@ export type Effect =
   | { kind: 'notnull'; sign: 1 | -1; table: string; name: string }
   | { kind: 'type'; table: string; name: string; to: 'timestamptz' | 'timestamp' }
   | { kind: 'rename'; table: string; from: string; to: string }
+  /** S4 — ENABLE/DISABLE and FORCE/NO FORCE ROW LEVEL SECURITY, as `enable` and `force`. */
+  | { kind: 'rls'; sign: 1 | -1; table: string; name: 'enable' | 'force' }
+  | { kind: 'policy'; sign: 1 | -1; table: string; name: string }
   | { kind: 'data'; description: string };
 
 const RULES: { rx: RegExp; effect: (m: RegExpMatchArray) => Effect }[] = [
@@ -45,6 +48,12 @@ const RULES: { rx: RegExp; effect: (m: RegExpMatchArray) => Effect }[] = [
   { rx: /^ALTER TABLE "(\w+)" RENAME COLUMN "(\w+)" TO "(\w+)"/, effect: (m) => ({ kind: 'rename', table: m[1], from: m[2], to: m[3] }) },
   { rx: /^CREATE INDEX "(\w+)" ON "(\w+)"/, effect: (m) => ({ kind: 'index', sign: 1, table: m[2], name: m[1] }) },
   { rx: /^DROP INDEX (?:IF EXISTS )?"(\w+)"/, effect: (m) => ({ kind: 'index', sign: -1, table: null, name: m[1] }) },
+  { rx: /^ALTER TABLE "(\w+)" ENABLE ROW LEVEL SECURITY/, effect: (m) => ({ kind: 'rls', sign: 1, table: m[1], name: 'enable' }) },
+  { rx: /^ALTER TABLE "(\w+)" DISABLE ROW LEVEL SECURITY/, effect: (m) => ({ kind: 'rls', sign: -1, table: m[1], name: 'enable' }) },
+  { rx: /^ALTER TABLE "(\w+)" FORCE ROW LEVEL SECURITY/, effect: (m) => ({ kind: 'rls', sign: 1, table: m[1], name: 'force' }) },
+  { rx: /^ALTER TABLE "(\w+)" NO FORCE ROW LEVEL SECURITY/, effect: (m) => ({ kind: 'rls', sign: -1, table: m[1], name: 'force' }) },
+  { rx: /^CREATE POLICY "(\w+)" ON "(\w+)"/, effect: (m) => ({ kind: 'policy', sign: 1, table: m[2], name: m[1] }) },
+  { rx: /^DROP POLICY (?:IF EXISTS )?"(\w+)" ON "(\w+)"/, effect: (m) => ({ kind: 'policy', sign: -1, table: m[2], name: m[1] }) },
   { rx: /^UPDATE "?(\w+)"?/, effect: (m) => ({ kind: 'data', description: `UPDATE ${m[1]}` }) },
   { rx: /^DO \$\$/, effect: () => ({ kind: 'data', description: 'DO block' }) },
 ];
@@ -91,6 +100,10 @@ function keyOf(e: Effect): string | null {
       return `type:${e.table}.${e.name}:${e.to}`;
     case 'rename':
       return `rename:${e.table}:${e.from}->${e.to}`;
+    case 'rls':
+      return `rls:${e.table}.${e.name}:${e.sign}`;
+    case 'policy':
+      return `policy:${e.table}.${e.name}:${e.sign}`;
     case 'data':
       return null;
   }
@@ -104,6 +117,8 @@ function inverseKey(e: Effect): string | null {
     case 'constraint':
     case 'index':
     case 'notnull':
+    case 'rls':
+    case 'policy':
       return keyOf({ ...e, sign: e.sign === 1 ? -1 : 1 } as Effect);
     case 'type':
       return keyOf({ ...e, to: e.to === 'timestamptz' ? 'timestamp' : 'timestamptz' });
@@ -139,7 +154,7 @@ export interface ReverseVerdict {
  * on whichever side has it.
  */
 function tableOf(e: Effect, indexTables: Map<string, string>): string | null {
-  if (e.kind === 'constraint') return e.table;
+  if (e.kind === 'constraint' || e.kind === 'rls' || e.kind === 'policy') return e.table;
   if (e.kind === 'index') return e.table ?? indexTables.get(e.name) ?? null;
   return null;
 }

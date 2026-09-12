@@ -358,14 +358,52 @@ function snapshotOf<T>(
   };
 }
 
-function executor(handle: DocumentStore | null): Executor {
+function required(handle: DocumentStore | null): DocumentStore {
   if (!handle) {
     throw new StoreValueError(
       'The document store is not configured. Callers must branch on a null store rather than ' +
         'reaching this.'
     );
   }
-  return handle.pool;
+  return handle;
+}
+
+/** The setting the row-security policy on `documents` reads. See migration 0009 and S4. */
+export const TENANT_SETTING = 'app.org_id';
+
+/**
+ * S4 — name the tenant to the database, on this connection, for this transaction.
+ *
+ * The policy on `documents` shows a connection only the rows of the tenant it has named and the
+ * tenantless top-level documents, and refuses a write into any other tenant's rows. The name is
+ * the tenant the PATH addresses — the same derivation the `org_id` column uses — so a statement
+ * whose own predicate is defective, or a script that reaches this table another way, cannot
+ * cross a tenant boundary: the database has not been told that tenant exists. A tenantless path
+ * names the empty string, which matches no organisation.
+ */
+async function nameTenant(exec: Executor, path: string): Promise<void> {
+  await exec.query(`SELECT set_config('${TENANT_SETTING}', $1, true)`, [tenantOf(path) ?? '']);
+}
+
+/** One statement, in its own transaction, with the tenant named first. */
+async function withTenant<T>(handle: DocumentStore, path: string, run: (exec: Executor) => Promise<T>): Promise<T> {
+  const client = await handle.pool.connect();
+  try {
+    await client.query('BEGIN');
+    await nameTenant(client, path);
+    const result = await run(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // The statement's own error is the one to report.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function readDoc<T>(exec: Executor, ref: DocumentReference): Promise<DocumentSnapshot<T>> {
@@ -510,13 +548,14 @@ function asQuery(source: CollectionReference | StoreQuery): StoreQuery {
 export async function getDoc<T = Record<string, unknown>>(
   ref: DocumentReference
 ): Promise<DocumentSnapshot<T>> {
-  return readDoc<T>(executor(getStore()), ref);
+  return withTenant(required(getStore()), ref.path, (exec) => readDoc<T>(exec, ref));
 }
 
 export async function getDocs<T = Record<string, unknown>>(
   source: CollectionReference | StoreQuery
 ): Promise<QuerySnapshot<T>> {
-  return readDocs<T>(executor(getStore()), asQuery(source));
+  const q = asQuery(source);
+  return withTenant(required(getStore()), q.collectionPath, (exec) => readDocs<T>(exec, q));
 }
 
 export async function setDoc(
@@ -524,15 +563,15 @@ export async function setDoc(
   data: unknown,
   options?: SetOptions
 ): Promise<void> {
-  return writeDoc(executor(getStore()), ref, data, options);
+  return withTenant(required(getStore()), ref.path, (exec) => writeDoc(exec, ref, data, options));
 }
 
 export async function updateDoc(ref: DocumentReference, data: unknown): Promise<void> {
-  return patchDoc(executor(getStore()), ref, data);
+  return withTenant(required(getStore()), ref.path, (exec) => patchDoc(exec, ref, data));
 }
 
 export async function deleteDoc(ref: DocumentReference): Promise<void> {
-  return removeDoc(executor(getStore()), ref);
+  return withTenant(required(getStore()), ref.path, (exec) => removeDoc(exec, ref));
 }
 
 export async function addDoc(
@@ -540,7 +579,7 @@ export async function addDoc(
   data: unknown
 ): Promise<DocumentReference> {
   const target: DocumentReference = { kind: 'document', path: ref.path, id: uuidv4() };
-  await writeDoc(executor(getStore()), target, data);
+  await withTenant(required(getStore()), target.path, (exec) => writeDoc(exec, target, data));
   return target;
 }
 
@@ -632,13 +671,15 @@ export async function runTransaction<T>(
     const client = await handle.pool.connect();
     try {
       await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+      // S4 — each operation names its tenant on this connection first; the setting is local to
+      // the transaction, so a transaction spanning two tenants sees each only while it names it.
       const tx: Transaction = {
         client,
-        get: (ref) => readDoc(client, ref),
-        getAll: (q) => readDocs(client, asQuery(q)),
-        set: (ref, data, options) => writeDoc(client, ref, data, options),
-        update: (ref, data) => patchDoc(client, ref, data),
-        delete: (ref) => removeDoc(client, ref),
+        get: (ref) => nameTenant(client, ref.path).then(() => readDoc(client, ref)),
+        getAll: (q) => nameTenant(client, asQuery(q).collectionPath).then(() => readDocs(client, asQuery(q))),
+        set: (ref, data, options) => nameTenant(client, ref.path).then(() => writeDoc(client, ref, data, options)),
+        update: (ref, data) => nameTenant(client, ref.path).then(() => patchDoc(client, ref, data)),
+        delete: (ref) => nameTenant(client, ref.path).then(() => removeDoc(client, ref)),
       };
       const result = await body(tx);
       await client.query('COMMIT');

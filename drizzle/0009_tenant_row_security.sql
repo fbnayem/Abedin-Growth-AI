@@ -1,0 +1,4 @@
+ALTER TABLE "documents" ENABLE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "documents" FORCE ROW LEVEL SECURITY;--> statement-breakpoint
+ALTER TABLE "documents" ADD CONSTRAINT "documents_org_matches_path" CHECK (org_id IS NOT DISTINCT FROM (CASE WHEN split_part(path, '/', 1) = 'organizations' AND split_part(path, '/', 3) <> '' THEN split_part(path, '/', 2) ELSE NULL END));--> statement-breakpoint
+CREATE POLICY "documents_tenant" ON "documents" AS PERMISSIVE FOR ALL TO public USING (org_id IS NULL OR org_id = current_setting('app.org_id', true)) WITH CHECK (org_id IS NULL OR org_id = current_setting('app.org_id', true));

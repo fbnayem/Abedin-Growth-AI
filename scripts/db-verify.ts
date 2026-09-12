@@ -241,6 +241,27 @@ const norm = (t: string) =>
   if (Number(p.can_truncate) > 0) {
     flag(`${p.can_truncate} tables the application role can TRUNCATE`);
   }
+  // ------------------------------------------------------------------ 7b. row security (S4)
+  //
+  // The policy on `documents` is only worth what the roles make of it: a superuser or a role
+  // with BYPASSRLS ignores every policy, and an owner ignores them unless FORCE is set.
+  const rls = await owner.query(
+    `SELECT relrowsecurity AS enabled, relforcerowsecurity AS forced FROM pg_class WHERE oid = 'public.documents'::regclass`
+  );
+  const policies = await owner.query(`SELECT polname FROM pg_policy WHERE polrelid = 'public.documents'::regclass ORDER BY 1`);
+  const roleBits = await owner.query(`SELECT rolbypassrls, rolsuper FROM pg_roles WHERE rolname = $1`, [APP_ROLE]);
+  const r = rls.rows[0] ?? { enabled: null, forced: null };
+  const names = policies.rows.map((x: { polname: string }) => x.polname);
+  const bits = roleBits.rows[0] ?? { rolbypassrls: null, rolsuper: null };
+  say(
+    `documents RLS     : enabled ${r.enabled}, forced ${r.forced}, policies [${names.join(', ')}], ` +
+      `app role BYPASSRLS ${bits.rolbypassrls}, superuser ${bits.rolsuper}   (want true, true, [documents_tenant], false, false)`
+  );
+  if (r.enabled !== true) flag('row-level security is not enabled on documents');
+  if (r.forced !== true) flag('row-level security is not forced on documents, so the owning role bypasses it');
+  if (!names.includes('documents_tenant')) flag('the documents_tenant policy is missing');
+  if (bits.rolbypassrls === true) flag('the application role has BYPASSRLS and ignores every policy');
+  if (bits.rolsuper === true) flag('the application role is a superuser and ignores every policy');
 
   await owner.query('ROLLBACK');
   await owner.end();

@@ -64,6 +64,13 @@
       "when": 1789172415849,
       "tag": "0008_drop_ai_run_logs",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789180762509,
+      "tag": "0009_tenant_row_security",
+      "breakpoints": true
     }
   ]
 }
