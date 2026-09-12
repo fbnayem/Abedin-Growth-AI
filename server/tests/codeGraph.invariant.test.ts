@@ -67,6 +67,8 @@ const OWNERS: Record<string, string[]> = {
   'server/services/outbox.service.ts': [
     'server/gateway/actionGateway.ts',
     'server/routes/outbox.routes.ts',
+    // S26 — the campaign engine enqueues a job per step; it is the outbox's second producer.
+    'server/services/campaignEngine.service.ts',
     'server/services/circuitBreaker.service.ts',
     'server/services/inboundPipeline.ts',
     'server/workers/outbox.worker.ts',

@@ -343,6 +343,14 @@ export const campaigns = pgTable(
  * and proves nothing about the running system. It is scaffolding placed deliberately, not
  * evidence of a working control.
  */
+/**
+ * RETIRED (S26, 2026-09-12). Declared under P1.2 for the campaign engine, with the right unique
+ * constraint; never written. It cannot be used for the engine: its foreign keys point at the
+ * relational `campaigns` and `contacts` tables, and both campaigns and contacts are documents.
+ * The live records are documents under `organizations/<org>/campaignEnrolments`, written by
+ * server/services/campaignEngine.service.ts with the id derived from (campaign, contact). Do
+ * not write here; a row here is read by nothing.
+ */
 export const campaignRecipients = pgTable(
   'campaign_recipients',
   {

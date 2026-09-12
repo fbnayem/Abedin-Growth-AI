@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CAMPAIGN, OPPORTUNITY, legalStates } from './stateMachines';
+import { timeZoneRejection } from '../../shared/domain/time';
 
 /**
  * S11 — what a request body is allowed to contain, stated once.
@@ -173,6 +174,32 @@ const stateChange = (field: string, states: string[]) =>
 export const campaignStatusSchema = stateChange('status', legalStates(CAMPAIGN));
 export const opportunityStageSchema = stateChange('stage', legalStates(OPPORTUNITY));
 
+/**
+ * S26 — enrolment names contacts and nothing else. Up to 500 at once: an enrolment is one write
+ * per contact, and a batch that large is a decision to make in more than one request.
+ */
+export const enrolRecipientsSchema = z
+  .object({
+    contactIds: z.array(z.string().min(1).max(255)).min(1).max(500),
+  })
+  .strict();
+
+/**
+ * S26 — a contact's time zone is stated, never guessed: the QUIET_HOURS guard cannot run without
+ * it, and refuses. An IANA identifier only; a fixed offset ("+06:00") is refused because it is
+ * not a zone and cannot follow daylight saving.
+ */
+export const contactTimeZoneSchema = z
+  .object({
+    timeZone: z
+      .string()
+      .min(1)
+      .max(64)
+      .refine((zone) => timeZoneRejection(zone) === null, { message: 'timeZone must be an IANA time zone identifier such as Europe/London' }),
+    expectedVersion: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
   'POST /api/company-brain/generate': companyBrainGenerateSchema,
@@ -181,6 +208,8 @@ export const BODY_SCHEMAS = {
   'POST /api/campaigns/:id/toggle': campaignStatusSchema,
   'PUT /api/pipeline/:id/stage': opportunityStageSchema,
   'POST /api/pipeline/:id/stage': opportunityStageSchema,
+  'POST /api/campaigns/:id/recipients': enrolRecipientsSchema,
+  'POST /api/contacts/:id/time-zone': contactTimeZoneSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

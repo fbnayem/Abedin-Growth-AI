@@ -5,6 +5,7 @@ import { assertTransition, CAMPAIGN } from '../domain/stateMachines';
 import { sendCaught, sendError } from '../lib/errors';
 import { parsedBodyOr400 } from '../lib/parsedBody';
 import { expectedVersionFrom, mutateWithVersion, sendMutationOutcome, sendVersionRequired, versionOf } from '../lib/concurrency';
+import { enrolRecipients, listRecipients, runCampaignTick, relationalConversationState } from '../services/campaignEngine.service';
 
 /**
  * S39 — Campaigns.
@@ -81,6 +82,50 @@ export const setCampaignStatus = async (req: Request, res: Response) => {
 campaignsRouter.post('/:id/status', setCampaignStatus);
 
 campaignsRouter.post('/:id/toggle', setCampaignStatus);
+
+/**
+ * S26 — enrol contacts. One record per (campaign, contact), created only if absent, so a second
+ * enrolment reports ALREADY_ENROLLED and overwrites nothing. The first step is due after its
+ * stated delay; the tick decides everything else, with the guards.
+ */
+campaignsRouter.post('/:id/recipients', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/campaigns/:id/recipients');
+    if (body === null) return;
+    const actor = `operator:${req.tenant?.uid ?? 'unknown'}`;
+    const outcome = await enrolRecipients(orgScope(req), req.params.id, body.contactIds, actor);
+    if (outcome.ok === false) {
+      if (outcome.code === 'CAMPAIGN_NOT_FOUND') return sendError(req, res, 'NOT_FOUND', outcome.message);
+      if (outcome.code === 'STORE_UNAVAILABLE') return sendError(req, res, 'STORE_UNAVAILABLE', outcome.message);
+      return sendError(req, res, 'VALIDATION_ERROR', outcome.message, { status: 422, details: { code: outcome.code } });
+    }
+    res.status(201).json({
+      campaignId: req.params.id,
+      enrolled: outcome.results.filter((r) => r.outcome === 'ENROLLED').length,
+      results: outcome.results,
+    });
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+campaignsRouter.get('/:id/recipients', async (req: Request, res: Response) => {
+  try {
+    const recipients = await listRecipients(orgScope(req), req.params.id);
+    res.json({ campaignId: req.params.id, count: recipients.length, recipients });
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * S26 — one tick, now, for this organisation, by this operator. What the scheduler would do on
+ * its interval, run by hand and answered with the report: what was reconciled, what was
+ * dispatched (to the outbox, not to the network), what was refused and by which guards.
+ */
+campaignsRouter.post('/run-tick', async (req: Request, res: Response) => {
+  try {
+    const actor = `operator:${req.tenant?.uid ?? 'unknown'}`;
+    const report = await runCampaignTick(orgScope(req), { conversationState: relationalConversationState }, new Date(), actor);
+    res.json({ report });
+  } catch (e: any) { sendCaught(req, res, e); }
+});
 
 campaignsRouter.post('/generate-strategy', async (req: Request, res: Response) => {
   try {

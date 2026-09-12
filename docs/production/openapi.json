@@ -500,7 +500,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/autopilot.routes.ts:12"
+        "x-source": "server/routes/autopilot.routes.ts:15"
       }
     },
     "/api/autopilot/settings": {
@@ -578,7 +578,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/autopilot.routes.ts:28"
+        "x-source": "server/routes/autopilot.routes.ts:38"
       }
     },
     "/api/autopilot/status": {
@@ -656,7 +656,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/autopilot.routes.ts:19"
+        "x-source": "server/routes/autopilot.routes.ts:29"
       }
     },
     "/api/autopilot/toggle": {
@@ -734,7 +734,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/autopilot.routes.ts:23"
+        "x-source": "server/routes/autopilot.routes.ts:33"
       }
     },
     "/api/campaigns": {
@@ -812,7 +812,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/campaigns.routes.ts:16"
+        "x-source": "server/routes/campaigns.routes.ts:17"
       }
     },
     "/api/campaigns/generate-strategy": {
@@ -891,7 +891,285 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/campaigns.routes.ts:85"
+        "x-source": "server/routes/campaigns.routes.ts:130"
+      }
+    },
+    "/api/campaigns/run-tick": {
+      "post": {
+        "operationId": "post_api_campaigns_run_tick",
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "none",
+        "x-source": "server/routes/campaigns.routes.ts:122"
+      }
+    },
+    "/api/campaigns/{id}/recipients": {
+      "get": {
+        "operationId": "get_api_campaigns_id_recipients",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "none",
+        "x-source": "server/routes/campaigns.routes.ts:110"
+      },
+      "post": {
+        "operationId": "post_api_campaigns_id_recipients",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "contactIds": {
+                    "items": {
+                      "maxLength": 255,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 500,
+                    "minItems": 1,
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "contactIds"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/campaigns.routes.ts:91"
       }
     },
     "/api/campaigns/{id}/status": {
@@ -1009,7 +1287,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/campaigns.routes.ts:81"
+        "x-source": "server/routes/campaigns.routes.ts:82"
       }
     },
     "/api/campaigns/{id}/toggle": {
@@ -1127,7 +1405,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/campaigns.routes.ts:83"
+        "x-source": "server/routes/campaigns.routes.ts:84"
       }
     },
     "/api/company-brain": {
@@ -1639,6 +1917,120 @@
         "x-source": "server/routes/companyBrain.routes.ts:37"
       }
     },
+    "/api/contacts/{id}/time-zone": {
+      "post": {
+        "operationId": "post_api_contacts_id_time_zone",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "timeZone": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "timeZone"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/contacts.routes.ts:357"
+      }
+    },
     "/api/contacts/{survivorId}/merge": {
       "post": {
         "operationId": "post_api_contacts_survivorid_merge",
@@ -1725,7 +2117,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/contacts.routes.ts:179"
+        "x-source": "server/routes/contacts.routes.ts:182"
       }
     },
     "/api/csp-report": {
@@ -3428,7 +3820,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:349"
+        "x-source": "server/routes/contacts.routes.ts:376"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -3482,6 +3874,10 @@
                     "type": "string"
                   },
                   "phone": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
+                  "timeZone": {
                     "maxLength": 500,
                     "type": "string"
                   },
@@ -3571,7 +3967,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:358"
+        "x-source": "server/routes/contacts.routes.ts:385"
       }
     },
     "/api/investors/batch-generate": {
@@ -3649,7 +4045,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:253"
+        "x-source": "server/routes/contacts.routes.ts:256"
       }
     },
     "/api/knowledge": {
@@ -3917,7 +4313,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:17"
+        "x-source": "server/routes/contacts.routes.ts:19"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -3971,6 +4367,10 @@
                     "type": "string"
                   },
                   "phone": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
+                  "timeZone": {
                     "maxLength": 500,
                     "type": "string"
                   },
@@ -4060,7 +4460,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:161"
+        "x-source": "server/routes/contacts.routes.ts:164"
       }
     },
     "/api/leads/batch-followup": {
@@ -4138,7 +4538,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:310"
+        "x-source": "server/routes/contacts.routes.ts:313"
       }
     },
     "/api/leads/batch-generate": {
@@ -4216,7 +4616,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:228"
+        "x-source": "server/routes/contacts.routes.ts:231"
       }
     },
     "/api/leads/research": {
@@ -4294,7 +4694,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:303"
+        "x-source": "server/routes/contacts.routes.ts:306"
       }
     },
     "/api/leads/{id}/email": {
@@ -4382,7 +4782,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:333"
+        "x-source": "server/routes/contacts.routes.ts:336"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -4470,7 +4870,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:326"
+        "x-source": "server/routes/contacts.routes.ts:329"
       }
     },
     "/api/linkedin-config": {
@@ -5953,7 +6353,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:364"
+        "x-source": "server/routes/contacts.routes.ts:391"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -6007,6 +6407,10 @@
                     "type": "string"
                   },
                   "phone": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
+                  "timeZone": {
                     "maxLength": 500,
                     "type": "string"
                   },
@@ -6096,7 +6500,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:373"
+        "x-source": "server/routes/contacts.routes.ts:400"
       }
     },
     "/api/partners/batch-generate": {
@@ -6174,7 +6578,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:278"
+        "x-source": "server/routes/contacts.routes.ts:281"
       }
     },
     "/api/pipeline": {
@@ -7917,7 +8321,7 @@
     "rawBody": 2,
     "readingBodyWithoutSchema": 14,
     "responsesDescribed": 0,
-    "routes": 88,
-    "withRequestContract": 12
+    "routes": 92,
+    "withRequestContract": 14
   }
 }

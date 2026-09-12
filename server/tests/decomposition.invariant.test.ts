@@ -127,9 +127,8 @@ describe('2. the guardrails that read server.ts read the routers too', () => {
 });
 
 // =============================================================================================
-describe('3. the eight fixed answers refuse, and the echo does too', () => {
+describe('3. the fixed answers refuse, and the echo does too (run-cycle-now runs a campaign tick since S26)', () => {
   const REFUSING = [
-    'POST /api/autopilot/run-cycle-now',
     'POST /api/autopilot/settings',
     'POST /api/leads/research',
     'POST /api/leads/:id/simulate-reply',

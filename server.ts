@@ -16,6 +16,7 @@ import { securityHeaders } from "./server/middleware/securityHeaders";
 import { resolveTenant } from "./server/middleware/tenant";
 import { requestId, terminalErrorHandler } from "./server/lib/errors";
 import { outboxWorker } from "./server/workers/outbox.worker";
+import { campaignScheduler } from "./server/workers/campaignScheduler";
 import { stripeRouter } from "./server/routes/stripe.routes";
 import { outboxRouter } from "./server/routes/outbox.routes";
 import { autonomyRouter } from "./server/routes/autonomy.routes";
@@ -204,6 +205,8 @@ for (const aiPath of [
   }
 
   outboxWorker.start();
+  // S26 — off unless CAMPAIGN_SCHEDULER_ENABLED is exactly "true"; says so in the log when it is not.
+  campaignScheduler.start();
 
   // P1.12 — Terminal error handler. Mounted LAST so nothing gets past it, including an
   // async rejection Express would otherwise leave as an unhandled promise with the request

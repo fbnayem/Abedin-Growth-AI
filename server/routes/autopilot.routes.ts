@@ -1,6 +1,9 @@
 import { Router, type Request, type Response } from 'express';
 import { autopilotRunner } from '../autopilotRunner';
-import { sendError } from '../lib/errors';
+import { sendCaught, sendError } from '../lib/errors';
+import { orgScope } from '../tenancy/orgScope';
+import { runCampaignTick, relationalConversationState } from '../services/campaignEngine.service';
+import { campaignScheduler } from '../workers/campaignScheduler';
 
 /**
  * S39 — The autopilot runner.
@@ -9,11 +12,18 @@ import { sendError } from '../lib/errors';
  */
 export const autopilotRouter = Router();
 
-autopilotRouter.post('/run-cycle-now', (req: Request, res: Response) => {
-  // S39 — Was `res.json({ status: "success" })`: the same answer for every request, which is a
-  // fabricated result rather than a stub, and the guardrail could not see it because it
-  // looked only for `success: true`.
-  sendError(req, res, 'NOT_IMPLEMENTED', 'Running an autopilot cycle on demand is not implemented. This endpoint reported success and ran nothing.');
+autopilotRouter.post('/run-cycle-now', async (req: Request, res: Response) => {
+  // S26 — a real cycle: one campaign tick for this organisation, and its report. Until
+  // 2026-09-12 this answered `{ status: "success" }` and ran nothing; then it refused; now the
+  // thing it claimed to run exists.
+  try {
+    const actor = `operator:${req.tenant?.uid ?? 'unknown'}`;
+    const report = await runCampaignTick(orgScope(req), { conversationState: relationalConversationState }, new Date(), actor);
+    res.json({
+      report,
+      scheduler: { running: campaignScheduler.isRunning, disabledReason: campaignScheduler.disabledReason, lastTickAt: campaignScheduler.lastTickAt },
+    });
+  } catch (e: any) { sendCaught(req, res, e); }
 });
 
 autopilotRouter.get('/status', (req: Request, res: Response) => {

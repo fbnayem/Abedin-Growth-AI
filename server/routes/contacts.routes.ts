@@ -1,11 +1,13 @@
 import { Router, type Request, type Response } from 'express';
-import { collection, getDocs, query, where, store } from '../store';
+import { collection, getDocs, getDoc, doc, query, where, store } from '../store';
 import { orgScope, orgPath } from '../tenancy/orgScope';
 import { createContactSchema, parseOrRespond } from '../lib/validation';
 import { normalizeEmailKey } from '../lib/emailKey';
 import { createContactIfAbsent, ensureAccount, mergeContacts } from '../lib/identityStore';
 import { accountDomain, plusAddressTag, suggestedBaseAddress } from '../lib/identity';
 import { sendCaught, sendError } from '../lib/errors';
+import { parsedBodyOr400 } from '../lib/parsedBody';
+import { expectedVersionFrom, mutateWithVersion, sendMutationOutcome, sendVersionRequired, versionOf } from '../lib/concurrency';
 
 /**
  * S39 — Contacts: leads, investors, partners, and the merge.
@@ -69,6 +71,7 @@ function buildContactDocument(
     country: input.country ?? null,
     employeeCount: input.employeeCount ?? null,
     notes: input.notes ?? null,
+    timeZone: input.timeZone ?? null,
   };
 }
 
@@ -344,6 +347,30 @@ contactsRouter.post('/leads/:id/email', (req: Request, res: Response) => {
     'NOT_IMPLEMENTED',
     "Emailing a lead is an external send and must go through the Production Action Gateway. This endpoint sent nothing and said it had."
   );
+});
+
+/**
+ * S26 — state a contact's time zone. The QUIET_HOURS guard cannot run without one and refuses
+ * the send, which is the correct answer for a person whose 3am we cannot tell; this is how an
+ * operator supplies the fact. Version-fenced like every other write to a record.
+ */
+contactsRouter.post('/contacts/:id/time-zone', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/contacts/:id/time-zone');
+    if (body === null) return;
+    const ref = doc(store, orgPath(orgScope(req), 'contacts'), req.params.id);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return sendError(req, res, 'NOT_FOUND', 'No such contact.');
+    const currentVersion = versionOf(snap.data(), true);
+    const expected = expectedVersionFrom(req);
+    if (expected.ok === false) return sendVersionRequired(req, res, expected, currentVersion);
+    const outcome = await mutateWithVersion(ref, expected.value, (existing: any) => ({
+      ...existing,
+      timeZone: body.timeZone,
+      timeZoneStatedAt: new Date().toISOString(),
+    }));
+    return sendMutationOutcome(req, res, outcome);
+  } catch (e: any) { sendCaught(req, res, e); }
 });
 
 contactsRouter.get('/investors', async (req: Request, res: Response) => {

@@ -61,6 +61,32 @@ export function tenantSpendLimits(): TenantSpendLimits {
 // Evaluated once at load so a malformed limit stops the process here, not at the first reply.
 tenantSpendLimits();
 
+export interface CampaignSchedulerConfig {
+  /** `CAMPAIGN_SCHEDULER_ENABLED` must be exactly "true". Absent, blank or anything else: off. */
+  readonly enabled: boolean;
+  readonly intervalMs: number;
+}
+
+/**
+ * S26 — the campaign scheduler is a production action loop and defaults OFF, like every flag
+ * that lets this system act on its own. A malformed interval is refused at load, not at the
+ * first tick.
+ */
+export function campaignScheduler(): CampaignSchedulerConfig {
+  const raw = process.env.CAMPAIGN_TICK_INTERVAL_MS;
+  let intervalMs = 60_000;
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = Number(raw.trim());
+    if (!Number.isInteger(n) || n < 1_000) {
+      throw new Error(`CAMPAIGN_TICK_INTERVAL_MS must be an integer number of milliseconds, at least 1000; got ${JSON.stringify(raw)}.`);
+    }
+    intervalMs = n;
+  }
+  return { enabled: process.env.CAMPAIGN_SCHEDULER_ENABLED === 'true', intervalMs };
+}
+
+campaignScheduler();
+
 if (isProduction && config.demoMode) {
   throw new Error("CRITICAL SAFETY ERROR: DEMO_MODE cannot be true in production!");
 }

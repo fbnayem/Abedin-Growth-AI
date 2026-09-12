@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { timeZoneRejection } from '../../shared/domain/time';
 import type { Request, Response } from 'express';
 import { sendError } from './errors';
 import { csvField, neutralizeCsvValue } from '../../shared/lib/csvSafety';
@@ -67,6 +68,8 @@ export const createContactSchema = z.object({
   country: shortText.optional(),
   employeeCount: shortText.optional(),
   notes: longText.optional(),
+  // S26 — stated, never guessed; the campaign engine's QUIET_HOURS guard refuses without it.
+  timeZone: shortText.refine((zone) => timeZoneRejection(zone) === null, { message: 'timeZone must be an IANA time zone identifier such as Europe/London' }).optional(),
 });
 
 export const createKnowledgeItemSchema = z.object({
