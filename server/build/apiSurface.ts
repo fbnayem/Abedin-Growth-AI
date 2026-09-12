@@ -1,0 +1,41 @@
+import type { ZodType } from 'zod';
+import { BODY_SCHEMAS } from '../domain/apiContracts';
+import { createContactSchema, createKnowledgeItemSchema, createOpportunitySchema } from '../lib/validation';
+
+/**
+ * S11 — every request body this server validates through a schema, by route.
+ *
+ * Two registries grew up separately: `BODY_SCHEMAS` in server/domain/apiContracts.ts (strict
+ * objects, unknown fields refused, used through `parsedBodyOr400`) and the create schemas in
+ * server/lib/validation.ts (used through `parseOrRespond`, directly or via the `createContact`
+ * helper the three contact-creating routes share). This is the union, keyed the same way, and
+ * it is what the OpenAPI document is generated from.
+ *
+ * Listing a route here is a CLAIM that its handler parses the body through this schema before
+ * using it. `openapi.invariant.test.ts` checks the claim against the handler's text — a route
+ * listed here whose handler reads `req.body` around the schema would be documented as validated
+ * while being nothing of the kind, which is worse than being undocumented.
+ *
+ * Routes that read a body and are NOT here are the honest remainder, and the same suite names
+ * them one by one so the list can shrink and never quietly grow.
+ */
+export const REQUEST_CONTRACTS: Readonly<Record<string, ZodType>> = {
+  ...BODY_SCHEMAS,
+  'POST /api/knowledge': createKnowledgeItemSchema,
+  'POST /api/pipeline': createOpportunitySchema,
+  'POST /api/leads': createContactSchema,
+  'POST /api/investors': createContactSchema,
+  'POST /api/partners': createContactSchema,
+};
+
+/** How each contract route reaches its schema, for the suite that checks the claim above. */
+export const CONTRACT_EVIDENCE: Readonly<Record<string, RegExp>> = {
+  'POST /api/company-brain': /parsedBodyOr400\(req, res, 'POST \/api\/company-brain'\)/,
+  'POST /api/company-brain/generate': /parsedBodyOr400\(req, res, 'POST \/api\/company-brain\/generate'\)/,
+  'POST /api/settings': /parsedBodyOr400\(req, res, 'POST \/api\/settings'\)/,
+  'POST /api/knowledge': /parseOrRespond\(createKnowledgeItemSchema, req, res\)/,
+  'POST /api/pipeline': /parseOrRespond\(createOpportunitySchema, req, res\)/,
+  'POST /api/leads': /createContact\(req, res, /,
+  'POST /api/investors': /createContact\(req, res, /,
+  'POST /api/partners': /createContact\(req, res, /,
+};
