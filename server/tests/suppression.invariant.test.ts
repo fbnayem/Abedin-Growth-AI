@@ -18,9 +18,14 @@ import { checkSuppression } from '../agents/salesDecisionEngine';
  * ----------------------------
  * No send was unguarded. The Production Action Gateway refuses every EMAIL_SEND without a
  * `contactId`, without a contact record, with any of `suppressed` / `unsubscribed` /
- * `hardBounced` / `complained` / `emailStatus === 'BOUNCED'` set, or with `consentGiven !== true`
- * — reading the LIVE record, per recipient, at dispatch. This was a false safety RECORD, not an
- * open door, and describing it as an open door would inflate it.
+ * `hardBounced` / `complained` / `emailStatus === 'BOUNCED'` set, or without a proven lawful
+ * basis — reading the LIVE record, per recipient, at dispatch. This was a false safety RECORD,
+ * not an open door, and describing it as an open door would inflate it.
+ *
+ * (The basis check was `consentGiven !== true` when this was written. It is now
+ * `evaluateLawfulBasis`, which is stricter in what it demands of a consent record and adds a
+ * second, separately-conditioned basis for business recipients. Suppression is unchanged and
+ * still outranks both: a later "stop" beats an earlier "yes".)
  *
  * A false safety record is still worth removing, because it is the artefact an incident review
  * reads. "The auditor recorded suppression CLEAN" is a sentence someone would rely on.
@@ -38,7 +43,26 @@ import { checkSuppression } from '../agents/salesDecisionEngine';
 
 const auditor = readFileSync('server/agents/independentAuditor.ts', 'utf8');
 const engine = readFileSync('server/agents/salesDecisionEngine.ts', 'utf8');
-const gateway = readFileSync('server/gateway/actionGateway.ts', 'utf8');
+
+/**
+ * Comments are removed before any assertion below reads this file, and the reason is a defect
+ * this suite actually had.
+ *
+ * The consent assertion here was `expect(gateway).toMatch(/contactData\.consentGiven !== true/)`.
+ * When that check moved into `server/domain/lawfulBasis.ts`, the assertion kept passing — because
+ * the commit that moved it left a comment in the gateway SAYING what the old check had been, and
+ * the regex matched the explanation rather than any executing line. A green test asserting the
+ * presence of code that no longer exists is worse than no test: it reports that an enforcement
+ * point is in place when it has gone.
+ *
+ * Every source assertion in this file therefore reads code with comments stripped, the same way
+ * `port.invariant` and `companyBrain.invariant` do.
+ */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+}
+
+const gateway = stripComments(readFileSync('server/gateway/actionGateway.ts', 'utf8'));
 
 // ===========================================================================
 describe('1. the check reports only what an address can settle', () => {
@@ -168,8 +192,29 @@ describe('3. the enforcement point is the gateway, reading the live record', () 
     }
   });
 
-  it('treats consent that is not explicitly true as refusal', () => {
-    expect(gateway).toMatch(/contactData\.consentGiven !== true/);
+  /**
+   * The consent decision moved into `server/domain/lawfulBasis.ts`, where it is exercised
+   * exhaustively by `lawfulBasis.invariant`. What this suite still owns is the wiring: that the
+   * gateway ASKS, and that it refuses on anything other than a proven basis. Both assertions run
+   * against comment-stripped source, so neither can be satisfied by a sentence about the code.
+   */
+  it('asks the lawful-basis decision rather than judging consent inline', () => {
+    expect(gateway).toMatch(/evaluateLawfulBasis\(contactData\)/);
+    // And there is exactly one owner of the decision: no inline consent test survives beside it.
+    expect(gateway).not.toMatch(/contactData\.consentGiven\s*!==\s*true/);
+  });
+
+  it('refuses the send on any verdict that is not ok', () => {
+    expect(gateway).toMatch(/if \(basis\.ok === false\)/);
+    const at = gateway.indexOf('basis.ok === false');
+    expect(at).toBeGreaterThan(-1);
+    // The branch that handles a failed verdict returns a block, not a fall-through.
+    expect(gateway.slice(at, at + 400)).toMatch(/errorCode: 'POLICY_BLOCKED'/);
+  });
+
+  it('tells the outreach policy whether consent was the basis, rather than a literal true', () => {
+    expect(gateway).toMatch(/consentGiven: basis\.basis === 'CONSENT'/);
+    expect(gateway).not.toMatch(/consentGiven: true,/);
   });
 
   /**

@@ -22,6 +22,7 @@ import {
   maySend,
   refusalReason,
 } from '../domain/campaignSafety';
+import { evaluateLawfulBasis } from '../domain/lawfulBasis';
 import { lockStateOf, mayProceed, refusalFor } from '../domain/autonomyLock';
 import { unsubscribeUrlFor } from '../domain/unsubscribe';
 import { replyLoopVerdict } from '../domain/replyLoop';
@@ -850,33 +851,37 @@ export class ActionGateway {
             return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
         }
 
-        // Unknown consent is INSUFFICIENT_DATA, never permission.
-        if (contactData.consentGiven !== true) {
+        // LAWFUL BASIS (§14). These two checks were `contactData.consentGiven !== true` and an
+        // inline ISO-code test. Both are still enforced and both still fail closed; they have
+        // moved into `server/domain/lawfulBasis.ts` so the decision can be exercised
+        // exhaustively without a datastore, which an inline check in a provider method cannot
+        // be.
+        //
+        // What changed is not the strictness but the vocabulary. The old gate asked only
+        // "is consentGiven exactly true", and NOTHING IN THIS SYSTEM COULD EVER SET IT: the
+        // create schema refuses the field as mass assignment, the document builder never
+        // writes it, and the only other writer copies an existing true between records during
+        // a merge. Every lead was therefore permanently unmailable. The gate now recognises a
+        // second basis — legitimate interest for business recipients — which carries four
+        // conditions of its own, and still refuses everything it cannot prove.
+        const basis = evaluateLawfulBasis(contactData);
+        if (basis.ok === false) {
             const reason =
-                `No affirmative consent record for contact ${request.payload.contactId} ` +
-                `(consentGiven=${JSON.stringify(contactData.consentGiven)}). ` +
-                `Unknown consent is treated as INSUFFICIENT_DATA and routed to human review, ` +
-                `not as permission.`;
+                `No lawful basis to email contact ${request.payload.contactId} ` +
+                `(${basis.code}). ${basis.message}`;
             console.warn(`[ActionGateway] ${reason}`);
             return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
         }
-
-        // Unknown country is not a permissive jurisdiction. Normalise to an ISO code and
-        // refuse when absent, rather than assuming 'US'.
-        const rawCountry = typeof contactData.country === 'string' ? contactData.country.trim().toUpperCase() : '';
-        if (!/^[A-Z]{2}$/.test(rawCountry)) {
-            const reason =
-                `Recipient jurisdiction unknown or not an ISO-3166 alpha-2 code ` +
-                `(country=${JSON.stringify(contactData.country)}). Refusing rather than ` +
-                `assuming a permissive jurisdiction.`;
-            console.warn(`[ActionGateway] ${reason}`);
-            return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
-        }
+        const rawCountry = basis.country;
 
         const policyResult = await outreachPolicyService.evaluateOutreach({
              country: rawCountry,
              campaignType: request.payload.campaignType || 'inbound',
-             consentGiven: true, // proven above, not assumed
+             // Was the literal `true`, which was honest while consent was the only basis that
+             // could reach this line. It no longer is: a legitimate-interest recipient has a
+             // lawful basis and has NOT consented, and telling the policy otherwise would
+             // hide exactly the distinction it exists to judge.
+             consentGiven: basis.basis === 'CONSENT',
              // Was hardcoded `true`. B2B status materially changes the legal basis under
              // PECR/GDPR, so it must come from the record and default to the stricter B2C.
              isB2B: contactData.isB2B === true,
