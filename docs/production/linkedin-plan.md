@@ -127,7 +127,7 @@ Each ends with the §B gate — compiles, migrations valid, tests pass, frontend
 build — and each carries its own proof obligation, because under the addendum compilation is not
 done.
 
-### LP1 — the prospect record: a person we cannot yet email
+### LP1 — the prospect record: a person we cannot yet email — **DELIVERED (`bbc6371`)**
 
 **The problem.** A LinkedIn identity with no email cannot be a contact, and must not be forced
 into being one. A half-formed contact with a placeholder address would be a record the lawful
@@ -279,3 +279,74 @@ rather say that now than after LP4.
 
 If you want LP6 anyway, I will build it, and the first thing I would build is the opt-out — not
 the sender.
+
+---
+
+## 7. LP1 as built
+
+Delivered at `bbc6371`. 104 suites, 2,721 tests; 33 mutants, all behaving.
+
+Built as planned, with three additions the work itself forced:
+
+**Credentials in a profile URL are refused.** Not in the plan, and it should have been. It came
+out of a mutation run: fixing the unreachable protocol check surfaced that
+`mailto:x@linkedin.com/in/ada-lovelace` parses `mailto:x` as *userinfo* and `linkedin.com` as the
+host — so it was being accepted as a perfectly good profile with credentials embedded in it.
+`crawlTarget.ts` already carries a `CREDENTIALS_IN_URL` code for exactly this, and the prospect
+parser now matches it.
+
+**Supplying an email is a refusal, not an ignore.** `validateCandidate` deliberately ignores
+unrecognised keys. The reasoning inverts here and the plan did not say so: a caller with an
+address has made a routing mistake, and silently dropping the one field that would have made this
+a real contact leaves them believing it was stored.
+
+**A second promotion to a different address is refused.** The plan said promotion was idempotent;
+it is, for the *same* address. A different one would put one person into the system twice, which
+is the thing the canonical URL exists to prevent, so it refuses and says to correct the existing
+contact instead.
+
+### One defect found in my own code
+
+**The protocol check was unreachable.** `normaliseProfileUrl` prepended `https://` to anything not
+already starting with `http(s)://`, so by the time the protocol check ran, every URL was http or
+https by construction. `file:///etc/passwd` became `https://file` and was refused by the *host*
+check. The guard read as protective and could never fire — found by a mutant that removed it and
+changed nothing.
+
+### A mutant recorded as equivalent rather than deleted
+
+Reverting the scheme detection alone is now behaviourally equivalent, because the credentials
+check closed the gap it used to expose. Verified across `mailto:`, `ftp:`, `file:`, `foo:` and
+`data:` inputs: identical outputs, only the refusal reason differs. It is kept in the harness
+marked as equivalent, with that verification written down, because it records which half carries
+the property — the credentials check is load-bearing, and the scheme detection is defence in depth
+that makes the protocol check reachable.
+
+### What LP1 does NOT do
+
+- **It does not find anybody's email.** That is LP4. LP1 is where a person waits.
+- **It does not make anybody mailable.** A promoted contact still needs its Article 14 notice; the
+  suite asserts a freshly promoted contact refuses with `LI_NOTICE_NOT_SENT`.
+- **It does not cover LinkedIn-sourced data in any signed assessment.** See §8.
+
+## 8. A gap this work opened, which needs a decision
+
+Running two audiences in parallel — practices via the website scraper, larger companies via
+LinkedIn — means two balancing assessments. The system supports several and each contact cites
+the one it relies on.
+
+**What it does not check is that the contact cited the RIGHT one.** `assessmentVerdict` checks
+country coverage, not source coverage. Two assessments both covering `GB` are interchangeable as
+far as the gate is concerned, so an enterprise contact identified on LinkedIn could cite the
+assessment written for dental practices scraped from their own websites, and nothing would object.
+
+That was a theoretical note under LP4 when the plan was written. With two audiences live it is a
+real hole, and it is the sort that is invisible until somebody asks to see the paperwork.
+
+The fix is small and mechanical: the assessment already declares `dataSources`, and every contact
+already carries `source`. Requiring the contact's source kind to be covered by the assessment's
+declared sources would make the mismatch refuse rather than pass — the same shape as the country
+check beside it.
+
+**I have not built it**, because it changes the lawful basis gate, which is safety-critical and
+outside what LP1 was asked for. It should be decided before LP4 rather than after.
