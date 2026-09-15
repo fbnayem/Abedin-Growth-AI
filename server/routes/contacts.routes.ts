@@ -14,6 +14,7 @@ import { importLeads } from '../services/leadImport.service';
 import { previewScore, scoreContacts } from '../services/leadScore.service';
 import { discoverLeads } from '../services/discovery.service';
 import { scrapeSite } from '../services/scrapeWorker.service';
+import { sendArticle14Notices } from '../services/article14Send.service';
 import { buildContactDocument } from '../domain/contactDocument';
 import { attributionFor, operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
@@ -286,6 +287,52 @@ contactsRouter.post('/leads/notice-sent', async (req: Request, res: Response) =>
       recorded: outcome.outcomes.filter((o) => o.recorded).length,
       unchanged: outcome.outcomes.filter((o) => !o.recorded).length,
       mailable: outcome.outcomes.filter((o) => o.mailable).length,
+      outcomes: outcome.outcomes,
+    });
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * ACTUALLY SEND the Article 14 notice.
+ *
+ * Distinct from `/leads/notice-sent` directly above, which records that a notice went out by
+ * some other route. Both endpoints exist on purpose: an operator who posted the notice by
+ * letter has to be able to record that, and removing the manual path would push them into
+ * lying to the system instead.
+ *
+ * PREVIEW is the default. An operator who calls this without saying `mode` gets the full set
+ * of checks and nothing leaves the process, which is the same shape the importer, the discovery
+ * lookup and the scraper use — the irreversible step should never be the first time you find
+ * out what would happen.
+ */
+contactsRouter.post('/leads/notice-send', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/leads/notice-send');
+    if (body === null) return;
+    const gate = operatorGate(req.user, isProduction);
+    if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+
+    const outcome = await sendArticle14Notices(orgScope(req), body.contactIds, gate.attribution, {
+      mode: body.mode ?? 'PREVIEW',
+      acknowledgesPossibleDuplicate: body.acknowledgesPossibleDuplicate,
+    });
+    if (outcome.ok === false) {
+      return sendError(
+        req,
+        res,
+        outcome.code === 'STORE_UNAVAILABLE' ? 'STORE_UNAVAILABLE' : 'VALIDATION_ERROR',
+        outcome.message
+      );
+    }
+
+    res.json({
+      mode: outcome.mode,
+      sent: outcome.outcomes.filter((o) => o.sent).length,
+      refused: outcome.outcomes.filter((o) => !o.sent).length,
+      // Counted separately rather than folded into `refused`: an ambiguous send is the one
+      // outcome where somebody has to decide something, and burying it in a total is how it
+      // gets missed (§32).
+      ambiguous: outcome.outcomes.filter((o) => o.code === 'SEND_AMBIGUOUS').length,
       outcomes: outcome.outcomes,
     });
   } catch (e: any) { sendCaught(req, res, e); }

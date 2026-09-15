@@ -311,6 +311,68 @@ export const noticeSentSchema = z
   .strict();
 
 /**
+ * Write a legitimate interests assessment.
+ *
+ * The three limbs of the balancing test are separate fields with their own floors, because a
+ * single free-text box is how the assessment gets written as a paragraph of marketing copy.
+ * `server/domain/lia.ts` holds the substantive rules; this schema is the transport shape and
+ * deliberately omits `signedBy`, `signedAt` and `reviewDueAt` — those are set by the act of
+ * signing, and a drafter who could set them could write an assessment that never expires.
+ */
+export const liaDraftSchema = z
+  .object({
+    title: z.string().trim().min(8).max(300),
+    purpose: z.string().trim().min(1).max(20000),
+    necessity: z.string().trim().min(1).max(20000),
+    balancing: z.string().trim().min(1).max(20000),
+    countries: z.array(z.string().trim().min(2).max(2)).min(1).max(50),
+    dataCategories: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
+    dataSources: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
+    safeguards: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
+    objectionRoute: z.string().trim().min(1).max(20000),
+  })
+  .strict();
+
+/**
+ * Sign an assessment.
+ *
+ * `reviewDueAt` is optional and defaults to twelve months from the signature. It is accepted
+ * here and nowhere else: the review date is part of the act of signing.
+ */
+export const liaSignSchema = z
+  .object({
+    reviewDueAt: z.string().trim().min(1).max(64).optional(),
+  })
+  .strict();
+
+/** Withdraw an assessment. The reason is required; see the service for why. */
+export const liaWithdrawSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+
+/**
+ * Actually send the Article 14 notice to a batch.
+ *
+ * Distinct from `POST /api/leads/notice-sent`, which RECORDS that a notice was sent by some
+ * other route. This one sends it. Both exist because an operator who posted the notice by letter
+ * needs to be able to record that, and removing the manual path would push them into lying to
+ * the system instead.
+ *
+ * `acknowledgesPossibleDuplicate` is how a contact whose previous attempt was ambiguous gets
+ * retried. It is not a default: a second copy of a privacy notice is a decision somebody makes,
+ * not something a backoff loop does on their behalf (§32).
+ */
+export const noticeSendSchema = z
+  .object({
+    contactIds: z.array(z.string().trim().min(1).max(255)).min(1).max(200),
+    mode: z.enum(['PREVIEW', 'SEND']).optional(),
+    acknowledgesPossibleDuplicate: z.boolean().optional(),
+  })
+  .strict();
+
+/**
  * Score contacts against the declared ideal customer profile.
  *
  * An empty `contactIds` means every contact in the organisation, which is the normal case after
@@ -383,6 +445,11 @@ export const BODY_SCHEMAS = {
   'POST /api/contacts/:id/revoke-consent': revokeConsentSchema,
   'POST /api/leads/import': leadImportSchema,
   'POST /api/leads/notice-sent': noticeSentSchema,
+  'POST /api/leads/notice-send': noticeSendSchema,
+  'POST /api/lia': liaDraftSchema,
+  'POST /api/lia/:id/amend': liaDraftSchema,
+  'POST /api/lia/:id/sign': liaSignSchema,
+  'POST /api/lia/:id/withdraw': liaWithdrawSchema,
   'POST /api/leads/score': scoreLeadsSchema,
   'POST /api/leads/discover': discoverLeadsSchema,
   'POST /api/leads/scrape': scrapeSiteSchema,

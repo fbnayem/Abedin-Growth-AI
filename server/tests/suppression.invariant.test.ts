@@ -199,9 +199,43 @@ describe('3. the enforcement point is the gateway, reading the live record', () 
    * against comment-stripped source, so neither can be satisfied by a sentence about the code.
    */
   it('asks the lawful-basis decision rather than judging consent inline', () => {
-    expect(gateway).toMatch(/evaluateLawfulBasis\(contactData\)/);
+    expect(gateway).toMatch(/evaluateLawfulBasis\(contactData,/);
     // And there is exactly one owner of the decision: no inline consent test survives beside it.
     expect(gateway).not.toMatch(/contactData\.consentGiven\s*!==\s*true/);
+  });
+
+  /**
+   * P6a/P6b — THE TWO STRICT CHECKS ARE TIED TO THE SEND FLAG, NOT HARDCODED OFF.
+   *
+   * Both `requireReviewedRegime` and `requireSignedAssessment` default false in the domain
+   * module, for a reason argued there: making them unconditional would freeze development
+   * behind a solicitor's invoice and the pressure would be to forge a sign-off. The whole
+   * safety property therefore lives in this ONE call site passing the flag — and a mutant that
+   * changes it to a literal `false` would leave every other test in the repository green.
+   *
+   * So the wiring is asserted directly. Comment-stripped, like everything else here, because
+   * the paragraph above contains the words it is looking for.
+   */
+  it('turns on the strict checks exactly when real sending is on', () => {
+    expect(gateway).toMatch(/const strict = isRealActionEnabled\('REAL_EMAIL_SEND_ENABLED'\)/);
+    const call = gateway.slice(gateway.indexOf('evaluateLawfulBasis(contactData,'));
+    const args = call.slice(0, 260);
+    expect(args).toMatch(/requireReviewedRegime: strict/);
+    expect(args).toMatch(/requireSignedAssessment: strict/);
+    expect(args).toMatch(/assessment,/);
+  });
+
+  /**
+   * And the assessment is RESOLVED rather than trusted. `liaId` used to satisfy the gate by
+   * being a non-empty string, so `x` was a balancing assessment; the lookup is what changed
+   * that, and a lookup that stopped happening would silently restore the old behaviour under
+   * the new option names.
+   */
+  it('resolves the cited assessment before deciding, when strict', () => {
+    expect(gateway).toMatch(/resolveAssessmentForContact\(/);
+    const at = gateway.indexOf('resolveAssessmentForContact(');
+    // Reached only under `strict`, so a preview or a development run does no extra read.
+    expect(gateway.slice(Math.max(0, at - 120), at)).toMatch(/strict\s*$|strict[\s\S]{0,60}$/);
   });
 
   it('refuses the send on any verdict that is not ok', () => {

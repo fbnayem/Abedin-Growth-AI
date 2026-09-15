@@ -49,6 +49,8 @@
  */
 
 import { isFreeMailAddress } from '../lib/identity';
+import { OUTREACH_REGIMES, type CountryRule, type OutreachRegime } from './lawfulBasisSources';
+import type { AssessmentVerdict } from './lia';
 
 /** The bases this system recognises. Anything else is not a basis. */
 export const LAWFUL_BASES = ['CONSENT', 'LEGITIMATE_INTEREST'] as const;
@@ -59,70 +61,27 @@ export const ADDRESS_TYPES = ['PERSONAL', 'ROLE'] as const;
 export type AddressType = (typeof ADDRESS_TYPES)[number];
 
 /**
- * How a country treats unsolicited commercial email.
+ * THE COUNTRY TABLE MOVED, AND GREW A REQUIREMENT.
  *
- *   GDPR_LI           legitimate interest is available for business recipients, with a right
- *                     to object that must be honoured.
- *   OPT_OUT           no prior permission required, subject to the local regime's own rules
- *                     (accurate headers, a postal address, a working unsubscribe).
- *   CONSENT_REQUIRED  prior express permission, including for business recipients.
+ * `OUTREACH_REGIMES` now lives in `./lawfulBasisSources`, where each row carries the instruments
+ * and provisions it is derived from, the specific questions a reviewer still has to answer, and
+ * a `review` field that is null until a qualified person signs it off. It is re-exported here so
+ * every existing importer is unaffected, and so the one table remains the one table.
+ *
+ * The move is not tidying. Previously a country was a regime plus a sentence of prose, and the
+ * instruction to have the table checked lived in a comment — which meant a seventh country could
+ * be added with no source at all and nothing would notice. The row type now requires at least
+ * one citation, so adding a country is mechanically an act of citing something.
  */
-export type OutreachRegime = 'GDPR_LI' | 'OPT_OUT' | 'CONSENT_REQUIRED';
-
-/**
- * The country table.
- *
- * DELIBERATELY SHORT, AND DELIBERATELY DENY-BY-DEFAULT. A country that is not listed here
- * refuses, rather than falling back to the most permissive reading of the least information —
- * which is the exact defect §14 exists to prevent and which this gate previously contained as
- * `resolvedCountry = 'US'`.
- *
- * THIS TABLE NEEDS LEGAL REVIEW BEFORE IT IS RELIED ON. The entries below are a starting point
- * drawn from the commonly stated position in each jurisdiction, not legal advice, and the
- * distinctions are genuinely fine: in the UK the consent rule in PECR applies to individual
- * subscribers, so a sole trader or a partnership is treated very differently from a limited
- * company at the same address. Add a country only when someone has checked it.
- */
-export const OUTREACH_REGIMES: Readonly<Record<string, { regime: OutreachRegime; note: string }>> =
-  Object.freeze({
-    GB: {
-      regime: 'GDPR_LI',
-      note:
-        'PECR restricts unsolicited email to individual subscribers. Corporate subscribers may ' +
-        'be contacted on a legitimate interests basis, with a right to object. Sole traders and ' +
-        'partnerships count as individual subscribers and need consent.',
-    },
-    US: {
-      regime: 'OPT_OUT',
-      note:
-        'CAN-SPAM requires no prior permission, but does require accurate headers, a valid ' +
-        'postal address and a working opt-out honoured promptly.',
-    },
-    NL: {
-      regime: 'GDPR_LI',
-      note: 'Business recipients may be contacted on an opt-out basis.',
-    },
-    FR: {
-      regime: 'GDPR_LI',
-      note:
-        'The regulator permits business email where the message relates to the recipient\'s ' +
-        'professional role, on an opt-out basis.',
-    },
-    DE: {
-      regime: 'CONSENT_REQUIRED',
-      note: 'Prior express consent is required for advertising email, including business to business.',
-    },
-    CA: {
-      regime: 'CONSENT_REQUIRED',
-      note: 'CASL requires express or implied consent before a commercial electronic message.',
-    },
-  });
+export type { CountryRule, OutreachRegime };
+export { OUTREACH_REGIMES };
 
 export type BasisRefusalCode =
   | 'NO_BASIS'
   | 'UNKNOWN_BASIS'
   | 'COUNTRY_UNKNOWN'
   | 'COUNTRY_NOT_REVIEWED'
+  | 'COUNTRY_NOT_LEGALLY_REVIEWED'
   | 'CONSENT_NOT_RECORDED'
   | 'CONSENT_REVOKED'
   | 'CONSENT_UNEVIDENCED'
@@ -131,6 +90,9 @@ export type BasisRefusalCode =
   | 'LI_ADDRESS_TYPE_UNKNOWN'
   | 'LI_INDIVIDUAL_SUBSCRIBER'
   | 'LI_NO_ASSESSMENT'
+  | 'LI_ASSESSMENT_NOT_RESOLVED'
+  | 'LI_ASSESSMENT_INVALID'
+  | 'LI_ASSESSMENT_MISMATCH'
   | 'LI_NOTICE_NOT_SENT';
 
 export type BasisVerdict =
@@ -177,13 +139,64 @@ export function regimeFor(country: unknown): OutreachRegime | null {
 }
 
 /**
+ * Options that make the gate stricter. There is no option that makes it looser, deliberately.
+ */
+export interface BasisOptions {
+  /**
+   * Refuse any country whose row in the table has not been signed off by a qualified person.
+   *
+   * DEFAULT FALSE, AND THE DEFAULT IS THE UNSAFE-LOOKING ONE, SO HERE IS THE ARGUMENT.
+   *
+   * Every row is unreviewed today. If this defaulted true, nothing in this system would be
+   * mailable at all — no preview would work, no test fixture would evaluate, and the entire
+   * lead pipeline would be dark until a solicitor had been paid. That is not a safety property,
+   * it is a development freeze, and the pressure it creates is to fill `review` in with
+   * something plausible to get moving. A control people are motivated to defeat is worse than
+   * one placed where the motivation runs the other way.
+   *
+   * So the check bites at the only place it matters: `ActionGateway.executeEmailSend` passes
+   * `requireReviewedRegime: isRealActionEnabled('REAL_EMAIL_SEND_ENABLED')`. Development and
+   * preview are unaffected; the moment real sending is turned on, an unreviewed country stops.
+   * Turning the flag on therefore cannot quietly begin mailing people under a rule nobody
+   * checked, which is the actual failure this guards against.
+   */
+  readonly requireReviewedRegime?: boolean;
+
+  /**
+   * Refuse unless `liaId` resolves to a signed, unwithdrawn, unexpired assessment covering this
+   * contact's country — rather than merely being a non-empty string.
+   *
+   * WHAT THIS REPLACES. The check below used to be `nonEmptyString(facts.liaId) !== null`, with
+   * a comment reading "the assessment is what makes the basis defensible". Typing `x` satisfied
+   * it. That is the exact shape of defect this file exists to remove, sitting inside the file
+   * that removes it.
+   *
+   * Resolution needs a datastore read, and this function is pure and stays pure — so the CALLER
+   * resolves the id (`resolveAssessmentForContact`) and passes the verdict in. The default is
+   * off for the same reason `requireReviewedRegime` defaults off: making it unconditional would
+   * mean every preview, fixture and test had to seed an assessment, and the pressure would be
+   * to weaken the check rather than to write one.
+   */
+  readonly requireSignedAssessment?: boolean;
+
+  /**
+   * The resolved assessment, when the caller has looked it up.
+   *
+   * Absent with `requireSignedAssessment` set is itself a refusal — `LI_ASSESSMENT_NOT_RESOLVED`
+   * — and not a pass. A caller that asks for the strict check and then forgets to do the lookup
+   * has a bug, and the failure mode of treating that as permission is the one that matters.
+   */
+  readonly assessment?: AssessmentVerdict;
+}
+
+/**
  * May this contact lawfully be sent commercial email?
  *
  * Suppression is NOT checked here. It is checked before this, and it outranks any basis: an
  * unsubscribe beats a consent, because the later statement is the operative one. Keeping the
  * two separate means neither can be mistaken for the other.
  */
-export function evaluateLawfulBasis(facts: BasisFacts): BasisVerdict {
+export function evaluateLawfulBasis(facts: BasisFacts, options: BasisOptions = {}): BasisVerdict {
   const country = normaliseCountry(facts.country);
   if (country === null) {
     return {
@@ -205,6 +218,22 @@ export function evaluateLawfulBasis(facts: BasisFacts): BasisVerdict {
         `No outreach regime is recorded for ${country}. A country is added to the table only ` +
         `once its rules have been checked, and an unreviewed country refuses rather than ` +
         `inheriting another country's rules.`,
+    };
+  }
+
+  // The row exists. Has anyone qualified actually checked it? Applies to BOTH bases, because
+  // an unreviewed row is unreviewed about consent too: what form of consent Germany requires
+  // and what a US footer must contain are exactly the sort of particular this catches.
+  if (options.requireReviewedRegime === true && entry.review === null) {
+    return {
+      ok: false,
+      code: 'COUNTRY_NOT_LEGALLY_REVIEWED',
+      message:
+        `The rule recorded for ${country} has not been reviewed by a qualified person. It reads: ` +
+        `"${entry.note}" — derived from ${entry.sources.length} cited provision(s) and carrying ` +
+        `${entry.openQuestions.length} unanswered question(s). Real sending is on, so an ` +
+        `unchecked rule refuses. Record the sign-off in server/domain/lawfulBasisSources.ts; ` +
+        `docs/production/legal-review-pack.md is the same material written for the reviewer.`,
     };
   }
 
@@ -317,7 +346,8 @@ export function evaluateLawfulBasis(facts: BasisFacts): BasisVerdict {
     };
   }
 
-  if (nonEmptyString(facts.liaId) === null) {
+  const liaId = nonEmptyString(facts.liaId);
+  if (liaId === null) {
     return {
       ok: false,
       code: 'LI_NO_ASSESSMENT',
@@ -325,6 +355,41 @@ export function evaluateLawfulBasis(facts: BasisFacts): BasisVerdict {
         'Legitimate interest requires a balancing assessment on file, and none is referenced ' +
         'by this contact. The assessment is what makes the basis defensible.',
     };
+  }
+
+  // The id names something. Does that something exist, and does it say what it needs to say?
+  if (options.requireSignedAssessment === true) {
+    const resolved = options.assessment;
+    if (resolved === undefined) {
+      return {
+        ok: false,
+        code: 'LI_ASSESSMENT_NOT_RESOLVED',
+        message:
+          `A signed assessment was required for this decision and none was looked up. The ` +
+          `caller asked for the strict check and did not resolve ${JSON.stringify(liaId)}, ` +
+          `which is a caller bug; an unresolved assessment is refused rather than assumed.`,
+      };
+    }
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        code: 'LI_ASSESSMENT_INVALID',
+        message: `${resolved.code}: ${resolved.message}`,
+      };
+    }
+    if (resolved.id !== liaId) {
+      // Belt and braces. If these disagree, the verdict in hand describes a different document
+      // from the one this contact cites, and acting on it would attribute one assessment's
+      // signature to another assessment's text.
+      return {
+        ok: false,
+        code: 'LI_ASSESSMENT_MISMATCH',
+        message:
+          `This contact cites assessment ${JSON.stringify(liaId)} but the resolved verdict is ` +
+          `for ${JSON.stringify(resolved.id)}. Refusing rather than crediting one document with ` +
+          `another document's signature.`,
+      };
+    }
   }
 
   if (nonEmptyString(facts.article14NoticeSentAt) === null) {

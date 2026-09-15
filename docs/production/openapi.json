@@ -29,6 +29,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -41,6 +43,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -107,6 +110,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -119,6 +124,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -185,6 +191,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -197,6 +205,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -273,6 +282,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -285,6 +296,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -359,6 +371,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -371,6 +385,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -438,6 +453,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -450,6 +467,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -516,6 +534,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -528,6 +548,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -594,6 +615,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -606,6 +629,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -672,6 +696,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -684,6 +710,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -750,6 +777,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -762,6 +791,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -828,6 +858,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -840,6 +872,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -907,6 +940,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -919,6 +954,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -995,6 +1031,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -1007,6 +1045,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -1107,6 +1146,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -1119,6 +1160,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -1225,6 +1267,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -1237,6 +1281,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -1343,6 +1388,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -1355,6 +1402,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -1421,6 +1469,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -1433,6 +1483,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -1717,6 +1768,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -1729,6 +1782,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -1852,6 +1906,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -1864,6 +1920,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2002,6 +2059,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2014,6 +2073,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2064,7 +2124,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:676"
+        "x-source": "server/routes/contacts.routes.ts:723"
       }
     },
     "/api/contacts/{id}/quotes": {
@@ -2090,6 +2150,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2102,6 +2164,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2152,7 +2215,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:735"
+        "x-source": "server/routes/contacts.routes.ts:782"
       },
       "post": {
         "operationId": "post_api_contacts_id_quotes",
@@ -2237,6 +2300,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2249,6 +2314,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2299,7 +2365,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:641"
+        "x-source": "server/routes/contacts.routes.ts:688"
       }
     },
     "/api/contacts/{id}/revoke-consent": {
@@ -2348,6 +2414,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2360,6 +2428,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2410,7 +2479,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:709"
+        "x-source": "server/routes/contacts.routes.ts:756"
       }
     },
     "/api/contacts/{id}/time-zone": {
@@ -2462,6 +2531,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2474,6 +2545,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2524,7 +2596,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:617"
+        "x-source": "server/routes/contacts.routes.ts:664"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -2550,6 +2622,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2562,6 +2636,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2613,7 +2688,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/contacts.routes.ts:442"
+        "x-source": "server/routes/contacts.routes.ts:489"
       }
     },
     "/api/csp-report": {
@@ -2629,6 +2704,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2641,6 +2718,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2708,6 +2786,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2720,6 +2800,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2786,6 +2867,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2798,6 +2881,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2864,6 +2948,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2876,6 +2962,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -2943,6 +3030,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -2955,6 +3044,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3021,6 +3111,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3033,6 +3125,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3099,6 +3192,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3111,6 +3206,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3177,6 +3273,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3189,6 +3287,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3255,6 +3354,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3267,6 +3368,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3334,6 +3436,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3346,6 +3450,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3412,6 +3517,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3424,6 +3531,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3490,6 +3598,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3502,6 +3612,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3568,6 +3679,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3580,6 +3693,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3657,6 +3771,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3669,6 +3785,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3745,6 +3862,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3757,6 +3876,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3833,6 +3953,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3845,6 +3967,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -3921,6 +4044,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -3933,6 +4058,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4009,6 +4135,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4021,6 +4149,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4097,6 +4226,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4109,6 +4240,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4175,6 +4307,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4187,6 +4321,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4254,6 +4389,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4266,6 +4403,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4316,7 +4454,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:745"
+        "x-source": "server/routes/contacts.routes.ts:792"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -4438,6 +4576,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4450,6 +4590,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4500,7 +4641,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:754"
+        "x-source": "server/routes/contacts.routes.ts:801"
       }
     },
     "/api/investors/batch-generate": {
@@ -4516,6 +4657,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4528,6 +4671,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4578,7 +4722,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:516"
+        "x-source": "server/routes/contacts.routes.ts:563"
       }
     },
     "/api/knowledge": {
@@ -4594,6 +4738,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4606,6 +4752,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4706,6 +4853,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4718,6 +4867,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4784,6 +4934,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4796,6 +4948,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -4846,7 +4999,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:37"
+        "x-source": "server/routes/contacts.routes.ts:38"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -4968,6 +5121,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -4980,6 +5135,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5030,7 +5186,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:194"
+        "x-source": "server/routes/contacts.routes.ts:195"
       }
     },
     "/api/leads/batch-followup": {
@@ -5046,6 +5202,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5058,6 +5216,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5108,7 +5267,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:573"
+        "x-source": "server/routes/contacts.routes.ts:620"
       }
     },
     "/api/leads/batch-generate": {
@@ -5124,6 +5283,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5136,6 +5297,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5186,7 +5348,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:491"
+        "x-source": "server/routes/contacts.routes.ts:538"
       }
     },
     "/api/leads/discover": {
@@ -5294,6 +5456,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5306,6 +5470,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5356,7 +5521,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:332"
+        "x-source": "server/routes/contacts.routes.ts:379"
       }
     },
     "/api/leads/import": {
@@ -5453,6 +5618,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5465,6 +5632,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5515,7 +5683,124 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:213"
+        "x-source": "server/routes/contacts.routes.ts:214"
+      }
+    },
+    "/api/leads/notice-send": {
+      "post": {
+        "operationId": "post_api_leads_notice_send",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "acknowledgesPossibleDuplicate": {
+                    "type": "boolean"
+                  },
+                  "contactIds": {
+                    "items": {
+                      "maxLength": 255,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 200,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "mode": {
+                    "enum": [
+                      "PREVIEW",
+                      "SEND"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contactIds"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/contacts.routes.ts:308"
       }
     },
     "/api/leads/notice-sent": {
@@ -5563,6 +5848,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5575,6 +5862,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5625,7 +5913,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:270"
+        "x-source": "server/routes/contacts.routes.ts:271"
       }
     },
     "/api/leads/research": {
@@ -5641,6 +5929,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5653,6 +5943,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5703,7 +5994,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:566"
+        "x-source": "server/routes/contacts.routes.ts:613"
       }
     },
     "/api/leads/score": {
@@ -5746,6 +6037,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5758,6 +6051,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5808,7 +6102,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:302"
+        "x-source": "server/routes/contacts.routes.ts:349"
       }
     },
     "/api/leads/scrape": {
@@ -5893,6 +6187,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5905,6 +6201,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -5955,7 +6252,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:384"
+        "x-source": "server/routes/contacts.routes.ts:431"
       }
     },
     "/api/leads/{id}/email": {
@@ -5981,6 +6278,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -5993,6 +6292,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6043,7 +6343,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:596"
+        "x-source": "server/routes/contacts.routes.ts:643"
       }
     },
     "/api/leads/{id}/score": {
@@ -6069,6 +6369,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6081,6 +6383,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6131,7 +6434,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:422"
+        "x-source": "server/routes/contacts.routes.ts:469"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -6157,6 +6460,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6169,6 +6474,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6219,7 +6525,748 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:589"
+        "x-source": "server/routes/contacts.routes.ts:636"
+      }
+    },
+    "/api/lia": {
+      "get": {
+        "operationId": "get_api_lia",
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "none",
+        "x-source": "server/routes/lia.routes.ts:32"
+      },
+      "post": {
+        "operationId": "post_api_lia",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "balancing": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "countries": {
+                    "items": {
+                      "maxLength": 2,
+                      "minLength": 2,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "dataCategories": {
+                    "items": {
+                      "maxLength": 300,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "dataSources": {
+                    "items": {
+                      "maxLength": 300,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "necessity": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "objectionRoute": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "safeguards": {
+                    "items": {
+                      "maxLength": 300,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "title": {
+                    "maxLength": 300,
+                    "minLength": 8,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "purpose",
+                  "necessity",
+                  "balancing",
+                  "countries",
+                  "dataCategories",
+                  "dataSources",
+                  "safeguards",
+                  "objectionRoute"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/lia.routes.ts:62"
+      }
+    },
+    "/api/lia/{id}": {
+      "get": {
+        "operationId": "get_api_lia_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "none",
+        "x-source": "server/routes/lia.routes.ts:52"
+      }
+    },
+    "/api/lia/{id}/amend": {
+      "post": {
+        "operationId": "post_api_lia_id_amend",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "balancing": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "countries": {
+                    "items": {
+                      "maxLength": 2,
+                      "minLength": 2,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "dataCategories": {
+                    "items": {
+                      "maxLength": 300,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "dataSources": {
+                    "items": {
+                      "maxLength": 300,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "necessity": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "objectionRoute": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "purpose": {
+                    "maxLength": 20000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "safeguards": {
+                    "items": {
+                      "maxLength": 300,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 50,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "title": {
+                    "maxLength": 300,
+                    "minLength": 8,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "purpose",
+                  "necessity",
+                  "balancing",
+                  "countries",
+                  "dataCategories",
+                  "dataSources",
+                  "safeguards",
+                  "objectionRoute"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/lia.routes.ts:75"
+      }
+    },
+    "/api/lia/{id}/sign": {
+      "post": {
+        "operationId": "post_api_lia_id_sign",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reviewDueAt": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/lia.routes.ts:88"
+      }
+    },
+    "/api/lia/{id}/withdraw": {
+      "post": {
+        "operationId": "post_api_lia_id_withdraw",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reason"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/lia.routes.ts:103"
       }
     },
     "/api/linkedin-config": {
@@ -6235,6 +7282,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6247,6 +7296,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6311,6 +7361,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6323,6 +7375,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6389,6 +7442,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6401,6 +7456,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6467,6 +7523,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6479,6 +7537,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6545,6 +7604,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6557,6 +7618,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6621,6 +7683,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6633,6 +7697,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6700,6 +7765,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6712,6 +7779,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6788,6 +7856,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6800,6 +7870,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6876,6 +7947,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6888,6 +7961,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -6964,6 +8038,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -6976,6 +8052,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7052,6 +8129,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7064,6 +8143,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7130,6 +8210,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7142,6 +8224,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7208,6 +8291,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7220,6 +8305,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7296,6 +8382,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7308,6 +8396,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7384,6 +8473,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7396,6 +8487,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7472,6 +8564,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7484,6 +8578,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7561,6 +8656,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7573,6 +8670,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7627,9 +8725,9 @@
         "x-source": "server/routes/outbox.routes.ts:154"
       }
     },
-    "/api/partners": {
+    "/api/outreach/preflight": {
       "get": {
-        "operationId": "get_api_partners",
+        "operationId": "get_api_outreach_preflight",
         "responses": {
           "default": {
             "content": {
@@ -7640,6 +8738,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7652,6 +8752,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7702,7 +8803,88 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:760"
+        "x-source": "server/routes/outreach.routes.ts:27"
+      }
+    },
+    "/api/partners": {
+      "get": {
+        "operationId": "get_api_partners",
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "none",
+        "x-source": "server/routes/contacts.routes.ts:807"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -7824,6 +9006,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7836,6 +9020,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7886,7 +9071,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:769"
+        "x-source": "server/routes/contacts.routes.ts:816"
       }
     },
     "/api/partners/batch-generate": {
@@ -7902,6 +9087,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7914,6 +9101,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -7964,7 +9152,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:541"
+        "x-source": "server/routes/contacts.routes.ts:588"
       }
     },
     "/api/pipeline": {
@@ -7980,6 +9168,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -7992,6 +9182,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8111,6 +9302,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8123,6 +9316,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8239,6 +9433,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8251,6 +9447,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8365,6 +9562,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8377,6 +9576,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8443,6 +9643,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8455,6 +9657,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8532,6 +9735,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8544,6 +9749,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8620,6 +9826,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8632,6 +9840,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8708,6 +9917,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8720,6 +9931,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8796,6 +10008,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8808,6 +10022,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8874,6 +10089,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8886,6 +10103,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -8952,6 +10170,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -8964,6 +10184,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9028,6 +10249,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9040,6 +10263,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9106,6 +10330,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9118,6 +10344,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9242,6 +10469,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9254,6 +10483,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9320,6 +10550,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9332,6 +10564,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9398,6 +10631,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9410,6 +10645,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9487,6 +10723,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9499,6 +10737,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9566,6 +10805,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9578,6 +10819,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9644,6 +10886,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9656,6 +10900,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9734,6 +10979,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9746,6 +10993,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9823,6 +11071,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9835,6 +11085,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9909,6 +11160,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9921,6 +11174,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -9987,6 +11241,8 @@
                       "properties": {
                         "code": {
                           "enum": [
+                            "ALREADY_SIGNED",
+                            "ALREADY_WITHDRAWN",
                             "ATTRIBUTION_REQUIRED",
                             "AUTH_INVALID",
                             "AUTH_REQUIRED",
@@ -9999,6 +11255,7 @@
                             "MODEL_OUTPUT_INVALID",
                             "NOT_FOUND",
                             "NOT_IMPLEMENTED",
+                            "NOT_SIGNED",
                             "POLICY_BLOCKED",
                             "PROVIDER_RATE_LIMITED",
                             "PROVIDER_UNAVAILABLE",
@@ -10059,7 +11316,7 @@
     "rawBody": 2,
     "readingBodyWithoutSchema": 14,
     "responsesDescribed": 0,
-    "routes": 106,
-    "withRequestContract": 22
+    "routes": 114,
+    "withRequestContract": 27
   }
 }

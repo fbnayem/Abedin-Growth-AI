@@ -4,8 +4,13 @@ import { readFileSync } from 'node:fs';
 /**
  * INVARIANTS FOR EVERY DECLARED ACTION TYPE (S25/§C).
  *
- * `ActionType` declares eight. The execution switch implemented two and sent the other six to
- * `default: { success: false, error: 'Unsupported action type' }`.
+ * `ActionType` declared eight when this suite was written. The execution switch implemented two
+ * and sent the other six to `default: { success: false, error: 'Unsupported action type' }`.
+ *
+ * P6c added a ninth, PRIVACY_NOTICE_SEND, and the `never` check below did exactly what it
+ * exists for: adding the type without classifying it was a compile error, not a runtime
+ * surprise. It is implemented, so it joins EMAIL_SEND and CALENDAR_CREATE in the implemented
+ * set rather than in UNIMPLEMENTED.
  *
  * That refusal carried no `errorCode`, so the outbox worker fell through to its `else` branch,
  * threw, and RETRIED — backoff after backoff for an action type that cannot succeed by being
@@ -15,8 +20,8 @@ import { readFileSync } from 'node:fs';
  *
  * Nothing dispatches them today: `EMAIL_SEND` from the outbox worker and `CALENDAR_CREATE` from
  * POST /api/meetings are the only two dispatch sites in the repository. So this suite is about what
- * happens the day somebody adds a third — and about the `never` check that makes a ninth type a
- * compile error rather than a runtime message.
+ * happens the day somebody adds another — and about the `never` check that makes an
+ * unclassified type a compile error rather than a runtime message.
  */
 
 let storeAvailable = true;
@@ -101,6 +106,9 @@ const UNIMPLEMENTED = [
   'EXTERNAL_MESSAGE_SEND',
 ];
 
+/** The three with an executor. PRIVACY_NOTICE_SEND joined them in P6c. */
+const IMPLEMENTED = ['EMAIL_SEND', 'CALENDAR_CREATE', 'PRIVACY_NOTICE_SEND'];
+
 function request(actionType: string) {
   return {
     actionType,
@@ -129,11 +137,13 @@ beforeEach(() => {
 });
 
 describe('1. every declared type is accounted for', () => {
-  it('there are eight, and the suite covers all of them', () => {
-    // A list that drifts from the enum would quietly stop testing a type.
+  it('there are nine, and the suite covers all of them', () => {
+    // A list that drifts from the enum would quietly stop testing a type. The count is asserted
+    // as well as the membership, so ADDING a type fails here rather than passing because the
+    // new name happened to be absent from both lists.
     const declared = Object.values(ActionType) as string[];
-    expect(declared.length).toBe(8);
-    expect([...UNIMPLEMENTED, 'EMAIL_SEND', 'CALENDAR_CREATE'].sort()).toEqual([...declared].sort());
+    expect(declared.length).toBe(9);
+    expect([...UNIMPLEMENTED, ...IMPLEMENTED].sort()).toEqual([...declared].sort());
   });
 
   it('no declared type produces the old anonymous refusal', async () => {

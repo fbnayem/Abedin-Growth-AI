@@ -95,6 +95,18 @@ export const ErrorCodes = {
   MERGE_REFUSED: 422,
   /** More rows point at the record than one transaction can reparent. */
   TOO_MANY_REFERENCES: 422,
+  /**
+   * A signed balancing assessment was asked to change.
+   *
+   * 422 and not 409: a version conflict is resolved by re-reading and retrying, and this cannot
+   * be. A signature is a claim about a specific text, so the remedy is to withdraw the
+   * assessment and write its replacement — a different act, not the same act again.
+   */
+  ALREADY_SIGNED: 422,
+  /** The assessment was withdrawn. Signing or amending it would resurrect a retired document. */
+  ALREADY_WITHDRAWN: 422,
+  /** An operation that only makes sense on a signed assessment was asked of a draft. */
+  NOT_SIGNED: 422,
   ILLEGAL_TRANSITION: 422,
   TERMINAL_STATE: 422,
   UNKNOWN_TARGET_STATE: 422,

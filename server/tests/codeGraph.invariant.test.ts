@@ -57,6 +57,14 @@ const OWNERS: Record<string, string[]> = {
     // REAL_SCRAPE_ENABLED. A future module importing this to fetch a user-supplied URL without
     // that check should fail here and be argued about rather than added to this list.
     'server/services/scrapeWorker.service.ts',
+    // P6d — the configured discovery adapter. A DIFFERENT kind of owner again: the URL comes
+    // from DISCOVERY_ENDPOINT rather than from a request, so it is deployment configuration
+    // rather than user input — and it is still checked. `buildConfiguredDiscoveryProvider` runs
+    // the same `checkCrawlTarget` resolution the scraper uses and additionally requires HTTPS,
+    // because an operator pasting a metadata-service address into an environment variable is a
+    // real way to be made to fetch something, and "it was in the config" is not a provenance
+    // that makes an address safe.
+    'server/providers/httpDiscovery.provider.ts',
   ],
   'server/geminiClient.ts': [
     'server/agents/companyBrainAgent.ts',
@@ -71,6 +79,13 @@ const OWNERS: Record<string, string[]> = {
     // The live booking path: CALENDAR_CREATE is dispatched from here.
     'server/routes/meetings.routes.ts',
     'server/workers/outbox.worker.ts',
+    // P6c — the Article 14 notice. It dispatches PRIVACY_NOTICE_SEND, and it is here rather
+    // than sending mail itself precisely because §C says every external side effect goes
+    // through this gateway. The notice was the one message with a standing argument for an
+    // exception — the ordinary send path refuses any contact whose notice has not been sent, so
+    // routing it through EMAIL_SEND would be circular — and the answer was a new action type
+    // with its own checks, not a service that reaches past the gateway to the provider.
+    'server/services/article14Send.service.ts',
   ],
   'server/services/outbox.service.ts': [
     'server/gateway/actionGateway.ts',

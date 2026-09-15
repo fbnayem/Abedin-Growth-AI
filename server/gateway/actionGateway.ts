@@ -23,6 +23,7 @@ import {
   refusalReason,
 } from '../domain/campaignSafety';
 import { evaluateLawfulBasis } from '../domain/lawfulBasis';
+import { resolveAssessmentForContact } from '../services/lia.service';
 import { lockStateOf, mayProceed, refusalFor } from '../domain/autonomyLock';
 import { unsubscribeUrlFor } from '../domain/unsubscribe';
 import { replyLoopVerdict } from '../domain/replyLoop';
@@ -48,7 +49,19 @@ export enum ActionType {
   PAYMENT_CREATE = 'PAYMENT_CREATE',
   SIGNATURE_SEND = 'SIGNATURE_SEND',
   CRM_UPDATE = 'CRM_UPDATE',
-  EXTERNAL_MESSAGE_SEND = 'EXTERNAL_MESSAGE_SEND'
+  EXTERNAL_MESSAGE_SEND = 'EXTERNAL_MESSAGE_SEND',
+  /**
+   * The Article 14 data-subject notice.
+   *
+   * A SEPARATE TYPE FROM EMAIL_SEND, AND NOT A CONVENIENCE. `executeEmailSend` refuses any
+   * contact whose notice has not been sent, so routing the notice through it would require the
+   * lawful basis that the notice itself creates — a circular dependency with a legal shape.
+   *
+   * Being its own type is also what makes the difference in checks visible. This one refuses on
+   * suppression and does NOT consult the lawful basis or the campaign safety guards, because it
+   * is not marketing: see server/domain/article14Notice.ts for the argument on each.
+   */
+  PRIVACY_NOTICE_SEND = 'PRIVACY_NOTICE_SEND'
 }
 
 export interface ActionRequest {
@@ -153,6 +166,7 @@ export function isIrreversible(actionType: ActionType): boolean {
     case ActionType.PAYMENT_CREATE:
     case ActionType.SIGNATURE_SEND:
     case ActionType.EXTERNAL_MESSAGE_SEND:
+    case ActionType.PRIVACY_NOTICE_SEND:
       return true;
     case ActionType.CRM_UPDATE:
       // An internal, idempotent write to our own store. Repeating it changes nothing.
@@ -166,6 +180,7 @@ export function isIrreversible(actionType: ActionType): boolean {
 export function providerFor(actionType: ActionType): string {
   switch (actionType) {
     case ActionType.EMAIL_SEND:
+    case ActionType.PRIVACY_NOTICE_SEND:
       return 'gmail';
     case ActionType.CALENDAR_CREATE:
     case ActionType.CALENDAR_UPDATE:
@@ -186,6 +201,7 @@ export function providerFor(actionType: ActionType): string {
 export function capabilityFor(actionType: ActionType): Capability | null {
   switch (actionType) {
     case ActionType.EMAIL_SEND:
+    case ActionType.PRIVACY_NOTICE_SEND:
       return 'EMAIL_SEND';
     case ActionType.CALENDAR_CREATE:
     case ActionType.CALENDAR_UPDATE:
@@ -350,6 +366,10 @@ export class ActionGateway {
           break;
         case ActionType.CALENDAR_CREATE:
           result = await this.executeCalendarCreate(request);
+          break;
+
+        case ActionType.PRIVACY_NOTICE_SEND:
+          result = await this.executePrivacyNoticeSend(request);
           break;
 
         // THE SIX THAT ARE DECLARED AND NOT IMPLEMENTED.
@@ -664,6 +684,11 @@ export class ActionGateway {
   private checkFeatureFlag(actionType: ActionType): boolean {
     switch (actionType) {
       case ActionType.EMAIL_SEND:
+      // The notice is a real email to a real person and is gated by the same flag. It is NOT
+      // given a flag of its own: a second switch that could be on while sending was off would
+      // mean "this system cannot email anyone" had two answers, and the seven-flag readiness
+      // report exists so that question has one.
+      case ActionType.PRIVACY_NOTICE_SEND:
         return isRealActionEnabled('REAL_EMAIL_SEND_ENABLED');
       case ActionType.CALENDAR_CREATE:
       case ActionType.CALENDAR_UPDATE:
@@ -864,7 +889,32 @@ export class ActionGateway {
         // a merge. Every lead was therefore permanently unmailable. The gate now recognises a
         // second basis — legitimate interest for business recipients — which carries four
         // conditions of its own, and still refuses everything it cannot prove.
-        const basis = evaluateLawfulBasis(contactData);
+        // `requireReviewedRegime` is the country table's own sign-off, and it is tied to the
+        // send flag rather than to the environment. Every row in that table is unreviewed today,
+        // so passing `true` unconditionally would make the whole system unmailable in
+        // development and the pressure would be to forge a sign-off to get moving. Tied here,
+        // the check costs nothing until somebody turns real sending on — and at that moment an
+        // unchecked jurisdiction stops, which is the failure worth catching.
+        //
+        // The assessment is RESOLVED, not trusted. `liaId` used to satisfy the gate by being a
+        // non-empty string, so `x` was a balancing assessment. When real sending is on it must
+        // now name a stored document that is signed, unwithdrawn, in date, and covering this
+        // contact's country. The lookup happens here because `evaluateLawfulBasis` is pure and
+        // stays pure; passing the verdict in keeps the decision exercisable without a database.
+        const strict = isRealActionEnabled('REAL_EMAIL_SEND_ENABLED');
+        const assessment = strict
+            ? await resolveAssessmentForContact(
+                  request.organizationId,
+                  contactData.liaId,
+                  typeof contactData.country === 'string' ? contactData.country.trim().toUpperCase() : '',
+              )
+            : undefined;
+
+        const basis = evaluateLawfulBasis(contactData, {
+            requireReviewedRegime: strict,
+            requireSignedAssessment: strict,
+            assessment,
+        });
         if (basis.ok === false) {
             const reason =
                 `No lawful basis to email contact ${request.payload.contactId} ` +
@@ -1085,6 +1135,174 @@ export class ActionGateway {
     }
   }
 
+
+  /**
+   * THE ARTICLE 14 NOTICE.
+   *
+   * The message that tells somebody we hold their data and where we got it. It is the thing
+   * `recordArticle14Notice` used to record without anything ever having sent it.
+   *
+   * WHAT THIS CHECKS, AND WHAT IT DELIBERATELY DOES NOT
+   * ---------------------------------------------------
+   * It does NOT call `evaluateLawfulBasis`. That is not an oversight and it is the whole reason
+   * this is a separate action type: the marketing gate refuses a contact whose notice has not
+   * been sent, so a notice that required a lawful basis could never be the message that
+   * establishes one.
+   *
+   * It does NOT run `evaluateCampaignSafety`. Frequency caps, quiet hours and daily recipient
+   * limits govern marketing volume. This is a legal notice, sent at most once per person for
+   * the life of the record, and the obligation it discharges has a deadline measured in weeks.
+   * Deferring it to business hours would trade a real duty against a courtesy.
+   *
+   * It DOES check suppression, first and before anything else. Somebody who has unsubscribed,
+   * complained, or whose address hard-bounced has either told us to stop or cannot receive it.
+   * A duty to inform does not override a person having said go away; that duty is then met by
+   * deleting the record, which for a lead nobody may contact is usually the honest answer.
+   *
+   * It DOES require the notice to have been built already. The body is assembled by
+   * `buildArticle14Notice` from the controller settings, the signed assessment and the
+   * contact's own provenance, and it refuses when any of those is missing. Composing it here
+   * would put a compliance document inside a dispatch method, where the next person to edit it
+   * will not know which lines are load-bearing.
+   */
+  private async executePrivacyNoticeSend(request: ActionRequest): Promise<ActionResult> {
+    console.log(`[ActionGateway] Executing PRIVACY_NOTICE_SEND to ${request.payload.to}`);
+    try {
+      if (!store) return { success: false, error: 'Datastore not initialized' };
+
+      if (!request.payload.contactId) {
+        const reason =
+          'PRIVACY_NOTICE_SEND requires an explicit contactId so suppression can be checked and ' +
+          'so the notice can be recorded against the record it concerns.';
+        console.warn(`[ActionGateway] ${reason}`);
+        return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+      }
+
+      const contactSnap = await getDoc(
+        doc(store, orgPath(request.organizationId, 'contacts'), request.payload.contactId)
+      );
+      if (!contactSnap.exists()) {
+        const reason =
+          `Contact ${request.payload.contactId} not found. Refusing to send a notice about a ` +
+          `record that does not exist in this organisation.`;
+        console.warn(`[ActionGateway] ${reason}`);
+        return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+      }
+      // `Record<string, unknown>`, not `as any`. Every field below is compared against a
+      // literal or read through a `typeof` narrow, so nothing here needs the compiler switched
+      // off — and the one field that is interpolated into a message is length-checked first.
+      // The ordinary send path above still carries an `as any` from before this rule existed;
+      // this path does not need to inherit it.
+      const contactData = (contactSnap.data() ?? {}) as Record<string, unknown>;
+
+      const suppressionFlags = [
+        contactData.suppressed === true ? 'SUPPRESSED' : null,
+        contactData.unsubscribed === true ? 'UNSUBSCRIBED' : null,
+        contactData.hardBounced === true ? 'HARD_BOUNCE' : null,
+        contactData.complained === true ? 'SPAM_COMPLAINT' : null,
+        contactData.emailStatus === 'BOUNCED' ? 'BOUNCED' : null,
+      ].filter(Boolean);
+      if (suppressionFlags.length > 0) {
+        const reason =
+          `Recipient is suppressed (${suppressionFlags.join(', ')}), so the notice is refused ` +
+          `too. A duty to inform does not override somebody having told us to stop; discharge ` +
+          `it by deleting the record instead.`;
+        console.warn(`[ActionGateway] ${reason}`);
+        return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+      }
+
+      // Already sent. Checked here as well as in the calling service, because this is the point
+      // past which the message actually leaves: a race between two batches that both read the
+      // contact as un-noticed must not become two notices.
+      if (typeof contactData.article14NoticeSentAt === 'string' && contactData.article14NoticeSentAt.trim() !== '') {
+        const reason =
+          `A notice was already sent to this contact at ${contactData.article14NoticeSentAt}. ` +
+          `The obligation is to tell someone once; sending again would be noise, and moving the ` +
+          `date forward would erase the evidence of when it was actually discharged.`;
+        console.warn(`[ActionGateway] ${reason}`);
+        return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+      }
+
+      const to = typeof request.payload.to === 'string' ? request.payload.to.trim() : '';
+      const subject = typeof request.payload.subject === 'string' ? request.payload.subject.trim() : '';
+      const textBody = typeof request.payload.textBody === 'string' ? request.payload.textBody : '';
+      const htmlBody = typeof request.payload.htmlBody === 'string' ? request.payload.htmlBody : '';
+      // TRIMMED for the emptiness test, not for sending. An earlier version compared against
+      // `''` without trimming, so a body of three spaces was a notice — found by the test
+      // below, which is the point of exercising this rather than reading it.
+      if (to === '' || subject === '' || textBody.trim() === '' || htmlBody.trim() === '') {
+        const reason =
+          'The notice body was not supplied. It is assembled by buildArticle14Notice from the ' +
+          'controller settings, the signed assessment and the contact provenance, and an empty ' +
+          'one means one of those was missing — which is a refusal, not a blank line in a legal ' +
+          'notice.';
+        console.warn(`[ActionGateway] ${reason}`);
+        return { success: false, blockedReason: reason, errorCode: 'POLICY_BLOCKED' };
+      }
+
+      const q = query(
+        collection(store, 'oauth_connections'),
+        where('organizationId', '==', request.organizationId)
+      );
+      const oauthsSnap = await getDocs(q);
+      let accessToken: string | null = null;
+      oauthsSnap.forEach((d) => {
+        const data = d.data();
+        if (data.provider === 'gmail' || data.provider === 'GMAIL') {
+          accessToken = typeof data.accessToken === 'string' ? data.accessToken : null;
+        }
+      });
+      if (!accessToken || isFabricatedProviderId(accessToken) || accessToken === 'mock_token') {
+        const reason =
+          'No usable Gmail credential is configured for this organization. Refusing to report a ' +
+          'notice that did not go out — that record is the precondition for mailing this person.';
+        console.warn(`[ActionGateway] PRIVACY_NOTICE_SEND refused: ${reason}`);
+        return { success: false, error: reason, errorCode: 'PROVIDER_NOT_CONFIGURED' };
+      }
+
+      // S32 — the same determinism requirement as EMAIL_SEND, for the same reason. The notice
+      // is irreversible, so the ambiguous case has to be answerable afterwards, and it can only
+      // be answered if the message carries an id derived from the job rather than from a clock.
+      let rfc822MessageId: string;
+      try {
+        rfc822MessageId = outboundMessageId(
+          request.payload.idempotencyKey,
+          process.env.OUTBOUND_MESSAGE_ID_DOMAIN
+        );
+      } catch (e: any) {
+        const reason = String(e?.message ?? e);
+        console.warn(`[ActionGateway] PRIVACY_NOTICE_SEND refused: ${reason}`);
+        return { success: false, error: reason, errorCode: 'UNRECONCILABLE_SEND' };
+      }
+
+      // An unsubscribe route on a privacy notice, deliberately. The notice tells people they
+      // can object, and a message that says so while offering no mechanical way to do it is the
+      // shape of compliance theatre this repository keeps deleting. It is also what makes the
+      // suppression check above reachable for somebody who had never been contacted before.
+      const unsubscribe = unsubscribeUrlFor({
+        orgId: request.organizationId,
+        contactId: request.payload.contactId,
+      });
+      if (unsubscribe.ok === false) {
+        console.warn(`[ActionGateway] PRIVACY_NOTICE_SEND refused: ${unsubscribe.reason}`);
+        return { success: false, blockedReason: unsubscribe.reason, errorCode: 'POLICY_BLOCKED' };
+      }
+
+      gmailService.setCredentials({ access_token: accessToken });
+      const result = await gmailService.sendEmail({
+        to,
+        subject,
+        bodyHtml: htmlBody,
+        bodyText: textBody,
+        rfc822MessageId,
+        unsubscribeUrl: unsubscribe.url,
+      });
+
+      return { success: true, providerResult: result };
+    } catch (e: any) {
+      throw classifyThrown(e, { provider: 'gmail', operation: 'PRIVACY_NOTICE_SEND' });
+    }
+  }
 
   private async executeCalendarCreate(request: ActionRequest): Promise<ActionResult> {
      console.log(`[ActionGateway] Executing CALENDAR_CREATE for ${request.payload.title}`);

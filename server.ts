@@ -38,6 +38,10 @@ import { reportingRouter } from "./server/routes/reporting.routes";
 import { pipelineRouter } from "./server/routes/pipeline.routes";
 import { companyBrainRouter } from "./server/routes/companyBrain.routes";
 import { settingsRouter } from "./server/routes/settings.routes";
+import { liaRouter } from "./server/routes/lia.routes";
+import { outreachRouter } from "./server/routes/outreach.routes";
+import { buildConfiguredDiscoveryProvider } from "./server/providers/httpDiscovery.provider";
+import { registerDiscoveryProvider } from "./server/services/discovery.service";
 import { pitchBattleRouter } from "./server/routes/pitchBattle.routes";
 import { campaignsRouter } from "./server/routes/campaigns.routes";
 import { autopilotRouter } from "./server/routes/autopilot.routes";
@@ -196,6 +200,8 @@ for (const aiPath of [
   app.use("/api/pipeline", pipelineRouter);
   app.use("/api/company-brain", companyBrainRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/lia", liaRouter);
+  app.use("/api/outreach", outreachRouter);
   app.use("/api/pitch-battle", pitchBattleRouter);
   app.use("/api/campaigns", campaignsRouter);
   app.use("/api/autopilot", autopilotRouter);
@@ -220,6 +226,23 @@ for (const aiPath of [
   app.get("*", (req: Request, res: Response) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
+  }
+
+  // P6c — register the discovery adapter, or say why there is none.
+  //
+  // Not a throw. "No vendor has been chosen" is the ordinary state of this deployment, and a
+  // startup crash would be the wrong way to say so. What WOULD be wrong is starting silently:
+  // an operator who has set DISCOVERY_ENDPOINT and mistyped the field map should learn it here
+  // rather than from a refusal the first time they spend money.
+  //
+  // The message never contains a credential — the config reader names variables, never values.
+  const discovery = await buildConfiguredDiscoveryProvider();
+  if (discovery.ok) {
+    registerDiscoveryProvider(discovery.provider);
+    console.log(`[Abedin Growth AI] Discovery provider registered: ${discovery.provider.providerName}`);
+  } else {
+    registerDiscoveryProvider(null);
+    console.log(`[Abedin Growth AI] No discovery provider (${discovery.code}): ${discovery.message}`);
   }
 
   outboxWorker.start();
