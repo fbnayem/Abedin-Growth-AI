@@ -311,6 +311,70 @@ export const noticeSentSchema = z
   .strict();
 
 /**
+ * Create prospects: people identified on LinkedIn for whom we have no address.
+ *
+ * DELIBERATELY NO `basis`, `liaId` OR `consentEvidence`. A prospect is not contactable, so a
+ * batch-level lawful basis here would record permission for something that cannot happen. The
+ * basis is chosen at promotion, when there is an address and the decision means something.
+ *
+ * `email` is not in the row schema either. A row carrying one is a routing mistake, and
+ * `validateProspect` refuses it by name rather than dropping it silently.
+ */
+export const createProspectsSchema = z
+  .object({
+    /** Where the batch came from, in a form a person could check. Required. */
+    sourceEvidence: z.string().trim().min(1).max(2000),
+    source: z.string().trim().min(1).max(200).optional(),
+    mode: z.enum(['PREVIEW', 'COMMIT']).optional(),
+    rows: z
+      .array(
+        z
+          .object({
+            ref: z.string().trim().max(255).optional(),
+            profileUrl: z.string().trim().min(1).max(2000),
+            name: z.string().trim().max(500).optional(),
+            firstName: z.string().trim().max(500).optional(),
+            lastName: z.string().trim().max(500).optional(),
+            headline: z.string().trim().max(2000).optional(),
+            title: z.string().trim().max(500).optional(),
+            companyName: z.string().trim().max(500).optional(),
+            companyWebsite: z.string().trim().max(500).optional(),
+            companyProfileUrl: z.string().trim().max(2000).optional(),
+            industry: z.string().trim().max(500).optional(),
+            country: z.string().trim().max(500).optional(),
+            location: z.string().trim().max(500).optional(),
+            employeeCount: z.string().trim().max(500).optional(),
+            notes: z.string().trim().max(10000).optional(),
+          })
+          .strict()
+      )
+      .min(1)
+      .max(2000),
+  })
+  .strict();
+
+/**
+ * Promote a prospect: an address has been found, so it becomes a contact.
+ *
+ * This is where the lawful basis is decided, and it is the same shape the importer uses —
+ * because promotion ends at the same `ingestRecords` every other source does.
+ */
+export const promoteProspectSchema = z
+  .object({
+    email: z.string().trim().min(3).max(320),
+    basis: z.enum(['CONSENT', 'LEGITIMATE_INTEREST']),
+    liaId: z.string().trim().min(1).max(255).optional(),
+    consentEvidence: z.string().trim().min(1).max(2000).optional(),
+    consentSource: z.string().trim().min(1).max(500).optional(),
+    country: z.string().trim().min(2).max(2).optional(),
+    addressType: z.enum(['PERSONAL', 'ROLE']).optional(),
+    /** Where the ADDRESS came from, which is usually not where the person came from. */
+    emailSource: z.string().trim().min(1).max(500).optional(),
+    mode: z.enum(['PREVIEW', 'COMMIT']).optional(),
+  })
+  .strict();
+
+/**
  * Write a legitimate interests assessment.
  *
  * The three limbs of the balancing test are separate fields with their own floors, because a
@@ -446,6 +510,8 @@ export const BODY_SCHEMAS = {
   'POST /api/leads/import': leadImportSchema,
   'POST /api/leads/notice-sent': noticeSentSchema,
   'POST /api/leads/notice-send': noticeSendSchema,
+  'POST /api/prospects': createProspectsSchema,
+  'POST /api/prospects/:id/promote': promoteProspectSchema,
   'POST /api/lia': liaDraftSchema,
   'POST /api/lia/:id/amend': liaDraftSchema,
   'POST /api/lia/:id/sign': liaSignSchema,

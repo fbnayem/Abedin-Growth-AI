@@ -39,6 +39,7 @@ import { pipelineRouter } from "./server/routes/pipeline.routes";
 import { companyBrainRouter } from "./server/routes/companyBrain.routes";
 import { settingsRouter } from "./server/routes/settings.routes";
 import { liaRouter } from "./server/routes/lia.routes";
+import { prospectsRouter } from "./server/routes/prospects.routes";
 import { outreachRouter } from "./server/routes/outreach.routes";
 import { buildConfiguredDiscoveryProvider } from "./server/providers/httpDiscovery.provider";
 import { registerDiscoveryProvider } from "./server/services/discovery.service";
@@ -200,6 +201,7 @@ for (const aiPath of [
   app.use("/api/pipeline", pipelineRouter);
   app.use("/api/company-brain", companyBrainRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/prospects", prospectsRouter);
   app.use("/api/lia", liaRouter);
   app.use("/api/outreach", outreachRouter);
   app.use("/api/pitch-battle", pitchBattleRouter);

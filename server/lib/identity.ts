@@ -124,6 +124,22 @@ export function tryContactDocId(email: unknown): string | null {
 }
 
 /**
+ * The document id for a PROSPECT, derived from its canonical LinkedIn profile URL.
+ *
+ * Here rather than in `domain/prospect.ts` so that every derived id in this system shares one
+ * scheme tag. If `ID_SCHEME` is ever bumped because a normalisation rule changed, prospects move
+ * with contacts and accounts instead of being the collection somebody forgot — which is the whole
+ * argument the `ID_SCHEME` comment above makes.
+ *
+ * The CANONICAL url, never the raw one. `normaliseProfileUrl` collapses locale subdomains, drops
+ * query strings and lower-cases the slug, and it has to run first: two ids for one human is the
+ * defect this derivation exists to prevent, and it is exactly what a raw URL would produce.
+ */
+export function derivedProspectId(canonicalProfileUrl: string): string {
+  return derivedId('pr', canonicalProfileUrl);
+}
+
+/**
  * The organisation domain for an address, or null when the address is a personal one.
  *
  * Null is the answer for free-mail providers, and it is the important half of this function:
