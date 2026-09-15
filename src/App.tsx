@@ -13,9 +13,6 @@ import { NewOpportunityModal } from "./components/NewOpportunityModal";
 import { AddLeadModal } from "./components/AddLeadModal";
 import { AddInvestorModal } from "./components/AddInvestorModal";
 import { AddPartnerModal } from "./components/AddPartnerModal";
-import { DiscoverLeadsModal } from "./components/DiscoverLeadsModal";
-import { DiscoverInvestorsModal } from "./components/DiscoverInvestorsModal";
-import { DiscoverPartnersModal } from "./components/DiscoverPartnersModal";
 import { ScheduleMeetingModal } from "./components/ScheduleMeetingModal";
 import { PitchSimulatorModal } from "./components/PitchSimulatorModal";
 import { LiveMeetingBattlecardModal } from "./components/LiveMeetingBattlecardModal";
@@ -23,6 +20,8 @@ import { OnboardingModal } from "./pages/OnboardingModal";
 import { diagnosticFetch } from "./utils/diagnosticFetch";
 import { DashboardView } from "./pages/DashboardView";
 import { LeadsView } from "./pages/LeadsView";
+import { LeadSourcesView } from "./pages/LeadSourcesView";
+import { EnrolInCampaignModal } from "./components/EnrolInCampaignModal";
 import { LeadDetailModal } from "./pages/LeadDetailModal";
 import { InvestorDetailModal } from "./pages/InvestorDetailModal";
 import { PartnerDetailModal } from "./pages/PartnerDetailModal";
@@ -104,9 +103,6 @@ export function App() {
   const [addLeadOpen, setAddLeadOpen] = useState(false);
   const [addInvestorOpen, setAddInvestorOpen] = useState(false);
   const [addPartnerOpen, setAddPartnerOpen] = useState(false);
-  const [discoverLeadsOpen, setDiscoverLeadsOpen] = useState(false);
-  const [discoverInvestorsOpen, setDiscoverInvestorsOpen] = useState(false);
-  const [discoverPartnersOpen, setDiscoverPartnersOpen] = useState(false);
   const [scheduleMeetingOpen, setScheduleMeetingOpen] = useState(false);
   const [scheduleMeetingInitialData, setScheduleMeetingInitialData] = useState<{
     name?: string;
@@ -759,18 +755,16 @@ export function App() {
               onSelectLead={(lead) => setActiveLeadDetail(lead)}
               onOpenScoreWhy={handleOpenScoreWhy}
               onOpenAddLead={() => setAddLeadOpen(true)}
-              onBatchDiscoverLeads={() => setDiscoverLeadsOpen(true)}
+              onBatchDiscoverLeads={() => setCurrentTab("sources")}
               onBookMeeting={handleBookMeeting}
               onOpenPitchSimulator={(lead) => setPitchSimulatorTarget({ entity: lead, type: "CUSTOMER" })}
               onOpenBattlecard={(lead) => setBattlecardTarget({ entity: lead, type: "CUSTOMER" })}
-              onBulkEnrollCampaign={(selectedLeads) => {
-                setLeads((prev) =>
-                  prev.map((l) =>
-                    selectedLeads.some((sl) => sl.id === l.id) ? { ...l, status: "CONTACTED" } : l
-                  )
-                );
-              }}
+              onRefreshLeads={() => void syncLiveEngineData()}
             />
+          )}
+
+          {currentTab === "sources" && (
+            <LeadSourcesView onImported={() => void syncLiveEngineData()} />
           )}
 
           {currentTab === "companies" && (
@@ -787,7 +781,7 @@ export function App() {
               onSelectInvestor={(inv) => setActiveInvestorDetail(inv)}
               onBookMeeting={handleBookMeeting}
               onAddInvestor={() => setAddInvestorOpen(true)}
-              onDiscoverInvestors={() => setDiscoverInvestorsOpen(true)}
+              onDiscoverInvestors={() => setCurrentTab("sources")}
               onOpenPitchSimulator={(inv) => setPitchSimulatorTarget({ entity: inv, type: "INVESTOR" })}
               onOpenBattlecard={(inv) => setBattlecardTarget({ entity: inv, type: "INVESTOR" })}
             />
@@ -800,7 +794,7 @@ export function App() {
               onSelectPartner={(p) => setActivePartnerDetail(p)}
               onBookMeeting={handleBookMeeting}
               onAddPartner={() => setAddPartnerOpen(true)}
-              onDiscoverPartners={() => setDiscoverPartnersOpen(true)}
+              onDiscoverPartners={() => setCurrentTab("sources")}
             />
           )}
 
@@ -950,6 +944,7 @@ export function App() {
         lead={activeLeadDetail}
         conversations={conversations}
         onClose={() => setActiveLeadDetail(null)}
+        onRefresh={() => void syncLiveEngineData()}
         onOpenScoreWhy={handleOpenScoreWhy}
         onSendEmail={handleSendEmail}
         onSendReply={handleSendInboxReply}
@@ -1048,19 +1043,6 @@ export function App() {
         }}
       />
 
-      <DiscoverLeadsModal
-        isOpen={discoverLeadsOpen}
-        onClose={() => setDiscoverLeadsOpen(false)}
-        onLeadsDiscovered={(newLeads) => {
-          setLeads((prev) => {
-            const existingIds = new Set(prev.map((l) => l.id));
-            const fresh = newLeads.filter((l) => !existingIds.has(l.id));
-            return [...fresh, ...prev];
-          });
-          setKpis((prev) => ({ ...prev, qualifiedLeads: prev.qualifiedLeads + newLeads.length }));
-        }}
-      />
-
       <AddInvestorModal
         isOpen={addInvestorOpen}
         onClose={() => setAddInvestorOpen(false)}
@@ -1069,35 +1051,11 @@ export function App() {
         }}
       />
 
-      <DiscoverInvestorsModal
-        isOpen={discoverInvestorsOpen}
-        onClose={() => setDiscoverInvestorsOpen(false)}
-        onInvestorsDiscovered={(newInvestors) => {
-          setInvestors((prev) => {
-            const existingIds = new Set(prev.map((i) => i.id));
-            const fresh = newInvestors.filter((i) => !existingIds.has(i.id));
-            return [...fresh, ...prev];
-          });
-        }}
-      />
-
       <AddPartnerModal
         isOpen={addPartnerOpen}
         onClose={() => setAddPartnerOpen(false)}
         onPartnerCreated={(partner) => {
           setPartners((prev) => [partner, ...prev]);
-        }}
-      />
-
-      <DiscoverPartnersModal
-        isOpen={discoverPartnersOpen}
-        onClose={() => setDiscoverPartnersOpen(false)}
-        onPartnersDiscovered={(newPartners) => {
-          setPartners((prev) => {
-            const existingIds = new Set(prev.map((p) => p.id));
-            const fresh = newPartners.filter((p) => !existingIds.has(p.id));
-            return [...fresh, ...prev];
-          });
         }}
       />
 

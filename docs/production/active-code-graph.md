@@ -14,9 +14,9 @@ Capability ownership is reported as *which live modules import the provider*, an
 | Entrypoint | Live modules reached |
 |---|---|
 | `server.ts` | 156 |
-| `src/main.tsx` | 62 |
+| `src/main.tsx` | 63 |
 
-Live modules in total: **211**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
+Live modules in total: **212**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
 
 ## 3. Capability providers and their live importers
 
@@ -309,7 +309,7 @@ The server's dependency surface by importer: every package a live module outside
 |---|---|---|
 | `src/App.tsx` | 1 | main.tsx |
 | `src/main.tsx` | 0 | main.tsx |
-| `src/types.ts` | 38 | main.tsx |
+| `src/types.ts` | 35 | main.tsx |
 
 ### src/components
 
@@ -322,10 +322,10 @@ The server's dependency surface by importer: every package a live module outside
 | `src/components/AutonomousGrowthPipelineCard.tsx` | 1 | main.tsx |
 | `src/components/CommandBar.tsx` | 1 | main.tsx |
 | `src/components/DeliverabilityScanner.tsx` | 2 | main.tsx |
-| `src/components/DiscoverInvestorsModal.tsx` | 1 | main.tsx |
-| `src/components/DiscoverLeadsModal.tsx` | 1 | main.tsx |
-| `src/components/DiscoverPartnersModal.tsx` | 1 | main.tsx |
+| `src/components/EnrolInCampaignModal.tsx` | 2 | main.tsx |
 | `src/components/Header.tsx` | 1 | main.tsx |
+| `src/components/LawfulBasisPanel.tsx` | 1 | main.tsx |
+| `src/components/LeadScoreCard.tsx` | 1 | main.tsx |
 | `src/components/LiveMeetingBattlecardModal.tsx` | 1 | main.tsx |
 | `src/components/LiveMeetingRoomModal.tsx` | 1 | main.tsx |
 | `src/components/LivePhoneTestWidget.tsx` | 2 | main.tsx |
@@ -343,7 +343,7 @@ The server's dependency surface by importer: every package a live module outside
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
-| `src/lib/apiFetch.ts` | 17 | main.tsx |
+| `src/lib/apiFetch.ts` | 19 | main.tsx |
 | `src/lib/emptyCompanyBrain.ts` | 1 | main.tsx |
 | `src/lib/firebase.ts` | 2 | main.tsx |
 | `src/lib/firebaseConfig.ts` | 1 | main.tsx |
@@ -365,6 +365,7 @@ The server's dependency surface by importer: every package a live module outside
 | `src/pages/InvestorsView.tsx` | 1 | main.tsx |
 | `src/pages/KnowledgeView.tsx` | 1 | main.tsx |
 | `src/pages/LeadDetailModal.tsx` | 1 | main.tsx |
+| `src/pages/LeadSourcesView.tsx` | 1 | main.tsx |
 | `src/pages/LeadsView.tsx` | 1 | main.tsx |
 | `src/pages/MeetingsView.tsx` | 1 | main.tsx |
 | `src/pages/OnboardingModal.tsx` | 1 | main.tsx |
@@ -384,7 +385,7 @@ The server's dependency surface by importer: every package a live module outside
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
-| `src/utils/diagnosticFetch.ts` | 12 | main.tsx |
+| `src/utils/diagnosticFetch.ts` | 11 | main.tsx |
 | `src/utils/exportUtils.ts` | 3 | main.tsx |
 
 ## 6. Operational-only modules

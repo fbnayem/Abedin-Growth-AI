@@ -235,8 +235,51 @@ export interface Lead {
   country: string;
   employeeCount?: string;
   status: LeadStatus;
+  /**
+   * The percentage of the ASSESSABLE points this contact earned — NOT a mark out of 100.
+   *
+   * Never read without `scoreConfidence`. 90 at confidence 10 and 90 at confidence 100 render
+   * identically and are not the same finding, which is why the two fields are documented
+   * together and why `LeadScoreCard` shows both at the same weight.
+   */
   aiScore: number;
+  /** How much of the rubric could be assessed at all, 0-100. See `server/domain/leadScore.ts`. */
+  scoreConfidence?: number;
+  /** Which rubric produced the stored score, so an old score can still be explained. */
+  scoreRubricVersion?: string;
+  scoredAt?: string;
+  scoredBy?: string;
   scoreBreakdown: ScoreBreakdown;
+
+  /**
+   * LAWFUL BASIS — whether this person may be sent commercial email, and the evidence for it.
+   *
+   * `consentGiven` is DERIVED from `lawfulBasis` by the server and is never an input at any
+   * layer: no schema accepts it, no builder takes it as a parameter, and no screen offers a
+   * field for it. It appears here because the record carries it, not because anything may set
+   * it. See `server/domain/lawfulBasis.ts`.
+   */
+  lawfulBasis?: 'CONSENT' | 'LEGITIMATE_INTEREST';
+  consentGiven?: boolean;
+  consentEvidence?: string | null;
+  consentSource?: string | null;
+  consentRecordedAt?: string | null;
+  consentRecordedBy?: string | null;
+  consentRevokedAt?: string | null;
+  liaId?: string | null;
+  article14NoticeSentAt?: string | null;
+  addressType?: 'PERSONAL' | 'ROLE';
+
+  /**
+   * PROVENANCE — where this record came from, which the Article 14 notice has to state.
+   *
+   * `MANUAL`, `IMPORT`, `PROVIDER:<name>` or `SCRAPE:<host>`. A record whose origin is unknown
+   * cannot be given that notice, and therefore cannot be mailed on legitimate interest.
+   */
+  source?: string | null;
+  sourceEvidence?: string | null;
+  sourceCollectedAt?: string | null;
+  importBatchId?: string | null;
   inboundCallVolumeLikelihood?: 'HIGH' | 'MEDIUM' | 'LOW';
   recommendedPitch: string;
   bestOutreachAngle: string;

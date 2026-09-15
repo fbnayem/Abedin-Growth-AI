@@ -17,11 +17,13 @@ import { ShieldCheck,
   ChevronRight,
   Bot,
   Flame,
+  Upload,
 } from "lucide-react";
 
 export type NavTab =
   | "home"
   | "leads"
+  | "sources"
   | "companies"
   | "investors"
   | "partners"
@@ -61,6 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const mainNavItems: { id: NavTab; label: string; icon: any; badge?: number; hot?: boolean }[] = [
     { id: "home", label: "Home", icon: LayoutDashboard, badge: attentionCount > 0 ? attentionCount : undefined, hot: attentionCount > 0 },
     { id: "leads", label: "Leads", icon: Users },
+    { id: "sources", label: "Lead Sources", icon: Upload },
     { id: "companies", label: "Companies", icon: Building2 },
     { id: "investors", label: "Investors", icon: TrendingUp },
     { id: "partners", label: "Partners", icon: Handshake },

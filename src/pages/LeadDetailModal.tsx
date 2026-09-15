@@ -1,5 +1,7 @@
 import { STANDARD_TIER, formatMoney } from "../../shared/domain/pricing";
 import React, { useState, useEffect } from "react";
+import { LawfulBasisPanel } from "../components/LawfulBasisPanel";
+import { LeadScoreCard } from "../components/LeadScoreCard";
 import {
   X,
   Sparkles,
@@ -54,6 +56,8 @@ interface LeadDetailModalProps {
   onOpenPitchSimulator?: (lead: Lead) => void;
   onOpenBattlecard?: (lead: Lead) => void;
   onNavigateToInbox?: (conversationId?: string) => void;
+  /** Reload the lead after something on this screen changed it server-side. */
+  onRefresh?: () => void;
 }
 
 export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
@@ -61,6 +65,7 @@ export const LeadDetailModal: React.FC<LeadDetailModalProps> = ({
   lead,
   conversations = [],
   onClose,
+  onRefresh,
   onOpenScoreWhy,
   onSendEmail,
   onSendReply,
@@ -374,8 +379,15 @@ ${companyBrain.companyName}`;
         {/* Header */}
         <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-black text-base text-white shadow-sm">
-              {lead.aiScore}
+            <div
+              className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-black text-base text-white shadow-sm"
+              title={
+                typeof lead.aiScore === "number"
+                  ? "Score of what could be assessed. See the score card for the confidence."
+                  : "Not scored yet."
+              }
+            >
+              {typeof lead.aiScore === "number" ? lead.aiScore : "—"}
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -870,14 +882,33 @@ ${companyBrain.companyName}`;
                         AI Discovery & Qualification
                       </span>
                       <span className="text-[10px] text-slate-400">
-                        {lead.discoveredAt ? new Date(lead.discoveredAt).toLocaleString() : "4 days ago"}
+                        {/* Was `: "4 days ago"` — a date invented for records that had none. */}
+                        {lead.discoveredAt ? new Date(lead.discoveredAt).toLocaleString() : "date not recorded"}
                       </span>
                     </div>
                     <p className="text-xs text-slate-600">
-                      Discovered {lead.name} ({lead.title}) at {lead.companyName}. Assigned ICP Fit Score: <strong>{lead.aiScore}/100</strong>.
+                      {lead.name}
+                      {lead.title ? ` (${lead.title})` : ""}
+                      {lead.companyName ? ` at ${lead.companyName}` : ""}
+                      {typeof lead.aiScore === "number"
+                        ? ` — scored ${lead.aiScore} of what could be assessed.`
+                        : " — not scored yet."}
                     </p>
-                    <div className="text-[11px] text-blue-700 bg-blue-50 p-2 rounded-lg font-medium">
-                      Pain probability: {lead.scoreBreakdown?.painProbability || 25}/25 • Intent score: {lead.scoreBreakdown?.intent || 18}/20
+                    {/*
+                      This read `painProbability || 25` and `intent || 18`. Those defaults fired
+                      whenever a component was absent or genuinely zero, so a lead nobody had
+                      assessed displayed 25/25 for pain probability. A component with no input
+                      now says so.
+                    */}
+                    <div className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg font-medium">
+                      Pain probability:{" "}
+                      {typeof lead.scoreBreakdown?.painProbability === "number"
+                        ? `${lead.scoreBreakdown.painProbability}/25`
+                        : "not scored"}{" "}
+                      • Intent:{" "}
+                      {typeof lead.scoreBreakdown?.intent === "number"
+                        ? `${lead.scoreBreakdown.intent}/20`
+                        : "not scored"}
                     </div>
                   </div>
                 </div>
@@ -1060,23 +1091,21 @@ ${companyBrain.companyName}`;
                 </div>
               </div>
 
-              {/* Score card */}
-              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-slate-500 font-medium">Autonomous ICP Fit Score</div>
-                  <div className="text-2xl font-black text-slate-900">{lead.aiScore}/100</div>
-                  <div className="text-xs text-slate-600 mt-0.5">
-                    {lead.scoreBreakdown?.reasons?.[0] || "High fit clinic profile with evening call volume"}
-                  </div>
-                </div>
-                <button
-                  onClick={() => onOpenScoreWhy(lead)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors flex items-center gap-1"
-                >
-                  <HelpCircle className="w-3.5 h-3.5" />
-                  <span>Explain Score</span>
-                </button>
-              </div>
+              {/*
+                The score card previously read `{lead.aiScore}/100` above
+                `scoreBreakdown?.reasons?.[0] || "High fit clinic profile with evening call
+                volume"` — a number from a loop index, explained by a hard-coded sentence about
+                a clinic nobody had looked at. It now shows the score AND the confidence, and
+                the explanation is computed from the record on demand.
+              */}
+              <LeadScoreCard
+                contactId={lead.id}
+                storedScore={typeof lead.aiScore === "number" ? lead.aiScore : null}
+                storedConfidence={lead.scoreConfidence ?? null}
+              />
+
+              {/* Whether this person may be emailed at all, and what is missing if not. */}
+              <LawfulBasisPanel contact={lead} onChanged={onRefresh} />
 
               {/* Information Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

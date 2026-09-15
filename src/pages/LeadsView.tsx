@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { EnrolInCampaignModal } from "../components/EnrolInCampaignModal";
 import {
   Users,
   Search,
@@ -78,6 +79,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [selectedIndustry, setSelectedIndustry] = useState<string>("ALL");
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [showBulkSuccess, setShowBulkSuccess] = useState(false);
+  const [enrolOpen, setEnrolOpen] = useState(false);
   const [inspectMessageLead, setInspectMessageLead] = useState<Lead | null>(null);
   const [batchActionLoading, setBatchActionLoading] = useState(false);
   const [batchActionFeedback, setBatchActionFeedback] = useState<string | null>(null);
@@ -198,13 +200,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     exportToCSV(toExport, "leads-export.csv");
   };
 
+  /**
+   * Open the enrolment modal, which calls the real endpoint.
+   *
+   * This previously set `status: "CONTACTED"` in React state, showed "Successfully queued
+   * outreach sequences for N leads!", and called nothing. Nothing was queued and a refresh
+   * undid it. Enrolment is a server-side decision — a contact who has unsubscribed, or whose
+   * lawful basis is incomplete, is refused — so the result has to come back from the server
+   * rather than be asserted here.
+   */
   const handleBulkEnroll = () => {
-    const selected = leads.filter((l) => selectedLeadIds.has(l.id));
-    if (onBulkEnrollCampaign && selected.length > 0) {
-      onBulkEnrollCampaign(selected);
-      setShowBulkSuccess(true);
-      setTimeout(() => setShowBulkSuccess(false), 3000);
-    }
+    if (selectedLeadIds.size > 0) setEnrolOpen(true);
   };
 
   // 1-Click Auto-Reply to All Replied Leads
@@ -296,13 +302,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             <span>Export CSV</span>
           </button>
 
+          {/*
+            Was "Discover with AI", calling an endpoint that answered 501 under a paragraph
+            claiming every lead was researched and scored. It now goes to Lead Sources, where
+            the four real ways in live — and where a source that is switched off says so.
+          */}
           <button
             id="batch-discover-leads-btn"
             onClick={onBatchDiscoverLeads}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors"
           >
             <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-            <span>Discover with AI</span>
+            <span>Add leads from a source</span>
           </button>
 
           <button
@@ -394,10 +405,21 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         </div>
       )}
 
+      <EnrolInCampaignModal
+        isOpen={enrolOpen}
+        onClose={() => setEnrolOpen(false)}
+        contactIds={[...selectedLeadIds]}
+        onEnrolled={() => {
+          setShowBulkSuccess(true);
+          setTimeout(() => setShowBulkSuccess(false), 4000);
+          onRefreshLeads?.();
+        }}
+      />
+
       {showBulkSuccess && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-900 font-bold flex items-center gap-2 animate-in fade-in">
           <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-          <span>Successfully queued outreach sequences for {selectedLeadIds.size} leads!</span>
+          <span>Enrolment ran. The modal reported what the server actually did, per contact.</span>
         </div>
       )}
 
