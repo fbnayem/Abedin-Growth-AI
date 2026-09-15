@@ -5,6 +5,7 @@ import { orgScope } from '../tenancy/orgScope';
 import { operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
 import { createProspects, listProspects, promoteProspect } from '../services/prospect.service';
+import type { ContactProvenance } from '../domain/contactDocument';
 
 /**
  * PROSPECTS: PEOPLE WE HAVE IDENTIFIED AND CANNOT YET EMAIL.
@@ -45,19 +46,23 @@ prospectsRouter.post('/', async (req: Request, res: Response) => {
     const gate = operatorGate(req.user, isProduction);
     if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
 
-    const outcome = await createProspects(
-      orgScope(req),
-      body.rows,
-      {
-        source: body.source ?? 'LINKEDIN',
-        sourceEvidence: body.sourceEvidence,
-        // The moment of the call. Not a caller-supplied date: this is when WE obtained the
-        // record, and the Article 14 notice quotes it once the prospect becomes a contact.
-        sourceCollectedAt: new Date().toISOString(),
-      },
-      gate.attribution,
-      { mode: body.mode ?? 'PREVIEW' }
-    );
+    // Named and typed rather than passed as an anonymous object: `ContactProvenance` is the
+    // anchor `leadSource.invariant.test.ts` scans for, so every place a lead's origin is
+    // recorded is a place that test can find and check the `source` value of.
+    const provenance: ContactProvenance = {
+      // Fixed, not taken from the body. See `createProspectsSchema`: the route a record
+      // arrived by decides which balancing assessment can cover it, so a caller who could
+      // name it could pick their own justification.
+      source: 'LINKEDIN',
+      sourceEvidence: body.sourceEvidence,
+      // The moment of the call. Not a caller-supplied date: this is when WE obtained the
+      // record, and the Article 14 notice quotes it once the prospect becomes a contact.
+      sourceCollectedAt: new Date().toISOString(),
+    };
+
+    const outcome = await createProspects(orgScope(req), body.rows, provenance, gate.attribution, {
+      mode: body.mode ?? 'PREVIEW',
+    });
     if (outcome.ok === false) {
       return sendError(
         req,

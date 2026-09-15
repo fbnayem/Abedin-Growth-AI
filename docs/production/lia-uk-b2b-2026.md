@@ -37,6 +37,31 @@ This is deliberate. The balancing test is not the same in every jurisdiction, an
 covering "Europe" covers nothing in particular. A second country needs its own assessment, or a
 considered extension of this one.
 
+## Routes of acquisition covered
+
+`SCRAPE`, `IMPORT`, `MANUAL`.
+
+**Not** `LINKEDIN`, and **not** `PROVIDER`.
+
+This is a new field and it is worth saying why it exists, because it looks like a duplicate of
+"data sources" below and is not. `dataSources` is prose, written for you and for a regulator.
+`sourceKinds` is a closed list the system can check: every contact carries a `source`, and before
+a send the gate asks whether THIS assessment covers THAT route. Until this field existed the gate
+only checked the country, so an assessment covering `GB` covered every `GB` contact however we
+had found them — and this document, which is about addresses practices publish on their own
+websites, would have been cited for a person identified on LinkedIn.
+
+The distinction is not administrative. The balancing limb below turns on what the person
+reasonably expected when they published their details. Somebody who put a contact address on
+their practice's own website, for the purpose of being contacted about the practice, expected
+something quite specific. Somebody who put up a professional profile and never published an
+address did not, and there is an extra step — finding the address elsewhere — that they took no
+part in. Those are two arguments. This document makes one of them.
+
+`PROVIDER` is excluded for the same reason it is flagged under Data sources: a purchased record
+carries a weaker expectation and a chain of collection we did not see. If a provider is ever
+connected, that is a new assessment, not an amendment to this one.
+
 ## Limb 1 — the purpose test: what is the interest, and whose?
 
 > Our own commercial interest in finding businesses that may need what we sell, and in reaching
@@ -121,6 +146,12 @@ assertion. If you are not persuaded, do not sign it.*
 - manual entry by our team, with the origin recorded
 - (not currently used) a paid data provider — if one is ever connected, this assessment needs
   revisiting, because a purchased list carries a weaker expectation than a published address
+- (not covered here) LinkedIn profiles — covered by its own assessment,
+  `docs/production/lia-linkedin-2026.md`, because the expectation attaching to a published
+  profile is materially different from the one attaching to a published address
+
+The machine-checkable version of this list is **Routes of acquisition covered**, above. Both are
+required; neither substitutes for the other.
 
 ## Safeguards
 

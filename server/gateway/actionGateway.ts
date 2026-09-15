@@ -898,16 +898,22 @@ export class ActionGateway {
         //
         // The assessment is RESOLVED, not trusted. `liaId` used to satisfy the gate by being a
         // non-empty string, so `x` was a balancing assessment. When real sending is on it must
-        // now name a stored document that is signed, unwithdrawn, in date, and covering this
-        // contact's country. The lookup happens here because `evaluateLawfulBasis` is pure and
-        // stays pure; passing the verdict in keeps the decision exercisable without a database.
+        // now name a stored document that is signed, unwithdrawn, in date, and covering both
+        // this contact's country AND the route by which this contact was obtained. The lookup
+        // happens here because `evaluateLawfulBasis` is pure and stays pure; passing the verdict
+        // in keeps the decision exercisable without a database.
+        //
+        // `source` is passed for the second half of that. Country coverage alone treated two
+        // assessments covering `GB` as interchangeable, so a contact identified on LinkedIn
+        // could cite the assessment written about addresses published on company websites — two
+        // materially different balancing arguments, and the gate could not tell them apart.
         const strict = isRealActionEnabled('REAL_EMAIL_SEND_ENABLED');
         const assessment = strict
-            ? await resolveAssessmentForContact(
-                  request.organizationId,
-                  contactData.liaId,
-                  typeof contactData.country === 'string' ? contactData.country.trim().toUpperCase() : '',
-              )
+            ? await resolveAssessmentForContact(request.organizationId, contactData.liaId, {
+                  country:
+                      typeof contactData.country === 'string' ? contactData.country.trim().toUpperCase() : '',
+                  source: contactData.source,
+              })
             : undefined;
 
         const basis = evaluateLawfulBasis(contactData, {

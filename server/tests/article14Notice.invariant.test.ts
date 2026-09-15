@@ -87,6 +87,7 @@ const LIA: LiaRecord = {
   necessity: 'x'.repeat(200),
   balancing: 'x'.repeat(200),
   countries: ['GB'],
+  sourceKinds: ['SCRAPE'],
   dataCategories: ['work email address', 'job title', 'employer name'],
   dataSources: ['company website contact pages'],
   safeguards: ['suppression on first objection'],
@@ -111,7 +112,7 @@ const SUBJECT = {
   sourceCollectedAt: '2026-09-10T08:00:00.000Z',
 };
 
-const VERDICT = assessmentVerdict(LIA, { country: 'GB', now: NOW });
+const VERDICT = assessmentVerdict(LIA, { country: 'GB', source: SUBJECT.source, now: NOW });
 
 function notice(overrides: Partial<typeof SUBJECT> = {}) {
   return buildArticle14Notice({
@@ -209,6 +210,27 @@ describe('2. the notice says where THIS record came from', () => {
     if (manual.ok) expect(manual.notice.text).toContain('A member of our team entered it');
   });
 
+  /**
+   * THE ROUTE THAT USED TO FALL THROUGH TO THE CATCH-ALL.
+   *
+   * `sourceSentence` carried its own copy of the vocabulary as string prefixes, and `LINKEDIN`
+   * was not among them — so a promoted prospect's notice read "We obtained it from LINKEDIN".
+   * Article 14(2)(f) asks for the source in terms the recipient can act on, and a category label
+   * is not that. It also has to say the two things that are true and unusual about this route:
+   * the profile was public, and the ADDRESS was not on it.
+   */
+  it('a LinkedIn-sourced record is described as a profile, and says the address came separately', () => {
+    const built = notice({ source: 'LINKEDIN', sourceEvidence: 'https://www.linkedin.com/in/ada-lovelace' });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.notice.text).toContain('public LinkedIn profile');
+    expect(built.notice.text).toContain('found your work email address separately');
+    // Not the catch-all, which would name the route instead of describing it.
+    expect(built.notice.text).not.toContain('We obtained it from LINKEDIN');
+    // And not somebody else's route.
+    expect(built.notice.text).not.toContain('publicly accessible web page');
+  });
+
   it('a record with NO provenance refuses rather than filling in a plausible guess', () => {
     for (const gap of [{ source: '' }, { sourceEvidence: '   ' }]) {
       const built = notice(gap);
@@ -225,7 +247,7 @@ describe('3. it cannot state a basis that does not hold', () => {
       { withdrawnAt: '2026-09-11T00:00:00.000Z' },
       { reviewDueAt: '2026-01-01T00:00:00.000Z' },
     ]) {
-      const verdict = assessmentVerdict({ ...LIA, ...broken } as LiaRecord, { country: 'GB', now: NOW });
+      const verdict = assessmentVerdict({ ...LIA, ...broken } as LiaRecord, { country: 'GB', source: SUBJECT.source, now: NOW });
       const built = buildArticle14Notice({ controller: CONTROLLER, subject: SUBJECT, assessment: verdict, lia: LIA });
       expect(built.ok, JSON.stringify(broken)).toBe(false);
       if (!built.ok) expect(built.code).toBe('ASSESSMENT_NOT_VALID');

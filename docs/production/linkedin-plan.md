@@ -197,9 +197,16 @@ with a usable address. Preview first, like everything else.
 
 - **A new balancing assessment.** The signed UK assessment covers work addresses collected from
   company websites. A LinkedIn-sourced identity enriched by a third party is different data from a
-  different source, and the existing assessment does not cover it. `assessmentVerdict` would not
-  catch this — it checks country coverage, not source coverage — so **this is a human obligation,
-  not a mechanical one**, and it should be written down as such.
+  different source, and the existing assessment does not cover it. **This is now mechanical rather
+  than a human obligation** — see §8: `assessmentVerdict` checks the route as well as the
+  country, so a LinkedIn contact citing the scraped-websites assessment is refused with
+  `LIA_SOURCE_NOT_COVERED`. The draft is `docs/production/lia-linkedin-2026.md`; it is unsigned,
+  so LinkedIn contacts are refused until somebody signs it.
+
+  Note what this means for enrichment specifically: if the address is **purchased** rather than
+  derived from the employer's published convention, that is a `PROVIDER` route and neither
+  existing assessment covers it. A third document, or an explicit extension of the LinkedIn one.
+  The route field makes that a refusal rather than an oversight.
 - **The Article 14 source line must say what actually happened**: identified on LinkedIn, address
   supplied by a named provider. The notice already reads the contact's own provenance, so this is
   a matter of recording provenance honestly at promotion time, not of writing new template prose.
@@ -329,7 +336,7 @@ that makes the protocol check reachable.
   suite asserts a freshly promoted contact refuses with `LI_NOTICE_NOT_SENT`.
 - **It does not cover LinkedIn-sourced data in any signed assessment.** See §8.
 
-## 8. A gap this work opened, which needs a decision
+## 8. A gap this work opened — CLOSED
 
 Running two audiences in parallel — practices via the website scraper, larger companies via
 LinkedIn — means two balancing assessments. The system supports several and each contact cites
@@ -348,5 +355,68 @@ already carries `source`. Requiring the contact's source kind to be covered by t
 declared sources would make the mismatch refuse rather than pass — the same shape as the country
 check beside it.
 
-**I have not built it**, because it changes the lawful basis gate, which is safety-critical and
-outside what LP1 was asked for. It should be decided before LP4 rather than after.
+**CLOSED.** Built after LP1, on the owner's instruction, before LP3.
+
+### What it turned out to be
+
+The obvious fix — match the contact's `source` against the assessment's `dataSources` — does not
+work, and it is worth recording why, because the version that does not work is the one that looks
+like more effort and therefore like more rigour. `dataSources` is prose written for a regulator:
+"publicly listed contact addresses on practice websites" shares no substring with
+`SCRAPE:smilecare.example`. Anything bridging the two is a heuristic, and a heuristic in a
+lawful-basis gate fails in both directions — it passes what it should refuse when a word happens
+to coincide, and refuses what it should pass when the wording merely differs. Worse, it reads
+like a check.
+
+So the assessment gained a second field, `sourceKinds`, drawn from a closed list of five routes
+(`MANUAL`, `IMPORT`, `PROVIDER`, `SCRAPE`, `LINKEDIN`) in `server/domain/leadSource.ts`. The prose
+is what a regulator reads; the vocabulary is what the gate enforces. Neither pretends to be the
+other, and both are required.
+
+### What else the work forced
+
+- **`source` is a REQUIRED field of the verdict context, not an optional one.** Optional would
+  have meant every existing caller silently skipping the check — the gap itself, with a type
+  annotation on it. Required means the compiler found all twenty-odd call sites, which is the
+  mechanism rather than a side effect of it.
+- **The resolver takes a named object, not two positional strings.** `country` and `source` are
+  both strings describing the same contact. Passed positionally, transposing them is a silent
+  error producing a confident wrong verdict.
+- **The prospects route no longer accepts a caller-supplied `source`.** It did: `body.source ??
+  'LINKEDIN'`. Once the route decides which assessment applies, a caller who can name the route
+  can choose their own justification. It is now fixed to `LINKEDIN`, and the request contract is
+  strict, so sending the field is a 400 rather than a value quietly ignored.
+- **Liveness was split from coverage.** "Is this document in force" and "does it cover this
+  contact" are different questions with different callers — the console and the preflight have no
+  contact in hand. The first attempt had liveness call coverage with the assessment's own first
+  declared route, which looked circular-but-harmless and was not: a declared route is a KIND
+  (`SCRAPE`) and a contact's provenance is a SOURCE STRING (`SCRAPE:smilecare.example`), two
+  different things wearing the same primitive. The probe never classified and every live
+  assessment reported as unusable. The fix was to stop fabricating an input, not to fabricate a
+  better one.
+- **The Article 14 notice gained a LinkedIn sentence.** `sourceSentence` carried a private copy of
+  the vocabulary as string prefixes, and `LINKEDIN` was not in it — so a promoted prospect's
+  notice said "We obtained it from LINKEDIN". It now shares the classifier and says the two things
+  that are true and unusual about this route: the profile was public, and the address was found
+  separately.
+- **A second assessment was drafted**, `docs/production/lia-linkedin-2026.md`. It has to exist,
+  because the gate now refuses a LinkedIn contact citing the scraped-website document. Its Limb 2
+  and Limb 3 are genuinely different, which is the evidence that the split was worth making
+  rather than bureaucracy.
+
+### What proves it
+
+25 mutants, all behaving. The one that mattered — deleting the route check outright — is killed
+by a test that builds the exact scenario: two assessments differing in one field, and a LinkedIn
+contact refused by the scraped-websites one.
+
+One mutant survived the first run and found a real gap in a test I had just written: the resolver
+could hard-code the COUNTRY and nothing noticed, because every resolver test passed `'GB'`. That
+is the same defect one field to the left, and it predates this work. Closed.
+
+### What it still does not do
+
+The check is on the ROUTE, not on the audience. An assessment covering `SCRAPE` covers every
+scraped contact, whether the site belonged to a two-person dental practice or a multinational. If
+the two audiences need different balancing arguments for reasons other than how they were found —
+and they might — that is a distinction no field here captures, and it stays a human judgement.

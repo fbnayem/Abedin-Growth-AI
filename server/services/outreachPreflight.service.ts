@@ -2,7 +2,7 @@ import { collection, doc, getDoc, getDocs, query, store, where } from '../store'
 import { orgPath } from '../tenancy/orgScope';
 import { safeModeSnapshot } from '../config/safeMode';
 import { readControllerIdentity } from '../domain/article14Notice';
-import { assessmentVerdict, type LiaRecord } from '../domain/lia';
+import { livenessVerdict, type LiaRecord } from '../domain/lia';
 import { unreviewedCountries } from '../domain/lawfulBasisSources';
 import { evaluateLawfulBasis } from '../domain/lawfulBasis';
 import { evaluateCampaignSafety } from '../domain/campaignSafety';
@@ -80,12 +80,9 @@ async function countUsableAssessments(orgId: string, now: Date): Promise<number 
     let usable = 0;
     for (const d of snap.docs) {
       const record = d.data() as unknown as LiaRecord;
-      // Judged against a country the assessment itself names, so this counts "is this document
-      // in a usable state" and not "does it cover any particular contact". Coverage is a
-      // per-contact question and is asked at send time.
-      const first = Array.isArray(record.countries) ? trimmedOrNull(record.countries[0]) : null;
-      if (first === null) continue;
-      if (assessmentVerdict(record, { country: first, now }).ok) usable += 1;
+      // Liveness, not coverage: signed, unwithdrawn, in date. Whether it covers any particular
+      // contact is a per-contact question and is asked at send time.
+      if (livenessVerdict(record, now).ok) usable += 1;
     }
     return usable;
   } catch {

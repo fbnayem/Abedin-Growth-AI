@@ -15,7 +15,7 @@ import { previewScore, scoreContacts } from '../services/leadScore.service';
 import { discoverLeads } from '../services/discovery.service';
 import { scrapeSite } from '../services/scrapeWorker.service';
 import { sendArticle14Notices } from '../services/article14Send.service';
-import { buildContactDocument } from '../domain/contactDocument';
+import { buildContactDocument, type ContactProvenance } from '../domain/contactDocument';
 import { attributionFor, operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
 
@@ -64,19 +64,23 @@ function contactDocumentFor(
   status: string,
   recordedBy: string | null
 ) {
+  // Named and typed rather than inline: `ContactProvenance` is the anchor
+  // `leadSource.invariant.test.ts` scans for, so every place a lead's origin is recorded is a
+  // place that test can find and check the `source` value of.
+  const provenance: ContactProvenance = {
+    source: 'MANUAL',
+    sourceEvidence:
+      input.sourceEvidence ??
+      (recordedBy === null ? 'Entered through the API.' : `Entered by ${recordedBy}.`),
+    sourceCollectedAt: new Date().toISOString(),
+  };
   return buildContactDocument(input, {
     id,
     organizationId,
     type,
     status,
     now: new Date(),
-    provenance: {
-      source: 'MANUAL',
-      sourceEvidence:
-        input.sourceEvidence ??
-        (recordedBy === null ? 'Entered through the API.' : `Entered by ${recordedBy}.`),
-      sourceCollectedAt: new Date().toISOString(),
-    },
+    provenance,
     basis:
       input.lawfulBasis !== undefined && recordedBy !== null
         ? {

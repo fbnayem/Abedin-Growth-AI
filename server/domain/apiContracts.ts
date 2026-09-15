@@ -324,7 +324,11 @@ export const createProspectsSchema = z
   .object({
     /** Where the batch came from, in a form a person could check. Required. */
     sourceEvidence: z.string().trim().min(1).max(2000),
-    source: z.string().trim().min(1).max(200).optional(),
+    // `source` is NOT accepted, and the schema is strict, so sending it is a 400 rather than a
+    // value that gets quietly ignored. A prospect in this collection came from LinkedIn — that
+    // is what the collection is, and `normaliseProfileUrl` refuses anything else. Letting a
+    // caller name the route something else would let them choose which balancing assessment
+    // applies to the contacts these become, which is the one thing the source must not be.
     mode: z.enum(['PREVIEW', 'COMMIT']).optional(),
     rows: z
       .array(
@@ -390,6 +394,7 @@ export const liaDraftSchema = z
     necessity: z.string().trim().min(1).max(20000),
     balancing: z.string().trim().min(1).max(20000),
     countries: z.array(z.string().trim().min(2).max(2)).min(1).max(50),
+    sourceKinds: z.array(z.string().trim().min(1).max(40)).min(1).max(20),
     dataCategories: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
     dataSources: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
     safeguards: z.array(z.string().trim().min(1).max(300)).min(1).max(50),

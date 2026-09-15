@@ -349,12 +349,17 @@ export async function listAssessments(orgId: string): Promise<LiaRecord[]> {
  * This is the function the gateway calls before a send. It returns a verdict rather than a
  * record, so the caller cannot accidentally treat "found" as "valid" — which is the mistake the
  * old free-text `liaId` check institutionalised.
+ *
+ * THE CONTEXT IS AN OBJECT AND NOT TWO POSITIONAL STRINGS, ON PURPOSE. `country` and `source`
+ * are both strings, both describe the contact, and sit next to each other; passed positionally,
+ * transposing them is a silent error that produces a confident wrong verdict — `GB` would be
+ * read as a route and `SCRAPE:x` as a jurisdiction, and both would refuse for reasons naming the
+ * wrong field. A named object cannot be transposed.
  */
 export async function resolveAssessmentForContact(
   orgId: string,
   liaId: unknown,
-  country: string,
-  now: Date = new Date()
+  context: { readonly country: string; readonly source: unknown; readonly now?: Date }
 ): Promise<AssessmentVerdict> {
   const id = trimmed(liaId);
   if (id === null) {
@@ -364,7 +369,11 @@ export async function resolveAssessmentForContact(
       message: 'This contact cites no balancing assessment, so there is nothing to resolve.',
     };
   }
-  return assessmentVerdict(await getAssessment(orgId, id), { country, now });
+  return assessmentVerdict(await getAssessment(orgId, id), {
+    country: context.country,
+    source: context.source,
+    now: context.now ?? new Date(),
+  });
 }
 
 /**

@@ -236,7 +236,11 @@ export async function sendArticle14Notices(
     }
     const record = assessments.get(liaId) ?? null;
     const country = trimmed(contact.country) ?? '';
-    const verdict = assessmentVerdict(record, { country, now });
+    // The contact's own source, for the second dimension of coverage. This matters more here
+    // than anywhere else: the notice's first substantive paragraph tells the person WHERE WE GOT
+    // THEIR DETAILS, so sending it under an assessment written about a different route would put
+    // a statement about one acquisition next to a signature given for another.
+    const verdict = assessmentVerdict(record, { country, source: contact.source, now });
     if (!verdict.ok) {
       outcomes.push(refuse(contactId, 'ASSESSMENT_INVALID', `${verdict.code}: ${verdict.message}`));
       continue;

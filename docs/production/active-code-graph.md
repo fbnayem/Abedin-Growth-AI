@@ -13,10 +13,10 @@ Capability ownership is reported as *which live modules import the provider*, an
 
 | Entrypoint | Live modules reached |
 |---|---|
-| `server.ts` | 169 |
+| `server.ts` | 170 |
 | `src/main.tsx` | 64 |
 
-Live modules in total: **226**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
+Live modules in total: **227**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
 
 ## 3. Capability providers and their live importers
 
@@ -124,7 +124,7 @@ The server's dependency surface by importer: every package a live module outside
 | `server/domain/campaignSafety.ts` | 3 | server.ts |
 | `server/domain/campaignSequence.ts` | 1 | server.ts |
 | `server/domain/checkoutPrice.ts` | 1 | server.ts |
-| `server/domain/contactDocument.ts` | 6 | server.ts |
+| `server/domain/contactDocument.ts` | 7 | server.ts |
 | `server/domain/contactMerge.ts` | 1 | server.ts |
 | `server/domain/contextBundle.ts` | 3 | server.ts |
 | `server/domain/crawlTarget.ts` | 2 | server.ts |
@@ -134,6 +134,7 @@ The server's dependency surface by importer: every package a live module outside
 | `server/domain/leadCandidate.ts` | 4 | server.ts |
 | `server/domain/leadImport.ts` | 1 | server.ts |
 | `server/domain/leadScore.ts` | 1 | server.ts |
+| `server/domain/leadSource.ts` | 2 | server.ts |
 | `server/domain/ledgerAdapters.ts` | 1 | server.ts |
 | `server/domain/lia.ts` | 6 | server.ts |
 | `server/domain/memoryFacts.ts` | 1 | server.ts |

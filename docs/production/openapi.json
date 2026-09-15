@@ -2124,7 +2124,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:723"
+        "x-source": "server/routes/contacts.routes.ts:727"
       }
     },
     "/api/contacts/{id}/quotes": {
@@ -2215,7 +2215,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:782"
+        "x-source": "server/routes/contacts.routes.ts:786"
       },
       "post": {
         "operationId": "post_api_contacts_id_quotes",
@@ -2365,7 +2365,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:688"
+        "x-source": "server/routes/contacts.routes.ts:692"
       }
     },
     "/api/contacts/{id}/revoke-consent": {
@@ -2479,7 +2479,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:756"
+        "x-source": "server/routes/contacts.routes.ts:760"
       }
     },
     "/api/contacts/{id}/time-zone": {
@@ -2596,7 +2596,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:664"
+        "x-source": "server/routes/contacts.routes.ts:668"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -2688,7 +2688,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/contacts.routes.ts:489"
+        "x-source": "server/routes/contacts.routes.ts:493"
       }
     },
     "/api/csp-report": {
@@ -4454,7 +4454,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:792"
+        "x-source": "server/routes/contacts.routes.ts:796"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -4641,7 +4641,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:801"
+        "x-source": "server/routes/contacts.routes.ts:805"
       }
     },
     "/api/investors/batch-generate": {
@@ -4722,7 +4722,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:563"
+        "x-source": "server/routes/contacts.routes.ts:567"
       }
     },
     "/api/knowledge": {
@@ -5186,7 +5186,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:195"
+        "x-source": "server/routes/contacts.routes.ts:199"
       }
     },
     "/api/leads/batch-followup": {
@@ -5267,7 +5267,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:620"
+        "x-source": "server/routes/contacts.routes.ts:624"
       }
     },
     "/api/leads/batch-generate": {
@@ -5348,7 +5348,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:538"
+        "x-source": "server/routes/contacts.routes.ts:542"
       }
     },
     "/api/leads/discover": {
@@ -5521,7 +5521,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:379"
+        "x-source": "server/routes/contacts.routes.ts:383"
       }
     },
     "/api/leads/import": {
@@ -5683,7 +5683,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:214"
+        "x-source": "server/routes/contacts.routes.ts:218"
       }
     },
     "/api/leads/notice-send": {
@@ -5800,7 +5800,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:308"
+        "x-source": "server/routes/contacts.routes.ts:312"
       }
     },
     "/api/leads/notice-sent": {
@@ -5913,7 +5913,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:271"
+        "x-source": "server/routes/contacts.routes.ts:275"
       }
     },
     "/api/leads/research": {
@@ -5994,7 +5994,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:613"
+        "x-source": "server/routes/contacts.routes.ts:617"
       }
     },
     "/api/leads/score": {
@@ -6102,7 +6102,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:349"
+        "x-source": "server/routes/contacts.routes.ts:353"
       }
     },
     "/api/leads/scrape": {
@@ -6252,7 +6252,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:431"
+        "x-source": "server/routes/contacts.routes.ts:435"
       }
     },
     "/api/leads/{id}/email": {
@@ -6343,7 +6343,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:643"
+        "x-source": "server/routes/contacts.routes.ts:647"
       }
     },
     "/api/leads/{id}/score": {
@@ -6434,7 +6434,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:469"
+        "x-source": "server/routes/contacts.routes.ts:473"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -6525,7 +6525,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:636"
+        "x-source": "server/routes/contacts.routes.ts:640"
       }
     },
     "/api/lia": {
@@ -6676,6 +6676,16 @@
                     "minItems": 1,
                     "type": "array"
                   },
+                  "sourceKinds": {
+                    "items": {
+                      "maxLength": 40,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   "title": {
                     "maxLength": 300,
                     "minLength": 8,
@@ -6688,6 +6698,7 @@
                   "necessity",
                   "balancing",
                   "countries",
+                  "sourceKinds",
                   "dataCategories",
                   "dataSources",
                   "safeguards",
@@ -6774,7 +6785,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/lia.routes.ts:62"
+        "x-source": "server/routes/lia.routes.ts:61"
       }
     },
     "/api/lia/{id}": {
@@ -6947,6 +6958,16 @@
                     "minItems": 1,
                     "type": "array"
                   },
+                  "sourceKinds": {
+                    "items": {
+                      "maxLength": 40,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   "title": {
                     "maxLength": 300,
                     "minLength": 8,
@@ -6959,6 +6980,7 @@
                   "necessity",
                   "balancing",
                   "countries",
+                  "sourceKinds",
                   "dataCategories",
                   "dataSources",
                   "safeguards",
@@ -7045,7 +7067,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/lia.routes.ts:75"
+        "x-source": "server/routes/lia.routes.ts:74"
       }
     },
     "/api/lia/{id}/sign": {
@@ -7154,7 +7176,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/lia.routes.ts:88"
+        "x-source": "server/routes/lia.routes.ts:87"
       }
     },
     "/api/lia/{id}/withdraw": {
@@ -7266,7 +7288,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/lia.routes.ts:103"
+        "x-source": "server/routes/lia.routes.ts:102"
       }
     },
     "/api/linkedin-config": {
@@ -8884,7 +8906,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:807"
+        "x-source": "server/routes/contacts.routes.ts:811"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -9071,7 +9093,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:816"
+        "x-source": "server/routes/contacts.routes.ts:820"
       }
     },
     "/api/partners/batch-generate": {
@@ -9152,7 +9174,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:588"
+        "x-source": "server/routes/contacts.routes.ts:592"
       }
     },
     "/api/pipeline": {
@@ -9790,7 +9812,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/prospects.routes.ts:22"
+        "x-source": "server/routes/prospects.routes.ts:23"
       },
       "post": {
         "operationId": "post_api_prospects",
@@ -9881,11 +9903,6 @@
                     "maxItems": 2000,
                     "minItems": 1,
                     "type": "array"
-                  },
-                  "source": {
-                    "maxLength": 200,
-                    "minLength": 1,
-                    "type": "string"
                   },
                   "sourceEvidence": {
                     "maxLength": 2000,
@@ -9978,7 +9995,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/prospects.routes.ts:41"
+        "x-source": "server/routes/prospects.routes.ts:42"
       }
     },
     "/api/prospects/{id}/promote": {
@@ -10137,7 +10154,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/prospects.routes.ts:79"
+        "x-source": "server/routes/prospects.routes.ts:84"
       }
     },
     "/api/quotes/{id}": {

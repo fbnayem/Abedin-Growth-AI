@@ -47,6 +47,13 @@
  */
 
 import { OUTREACH_REGIMES } from './lawfulBasisSources';
+import {
+  LEAD_SOURCE_KINDS,
+  LEAD_SOURCE_KIND_NOTES,
+  classifyLeadSource,
+  normaliseSourceKinds,
+  type LeadSourceKind,
+} from './leadSource';
 
 /** How long a signature stands before somebody has to look at the assessment again. */
 export const LIA_DEFAULT_REVIEW_MONTHS = 12;
@@ -73,6 +80,7 @@ export const LIA_SUBSTANTIVE_FIELDS = [
   'necessity',
   'balancing',
   'countries',
+  'sourceKinds',
   'dataCategories',
   'dataSources',
   'safeguards',
@@ -90,9 +98,18 @@ export interface LiaDraft {
   readonly balancing: string;
   /** ISO-3166 alpha-2 codes this assessment covers. Must be in the outreach regime table. */
   readonly countries: readonly string[];
+  /**
+   * Which ROUTES of acquisition this assessment covers, from the closed list in `./leadSource`.
+   *
+   * The machine-checkable half of the same question `dataSources` answers in prose. The gate
+   * compares a contact's `source` against this; a regulator reads `dataSources`. Separating them
+   * is deliberate — see the header of `./leadSource` for why matching the prose would be a
+   * heuristic dressed as a control.
+   */
+  readonly sourceKinds: readonly LeadSourceKind[];
   /** What categories of personal data are processed: "name", "work email", "job title". */
   readonly dataCategories: readonly string[];
-  /** Where the data comes from: "company website contact pages", "CSV from a trade directory". */
+  /** Where the data comes from, in prose: "company website contact pages", "a trade directory". */
   readonly dataSources: readonly string[];
   /** What reduces the impact: suppression on first objection, no personal addresses, and so on. */
   readonly safeguards: readonly string[];
@@ -124,7 +141,37 @@ export type LiaRefusalCode =
   | 'LIA_WITHDRAWN'
   | 'LIA_EXPIRED'
   | 'LIA_COUNTRY_NOT_COVERED'
+  | 'LIA_SOURCE_UNKNOWN'
+  | 'LIA_SOURCE_NOT_COVERED'
   | 'LIA_MALFORMED';
+
+/**
+ * The answer to "is this document in force", with no contact involved.
+ *
+ * Carries the record on success, so the caller that goes on to ask a coverage question is
+ * narrowed to a non-null record without asserting it a second time — and so nothing has to
+ * re-derive from the raw record what this function has already read out of it.
+ */
+export type LivenessVerdict =
+  | {
+      readonly ok: true;
+      readonly record: LiaRecord;
+      /**
+       * The declared routes, normalised, non-empty, every entry known.
+       *
+       * Carried rather than re-derived so the coverage check has no `?? []` fallback to write \u2014
+       * a fallback that, after the checks below, could never be taken. Unreachable defensive
+       * code is the defect this repository keeps finding, and the way not to write it is to make
+       * the guarantee available instead of re-asserting it.
+       */
+      readonly sourceKinds: readonly LeadSourceKind[];
+      readonly id: string;
+      readonly title: string;
+      readonly signedBy: string;
+      readonly signedAt: string;
+      readonly reviewDueAt: string | null;
+    }
+  | { readonly ok: false; readonly code: LiaRefusalCode; readonly message: string };
 
 export type AssessmentVerdict =
   | {
@@ -134,6 +181,15 @@ export type AssessmentVerdict =
       readonly signedBy: string;
       readonly signedAt: string;
       readonly reviewDueAt: string | null;
+      /**
+       * The route this verdict was reached for — not every route the assessment covers.
+       *
+       * A verdict answers a question about one contact, so it reports the kind that contact's
+       * `source` classified to. The Article 14 notice quotes it, and a notice that told someone
+       * "we cover websites, directories and LinkedIn" rather than which one applies to them
+       * would be answering a question they did not ask.
+       */
+      readonly sourceKind: LeadSourceKind;
     }
   | { readonly ok: false; readonly code: LiaRefusalCode; readonly message: string };
 
@@ -142,6 +198,8 @@ export type DraftRefusalCode =
   | 'LIA_LIMB_TOO_LONG'
   | 'LIA_NO_COUNTRIES'
   | 'LIA_COUNTRY_UNKNOWN'
+  | 'LIA_NO_SOURCE_KINDS'
+  | 'LIA_SOURCE_KIND_UNKNOWN'
   | 'LIA_LIST_EMPTY'
   | 'LIA_LIST_TOO_LONG'
   | 'LIA_ITEM_TOO_LONG';
@@ -233,6 +291,39 @@ export function validateLiaDraft(raw: Readonly<Record<string, unknown>>): DraftO
     }
   }
 
+  // The routes of acquisition, as a closed vocabulary rather than as prose. An assessment that
+  // names none covers no route, which — since every contact arrives by some route — means it
+  // supports no send at all. Refusing at authoring time says that plainly, rather than leaving
+  // the author to discover it later as a refusal on every contact they try.
+  // Absent and wrong are different facts with different remedies, so they are different codes.
+  // An author who left the field out needs to be told it exists; one who typed `APOLLO` needs the
+  // list of what is accepted. Folding them together reported a missing field as containing an
+  // unrecognised route named "undefined", which sends the author looking for a typo.
+  const sourceKinds =
+    raw.sourceKinds === undefined ? [] : normaliseSourceKinds(raw.sourceKinds);
+  if (sourceKinds === null) {
+    return {
+      ok: false,
+      code: 'LIA_SOURCE_KIND_UNKNOWN',
+      message:
+        `sourceKinds contains a route this system does not recognise ` +
+        `(${JSON.stringify(raw.sourceKinds)}). The recognised routes are ` +
+        `${LEAD_SOURCE_KINDS.map((k) => `${k} (${LEAD_SOURCE_KIND_NOTES[k]})`).join('; ')}.`,
+    };
+  }
+  if (sourceKinds.length === 0) {
+    return {
+      ok: false,
+      code: 'LIA_NO_SOURCE_KINDS',
+      message:
+        'An assessment must say which routes of acquisition it covers. The balancing test turns ' +
+        'on what the person reasonably expected when they published or handed over their ' +
+        'details, and that expectation is a property of the route: an address published on a ' +
+        'company contact page and a profile found on LinkedIn are two different arguments. ' +
+        'An assessment covering "however we got it" covers nothing.',
+    };
+  }
+
   const lists: Record<string, string[]> = {};
   for (const { field, label } of LISTS) {
     const values = list(raw[field]);
@@ -272,6 +363,7 @@ export function validateLiaDraft(raw: Readonly<Record<string, unknown>>): DraftO
       necessity: text(raw.necessity),
       balancing: text(raw.balancing),
       countries: Object.freeze([...new Set(countries)]),
+      sourceKinds: Object.freeze(sourceKinds),
       dataCategories: Object.freeze(lists.dataCategories),
       dataSources: Object.freeze(lists.dataSources),
       safeguards: Object.freeze(lists.safeguards),
@@ -288,22 +380,24 @@ export function defaultReviewDue(signedAt: Date): string {
 }
 
 /**
- * Does this assessment support sending to a contact in `country`, as at `now`?
+ * IS THIS DOCUMENT LIVE? Signed, unwithdrawn, in date, and not garbled.
  *
- * Pure, and takes the record rather than an id, so the whole decision can be exercised without a
- * datastore. The caller resolves the id; this decides what the resolution means. A missing
- * record is passed as `null` rather than as an exception, because "no such assessment" is an
- * ordinary answer here and an ordinary answer should not need a catch.
+ * Separated from coverage because it is a genuinely different question and has genuinely
+ * different callers. The console lists assessments and the preflight counts them; neither has a
+ * contact in hand, and neither should have to invent one to ask whether a document is in force.
  *
- * ORDER IS DELIBERATE. Withdrawn is checked before expiry, and both before country coverage, so
- * the message an operator sees names the most fundamental problem rather than the first one the
- * code happened to notice. Telling someone their assessment does not cover France, when it was
- * withdrawn last March, would send them to fix the wrong thing.
+ * AN EARLIER VERSION OF THIS FUNCTION GOT THAT WRONG IN AN INSTRUCTIVE WAY. It called
+ * `assessmentVerdict` and probed coverage with the assessment\u2019s own first country and first
+ * declared route \u2014 which looked circular-but-harmless and was not, because a declared route is a
+ * KIND (`SCRAPE`) and a contact\u2019s provenance is a SOURCE STRING (`SCRAPE:smilecare.example`).
+ * Two different things wearing the same primitive type. The probe never classified, so every
+ * live assessment reported as unusable. Splitting the questions removes the need to fabricate an
+ * input at all, which is the fix rather than a better fake.
+ *
+ * Returns the record on success so the caller that needs coverage next is narrowed to a
+ * non-null record without asserting it a second time.
  */
-export function assessmentVerdict(
-  record: LiaRecord | null,
-  context: { readonly country: string; readonly now: Date }
-): AssessmentVerdict {
+export function livenessVerdict(record: LiaRecord | null, now: Date): LivenessVerdict {
   if (record === null) {
     return {
       ok: false,
@@ -330,7 +424,7 @@ export function assessmentVerdict(
         `Assessment ${record.id} was withdrawn at ${record.withdrawnAt}` +
         `${text(record.withdrawnReason) === '' ? '' : `: ${record.withdrawnReason}`}. ` +
         `A withdrawn assessment does not support outreach, and re-signing it is not the remedy ` +
-        `— write the assessment that replaces it.`,
+        `\u2014 write the assessment that replaces it.`,
     };
   }
 
@@ -363,7 +457,7 @@ export function assessmentVerdict(
         message: `Assessment ${record.id} has an unreadable review date ${JSON.stringify(record.reviewDueAt)}.`,
       };
     }
-    if (context.now.getTime() >= dueMs) {
+    if (now.getTime() >= dueMs) {
       return {
         ok: false,
         code: 'LIA_EXPIRED',
@@ -375,27 +469,143 @@ export function assessmentVerdict(
     }
   }
 
+  // A document that covers nothing supports nothing, and a console reporting it as "in force"
+  // would be telling the truth in a way that misleads. `validateLiaDraft` refuses both of these,
+  // so only a migration or a hand edit can produce one \u2014 which is exactly why the read path has
+  // to check rather than assume. MALFORMED and not NOT_COVERED, because no contact is involved:
+  // this is a statement about the document, not about anybody's country or route.
+  const routes = normaliseSourceKinds(record.sourceKinds);
+  // A DECLARED ROUTE OUTSIDE THE CLOSED LIST IS REPORTED, NOT SILENTLY TREATED AS "COVERS
+  // NOTHING". The two look the same from a contact's point of view \u2014 both refuse \u2014 but they send
+  // the author somewhere different. "Not covered" tells them to write the assessment for this
+  // route; if the assessment already exists and its stored `sourceKinds` says `APOLLO`, they
+  // would be writing a document they already have. Unlike a country code, a route is drawn from
+  // a list this system owns, so an entry outside it means the stored document and this code
+  // disagree about what routes exist \u2014 and that disagreement is the thing worth saying.
+  //
+  // `validateLiaDraft` cannot produce one; a migration or a hand edit can, which is precisely
+  // why the read path checks rather than trusts.
+  if (routes === null) {
+    return {
+      ok: false,
+      code: 'LIA_MALFORMED',
+      message:
+        `Assessment ${record.id} declares a route this system does not recognise ` +
+        `(${JSON.stringify(record.sourceKinds)}). The recognised routes are ` +
+        `${LEAD_SOURCE_KINDS.join(', ')}. An unrecognised declaration is not a wildcard, and it ` +
+        `is not the same as covering no route: it means this document and this code disagree ` +
+        `about what routes exist.`,
+    };
+  }
+
+
+  const declaresCountry = Array.isArray(record.countries) && record.countries.length > 0;
+  const declaresRoute = routes.length > 0;
+  if (!declaresCountry || !declaresRoute) {
+    return {
+      ok: false,
+      code: 'LIA_MALFORMED',
+      message:
+        `Assessment ${record.id} declares ` +
+        `${declaresCountry ? '' : 'no jurisdiction'}${!declaresCountry && !declaresRoute ? ' and ' : ''}` +
+        `${declaresRoute ? '' : 'no route of acquisition'}, so there is no contact it could ` +
+        `support. An assessment covering "everywhere, however we got it" covers nothing.`,
+    };
+  }
+
+  return {
+    ok: true,
+    record,
+    sourceKinds: routes,
+    id: record.id,
+    title: text(record.title),
+    signedBy,
+    signedAt,
+    reviewDueAt: due === '' ? null : due,
+  };
+}
+
+/**
+ * Does this assessment support sending to a contact in `country`, acquired by `source`, at `now`?
+ *
+ * Pure, and takes the record rather than an id, so the whole decision can be exercised without a
+ * datastore. The caller resolves the id; this decides what the resolution means. A missing
+ * record is passed as `null` rather than as an exception, because "no such assessment" is an
+ * ordinary answer here and an ordinary answer should not need a catch.
+ *
+ * COVERAGE HAS TWO DIMENSIONS, AND FOR A WHILE THIS FUNCTION ONLY CHECKED ONE.
+ * It checked country and stopped, so two assessments both covering `GB` were interchangeable:
+ * a person identified on LinkedIn could cite the assessment written for practices scraped from
+ * their own websites and nothing objected. `source` is now part of the question, and it is a
+ * REQUIRED field of the context rather than an optional one \u2014 an optional one would have meant
+ * every existing caller silently skipping the check, which is the gap itself with a type on it.
+ * Making it required means the compiler, not a reviewer, is what finds a caller who forgot.
+ *
+ * ORDER IS DELIBERATE. Liveness comes first entire \u2014 withdrawn before expiry, and both before
+ * any coverage question \u2014 so the message an operator sees names the most fundamental problem
+ * rather than the first one the code happened to notice. Telling someone their assessment does
+ * not cover France, when it was withdrawn last March, would send them to fix the wrong thing.
+ * Country precedes source only because it is the coarser of the two; both are coverage and
+ * neither outranks the other.
+ */
+export function assessmentVerdict(
+  record: LiaRecord | null,
+  context: { readonly country: string; readonly source: unknown; readonly now: Date }
+): AssessmentVerdict {
+  const live = livenessVerdict(record, context.now);
+  if (!live.ok) return live;
+
   const country = typeof context.country === 'string' ? context.country.trim().toUpperCase() : '';
-  const covered = Array.isArray(record.countries)
-    ? record.countries.map((c) => text(c).toUpperCase())
+  const covered = Array.isArray(live.record.countries)
+    ? live.record.countries.map((c) => text(c).toUpperCase())
     : [];
   if (country === '' || !covered.includes(country)) {
     return {
       ok: false,
       code: 'LIA_COUNTRY_NOT_COVERED',
       message:
-        `Assessment ${record.id} covers ${covered.length === 0 ? 'no country' : covered.join(', ')} ` +
+        `Assessment ${live.id} covers ${covered.join(', ')} ` +
         `and this contact is in ${country === '' ? 'an unstated country' : country}. The ` +
         `balancing test differs by jurisdiction, so coverage is not transferable.`,
     };
   }
 
+  // The second dimension of coverage. An unclassifiable source and an uncovered one are separate
+  // codes because they have separate remedies: the first means this contact\u2019s provenance string
+  // is a shape nothing here understands, and the second means the assessment simply was not
+  // written about this route.
+  const kind = classifyLeadSource(context.source);
+  if (kind === null) {
+    return {
+      ok: false,
+      code: 'LIA_SOURCE_UNKNOWN',
+      message:
+        `This contact records its source as ${JSON.stringify(context.source)}, which is not a ` +
+        `route this system recognises, so no assessment can be shown to cover it. The ` +
+        `recognised routes are ${LEAD_SOURCE_KINDS.join(', ')}. An unrecognised route refuses ` +
+        `rather than borrowing the justification written for a recognised one.`,
+    };
+  }
+  if (!live.sourceKinds.includes(kind)) {
+    return {
+      ok: false,
+      code: 'LIA_SOURCE_NOT_COVERED',
+      message:
+        `Assessment ${live.id} covers ${live.sourceKinds.join(', ')} and ` +
+        `this contact was obtained by ${kind} \u2014 ${LEAD_SOURCE_KIND_NOTES[kind]}. The balancing ` +
+        `test weighs what the person reasonably expected, and that expectation follows the ` +
+        `route: an assessment written about one is not evidence about another. Write the ` +
+        `assessment that covers ${kind}, or correct this contact\u2019s source.`,
+    };
+  }
+
   return {
     ok: true,
-    id: record.id,
-    title: text(record.title),
-    signedBy,
-    signedAt,
-    reviewDueAt: due === '' ? null : due,
+    id: live.id,
+    title: live.title,
+    signedBy: live.signedBy,
+    signedAt: live.signedAt,
+    reviewDueAt: live.reviewDueAt,
+    sourceKind: kind,
   };
 }

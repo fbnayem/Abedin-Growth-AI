@@ -224,6 +224,34 @@ German send.
 
 ---
 
+## 2b. One question that is not about a country
+
+The system now requires a balancing assessment to declare which **routes of acquisition** it
+covers, from a closed list: an address collected from the organisation's own website (`SCRAPE`),
+one read from a list we uploaded (`IMPORT`), one entered by a member of staff (`MANUAL`), one
+returned by a data provider (`PROVIDER`), or a person identified from a public LinkedIn profile
+whose address was found separately (`LINKEDIN`). A contact obtained by one route cannot be sent
+under an assessment written about another; the send is refused.
+
+We did this because the balancing test turns on what the person reasonably expected, and that
+expectation seems to us to follow the route rather than the jurisdiction. Somebody who published
+a contact address on their own website expected something fairly specific. Somebody who published
+a professional profile, and never published an address, did not.
+
+**Please confirm, or correct:**
+
+1. Is it right that these five routes need separate balancing assessments rather than one
+   assessment naming several sources? We would rather be told we have over-engineered this than
+   discover later that one document was doing work it could not do.
+2. Is the LinkedIn case in particular materially weaker than the published-address case, as
+   `lia-linkedin-2026.md` assumes? That draft treats it as closer and proposes two conditions —
+   the address must be derived from the employer's published convention rather than purchased,
+   and one approach rather than a sequence. Are those the right conditions, and are they enough?
+3. Where an address is **inferred** from an employer's published naming convention rather than
+   found published for that individual, does that change the analysis in a way we have missed?
+
+---
+
 ## 3. What we are not asking you to check
 
 Stated plainly so that a sign-off is not read as covering more than it does.
@@ -231,7 +259,8 @@ Stated plainly so that a sign-off is not read as covering more than it does.
 - **Whether the balancing assessment is any good.** The system checks that each limb of the
   three-part test is present and long enough to be a sentence. It cannot check that the reasoning
   is sound. The draft assessment is in `lia-uk-b2b-2026.md` and would benefit from your eye, but
-  that is a separate ask.
+  that is a separate ask, as is `lia-linkedin-2026.md`. Section 2b above is the exception: it asks
+  a structural question about how those documents are scoped, not whether their reasoning holds.
 - **Whether the people on a list are the right people to contact.** A business judgement.
 - **Whether the message copy is accurate or would be read as deceptive.** Nothing in the system
   reads the copy.

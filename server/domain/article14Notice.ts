@@ -61,6 +61,7 @@
  */
 
 import type { AssessmentVerdict, LiaRecord } from './lia';
+import { classifyLeadSource, sourceParticular } from './leadSource';
 
 /** The controller details a notice cannot be written without. */
 export const CONTROLLER_FIELDS = [
@@ -203,35 +204,53 @@ export function escapeHtml(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** Describe where the data came from, in terms the recipient can act on. */
+/**
+ * Describe where the data came from, in terms the recipient can act on.
+ *
+ * Article 14(2)(f) asks for the source, and a person is entitled to an answer they can picture.
+ * This switches on `classifyLeadSource` rather than on its own string prefixes — it used to
+ * carry a private copy of the vocabulary, and a private copy is how `LINKEDIN` fell through to
+ * the catch-all and told people "We obtained it from LINKEDIN", which is a category label rather
+ * than an explanation. Sharing the classifier means a new route cannot be added to the gate
+ * without this sentence being considered.
+ *
+ * The catch-all remains, and is reached only by a source no route recognises. It stays vague
+ * because being vague about a source we cannot name is honest, and inventing a specific
+ * description for an unclassifiable string would not be.
+ */
 function sourceSentence(subject: NoticeSubject): string {
   const source = subject.source.trim();
   const evidence = subject.sourceEvidence.trim();
-  if (source.startsWith('SCRAPE:')) {
-    return (
-      `We collected it from a publicly accessible web page: ${evidence || source.slice(7)}. ` +
-      `It was not obtained from you directly.`
-    );
+  const particular = sourceParticular(source);
+  switch (classifyLeadSource(source)) {
+    case 'SCRAPE':
+      return (
+        `We collected it from a publicly accessible web page: ${evidence || (particular ?? source)}. ` +
+        `It was not obtained from you directly.`
+      );
+    case 'PROVIDER':
+      return (
+        `We obtained it from a third-party data provider, ${particular ?? source}, in the search ` +
+        `recorded as "${evidence}". It was not obtained from you directly.`
+      );
+    case 'IMPORT':
+      return (
+        `We obtained it from a list imported into our system, recorded as "${evidence}". It was ` +
+        `not obtained from you directly.`
+      );
+    case 'MANUAL':
+      return (
+        `A member of our team entered it, recording the origin as "${evidence}". It was not ` +
+        `obtained from you through a form or a sign-up.`
+      );
+    case 'LINKEDIN':
+      return (
+        `We identified you from your public LinkedIn profile, recorded as "${evidence}", and ` +
+        `found your work email address separately. Neither was given to us by you.`
+      );
+    default:
+      return `We obtained it from ${source}, recorded as "${evidence}". It was not obtained from you directly.`;
   }
-  if (source.startsWith('PROVIDER:')) {
-    return (
-      `We obtained it from a third-party data provider, ${source.slice(9)}, in the search ` +
-      `recorded as "${evidence}". It was not obtained from you directly.`
-    );
-  }
-  if (source === 'IMPORT') {
-    return (
-      `We obtained it from a list imported into our system, recorded as "${evidence}". It was ` +
-      `not obtained from you directly.`
-    );
-  }
-  if (source === 'MANUAL') {
-    return (
-      `A member of our team entered it, recording the origin as "${evidence}". It was not ` +
-      `obtained from you through a form or a sign-up.`
-    );
-  }
-  return `We obtained it from ${source}, recorded as "${evidence}". It was not obtained from you directly.`;
 }
 
 const RIGHTS_LINES: readonly string[] = [

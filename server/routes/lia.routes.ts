@@ -11,7 +11,7 @@ import {
   signAssessment,
   withdrawAssessment,
 } from '../services/lia.service';
-import { assessmentVerdict } from '../domain/lia';
+import { livenessVerdict } from '../domain/lia';
 
 /**
  * BALANCING ASSESSMENTS, AND THE ONE REPORT THAT SAYS WHETHER A SEND COULD HAPPEN.
@@ -35,10 +35,10 @@ liaRouter.get('/', async (req: Request, res: Response) => {
     const records = await listAssessments(orgScope(req));
     res.json({
       assessments: records.map((record) => {
-        // The verdict is evaluated against the first country the assessment itself names, so a
-        // console can show "usable" or "expired" without asking about a particular contact.
-        const country = Array.isArray(record.countries) ? (record.countries[0] ?? '') : '';
-        const verdict = assessmentVerdict(record, { country, now });
+        // Liveness, not coverage: whether this DOCUMENT is signed, unwithdrawn and in date. A
+        // console can show that without asking about a particular contact, and must not imply
+        // more — "usable" here does not mean "usable for the lead you are looking at".
+        const verdict = livenessVerdict(record, now);
         return {
           ...record,
           usable: verdict.ok,
@@ -53,8 +53,7 @@ liaRouter.get('/:id', async (req: Request, res: Response) => {
   try {
     const record = await getAssessment(orgScope(req), req.params.id);
     if (record === null) return sendError(req, res, 'NOT_FOUND', `No assessment ${req.params.id}.`);
-    const country = Array.isArray(record.countries) ? (record.countries[0] ?? '') : '';
-    const verdict = assessmentVerdict(record, { country, now: new Date() });
+    const verdict = livenessVerdict(record, new Date());
     res.json({ ...record, usable: verdict.ok, whyNotUsable: verdict.ok ? null : `${verdict.code}: ${verdict.message}` });
   } catch (e: any) { sendCaught(req, res, e); }
 });
