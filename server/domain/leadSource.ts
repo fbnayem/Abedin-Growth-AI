@@ -84,6 +84,43 @@ export const QUALIFIED_SOURCE_KINDS: readonly LeadSourceKind[] = ['PROVIDER', 'S
 export const BARE_SOURCE_KINDS: readonly LeadSourceKind[] = ['MANUAL', 'IMPORT', 'LINKEDIN'];
 
 /**
+ * ROUTES NO ASSESSMENT MAY COVER, BY POLICY RATHER THAN BY OMISSION.
+ *
+ * The owner's decision for the initial release: purchased data is not used. `PROVIDER` stays in
+ * the vocabulary — the classifier still recognises it, the Article 14 notice still has a sentence
+ * for it, and a contact carrying one is still refused with a message naming the route rather than
+ * shrugging — but no balancing assessment may declare it.
+ *
+ * WHY THIS IS A RULE AND NOT JUST AN ABSENCE. `PROVIDER` was already refused, because no
+ * assessment covered it. That refusal is real and it is also fragile: adding `PROVIDER` to an
+ * existing assessment's `sourceKinds` is one word in one request body, and the whole policy would
+ * evaporate with nothing recording that a decision had been reversed. A rule that holds only
+ * while nobody types a word is the shape of control this repository exists to remove.
+ *
+ * So the refusal has a reason attached to it, and reversing it is an edit to this file — which
+ * means a commit, a diff, and somewhere to write the business case down. That is the whole
+ * mechanism: not to make it impossible, but to make it deliberate.
+ *
+ * TO REVERSE: empty this list, and write the argument in the commit. Then a `PROVIDER`
+ * assessment can be authored and signed like any other. Nothing else needs to change.
+ */
+export const UNCOVERABLE_SOURCE_KINDS: Readonly<Record<string, string>> = {
+  PROVIDER:
+    'Purchased and third-party-supplied data is not used in the initial release. A provider ' +
+    'record carries a collection chain this system did not see and a notice obligation ' +
+    'somebody else discharged or did not, and the balancing test for it is a different ' +
+    'argument from either assessment currently drafted. Reverse this in ' +
+    'server/domain/leadSource.ts when there is a business case and evidence for the route, ' +
+    'not because the vocabulary has a word for it.',
+};
+
+/** Is this route one no assessment may declare? Returns the recorded reason, or null. */
+export function uncoverableReason(kind: unknown): string | null {
+  const word = typeof kind === 'string' ? kind.trim().toUpperCase() : '';
+  return UNCOVERABLE_SOURCE_KINDS[word] ?? null;
+}
+
+/**
  * What each kind means, in the words a person signing an assessment would need.
  *
  * Kept here rather than in the UI because the refusal messages quote it, and a refusal that

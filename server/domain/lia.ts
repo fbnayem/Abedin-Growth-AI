@@ -52,6 +52,7 @@ import {
   LEAD_SOURCE_KIND_NOTES,
   classifyLeadSource,
   normaliseSourceKinds,
+  uncoverableReason,
   type LeadSourceKind,
 } from './leadSource';
 
@@ -200,6 +201,7 @@ export type DraftRefusalCode =
   | 'LIA_COUNTRY_UNKNOWN'
   | 'LIA_NO_SOURCE_KINDS'
   | 'LIA_SOURCE_KIND_UNKNOWN'
+  | 'LIA_SOURCE_KIND_NOT_PERMITTED'
   | 'LIA_LIST_EMPTY'
   | 'LIA_LIST_TOO_LONG'
   | 'LIA_ITEM_TOO_LONG';
@@ -311,6 +313,20 @@ export function validateLiaDraft(raw: Readonly<Record<string, unknown>>): DraftO
         `${LEAD_SOURCE_KINDS.map((k) => `${k} (${LEAD_SOURCE_KIND_NOTES[k]})`).join('; ')}.`,
     };
   }
+  for (const kind of sourceKinds) {
+    const why = uncoverableReason(kind);
+    if (why !== null) {
+      return {
+        ok: false,
+        code: 'LIA_SOURCE_KIND_NOT_PERMITTED',
+        message:
+          `An assessment may not declare ${kind}. ${why} This is a recorded decision rather ` +
+          `than an omission: ${kind} is still a route this system recognises, and a contact ` +
+          `carrying it is refused by name rather than by silence.`,
+      };
+    }
+  }
+
   if (sourceKinds.length === 0) {
     return {
       ok: false,

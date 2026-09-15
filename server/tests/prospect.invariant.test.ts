@@ -44,6 +44,17 @@ const stripComments = (source: string) =>
 const ORG = 'org-a';
 const NOW = new Date('2026-09-15T10:00:00.000Z');
 const NAMED: Attribution = { kind: 'IDENTIFIED', actor: 'ops@abedin.example' };
+
+/**
+ * Where the ADDRESS came from, which is not where the PERSON came from.
+ *
+ * Required at promotion. `lia-linkedin-2026.md` covers an address derived from the employer's
+ * published naming convention and does NOT cover one purchased from a provider, so which of the
+ * two happened decides whether the contact has a lawful basis at all. While this was optional the
+ * fixtures below simply omitted it, which is how a document comes to claim something about every
+ * record that the data cannot support for any of them.
+ */
+const ADDRESS_ORIGIN = 'analytical.example contact page — firstname@ convention';
 const NOBODY: Attribution = { kind: 'UNATTRIBUTED', why: 'no verified identity on the request' };
 
 const PROVENANCE: ContactProvenance = {
@@ -512,6 +523,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'PREVIEW',
       now: NOW,
+      emailSource: ADDRESS_ORIGIN,
     });
     expect(outcome.ok).toBe(true);
     expect(Object.keys(memory.docs).filter((k) => k.includes('/contacts/')).length).toBe(0);
@@ -523,6 +535,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NOBODY, {
       mode: 'COMMIT',
       now: NOW,
+      emailSource: ADDRESS_ORIGIN,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('ATTRIBUTION_REQUIRED');
@@ -532,6 +545,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, 'pr_nobody', 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
+      emailSource: ADDRESS_ORIGIN,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('NOT_FOUND');
@@ -542,6 +556,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'not an address', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
+      emailSource: ADDRESS_ORIGIN,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.message).toContain('UNUSABLE_EMAIL');
@@ -591,6 +606,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
+      emailSource: ADDRESS_ORIGIN,
     });
     if (!outcome.ok) throw new Error('promotion failed');
     const contact = memory.docs[`organizations/${ORG}/contacts/${outcome.contactId}`] as Record<string, unknown>;
@@ -599,8 +615,8 @@ describe('6. promotion: the moment an address is found', () => {
 
   it('promoting twice with the same address is idempotent', async () => {
     const id = await seedOne();
-    const first = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW });
-    const second = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW });
+    const first = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
+    const second = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
     expect(second.alreadyPromoted).toBe(true);
@@ -610,8 +626,8 @@ describe('6. promotion: the moment an address is found', () => {
 
   it('REFUSES a second promotion to a DIFFERENT address, rather than duplicating the person', async () => {
     const id = await seedOne();
-    await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW });
-    const second = await promoteProspect(ORG, id, 'ada@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW });
+    await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
+    const second = await promoteProspect(ORG, id, 'ada@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
     expect(second.ok).toBe(false);
     if (!second.ok) {
       expect(second.code).toBe('ALREADY_PROMOTED');
@@ -624,7 +640,7 @@ describe('6. promotion: the moment an address is found', () => {
     // Promotion does not make anybody contactable. It makes them ADDRESSABLE, which is a
     // different thing, and the gate still wants the notice.
     const id = await seedOne();
-    const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW });
+    const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.mailable).toBe(false);
@@ -639,6 +655,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect('org-b', id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
+      emailSource: ADDRESS_ORIGIN,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('NOT_FOUND');

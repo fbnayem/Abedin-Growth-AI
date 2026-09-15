@@ -10071,7 +10071,8 @@
                 },
                 "required": [
                   "email",
-                  "basis"
+                  "basis",
+                  "emailSource"
                 ],
                 "type": "object"
               }

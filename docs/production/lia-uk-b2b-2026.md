@@ -25,6 +25,37 @@ effect immediately and makes every contact citing it unmailable, with no data lo
 
 ---
 
+## Document control
+
+Every field here is on the reviewer's checklist. A blank one is a blank one — it is not filled in
+with a plausible value, because a document control block that invents its own approver is worse
+than one that admits it has none.
+
+| Field | Value |
+|---|---|
+| **Owner** | _(unassigned — the person accountable for this document being correct and current)_ |
+| **Reviewer / approver** | _(unassigned — must be the privacy or legal reviewer, and must not be the author)_ |
+| **Author** | Drafted in the Abedin Growth AI repository by the engineer who built the enforcement. Accurate about what the system does; unqualified on whether the balance is correctly struck. |
+| **Version** | 1 |
+| **Status** | **DRAFT — not signed, not in force** |
+| **Effective from** | _(set at signature)_ |
+| **Supersedes** | Nothing. First assessment for these routes. |
+| **Review due** | Twelve months after signature, unless a shorter date is given at signing |
+| **Countries covered** | `GB` |
+| **Routes covered (`sourceKinds`)** | `SCRAPE`, `IMPORT`, `MANUAL` — **not** `LINKEDIN`, **not** `PROVIDER` |
+| **Article 14 handling** | § Article 14 handling, below |
+| **Retention** | § Retention, below |
+| **Objection route** | § How a person objects, below |
+
+**What the system can and cannot record about this approval.** When signed, it stores the signer,
+the signature timestamp, the review date, the frozen text, and the exact `sourceKinds`. It does
+**not** yet store a content hash, a separate effective date, or a link to a superseded version.
+Those three are on the reviewer's list and the software cannot preserve them today — so they must
+be built before a signed assessment is loaded, not after, or the evidence is lost at the moment it
+is created. Flagged rather than worked around.
+
+---
+
 ## Title
 
 UK B2B outreach to dental and healthcare practices, 2026
@@ -175,6 +206,52 @@ required; neither substitutes for the other.
 *Configure the real address in organisation settings before signing. The system will not send a
 notice until the controller details are complete, and the placeholder above will read as a
 placeholder to whoever receives it.*
+
+## Article 14 handling
+
+Article 14 applies to every record here, because none of it was obtained from the person
+themselves. The system treats the notice as a precondition rather than a policy: a contact with no
+`article14NoticeSentAt` is refused at the gate with `LI_NOTICE_NOT_SENT`, and that refusal cannot
+be bypassed by a setting.
+
+- **What is sent.** A notice naming the controller, the source of the record in terms the person
+  can picture, the categories held, the basis and this assessment's id and signature date, the
+  retention statement, the rights, and how to object. Built by
+  `server/domain/article14Notice.ts`; it refuses to build at all if any controller field is
+  missing, rather than emitting a notice with a gap in it.
+- **When.** Before or with first contact. Mechanically: the notice send is a separate action type
+  through the gateway, and the marketing send stays refused until it has succeeded.
+- **The source sentence for a scraped address specifically.** “We collected it from a publicly accessible web page: <the page>. It was not obtained from you directly.” An imported record and a manually entered one each get their own sentence naming the file or the person.
+- **If the send is ambiguous** — a provider timeout, an unreadable response — the contact is
+  marked ambiguous and stays unmailable. The notice is never recorded as sent on a maybe, because
+  recording "sent" when it was not marks somebody mailable who was never told where we got their
+  data. A duplicate notice is the harmless direction.
+- **What is NOT automated.** A person exercising a right in reply to the notice — access,
+  rectification, erasure — is handled by a human reading the mailbox. Objection and unsubscribe
+  are the exceptions and are mechanical.
+
+## Retention
+
+**Nothing in the system enforces any of this today.** The `retentionPolicy` controller setting is
+a sentence an operator writes, and it is quoted verbatim to the recipient under "HOW LONG WE KEEP
+IT". There is no deletion job. That makes the schedule below a commitment made to people in
+writing and kept by hand, which is exactly the shape of control this repository exists to remove
+— it is recorded here as an open gap rather than presented as a safeguard.
+
+Proposed, for the approver to accept or change:
+
+| Record | Kept for | Why |
+|---|---|---|
+| A contact who never replied | 12 months from last contact, then deleted | Past that, the record is neither a live prospect nor evidence of anything. |
+| A contact who replied or became a customer | Per the ordinary customer record, outside this assessment | Different purpose, different basis. |
+| A contact who objected or unsubscribed | **Indefinitely, minimised**: address hash, date, and that they objected. Nothing else. | Required to honour the objection. Deleting it would let the same person be re-imported and contacted again, which is the harm the objection exists to stop. |
+| A prospect with no address found | 6 months, then deleted | Not reachable by these routes; included so the table is the same in both assessments. |
+| Evidence a notice was sent | Life of the contact record plus 2 years | It is the proof the Article 14 obligation was met. |
+| This assessment, signed | Indefinitely | It is the record of what rules the system operated under, and when. |
+
+The middle row is the one worth arguing about: a suppression record is personal data kept forever
+in order to protect the person it concerns. Minimising it to a hash and a date is the answer this
+document proposes, and it is the approver's to accept.
 
 ## Review
 

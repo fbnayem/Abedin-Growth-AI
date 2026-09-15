@@ -9,6 +9,7 @@ import {
   isLeadSourceKind,
   normaliseSourceKinds,
   sourceParticular,
+  uncoverableReason,
 } from '../domain/leadSource';
 
 /**
@@ -126,6 +127,48 @@ describe('1. the vocabulary is the one the code actually writes', () => {
       expect(LEAD_SOURCE_KIND_NOTES[kind]?.length ?? 0, kind).toBeGreaterThan(20);
     }
     expect(Object.keys(LEAD_SOURCE_KIND_NOTES).sort()).toEqual([...LEAD_SOURCE_KINDS].sort());
+  });
+});
+
+describe('1b. a route may be blocked by decision rather than by omission', () => {
+  /**
+   * `PROVIDER` is recognised and uncoverable: the classifier still names it, the Article 14 notice
+   * still has a sentence for it, and no assessment may declare it. That is the owner's policy for
+   * the initial release, and the point of recording it here rather than simply not writing the
+   * assessment is that adding `PROVIDER` to an existing one would otherwise be a single word in a
+   * request body, with nothing anywhere saying a decision had been reversed.
+   */
+  it('names the blocked route and carries the reason and the way back', () => {
+    const why = uncoverableReason('PROVIDER');
+    expect(why).not.toBeNull();
+    expect(why ?? '').toContain('business case');
+    expect(why ?? '').toContain('server/domain/leadSource.ts');
+  });
+
+  /**
+   * A MUTATION SURVIVOR FOUND THIS UNTESTED.
+   *
+   * Removing the upper-casing from `uncoverableReason` changed nothing, because its only caller
+   * inside `validateLiaDraft` runs `normaliseSourceKinds` first, which has already upper-cased.
+   * The guard was unreachable from that path — the shape of defect this repository keeps finding.
+   *
+   * It is kept rather than deleted, because this function is EXPORTED and takes an arbitrary
+   * string: any future caller reaches it directly. Keeping it means pinning it, so the guard is
+   * covered by a test rather than by the accident of who happens to call it today.
+   */
+  it('blocks the route whatever the case and spacing, since it takes an arbitrary string', () => {
+    for (const spelling of ['PROVIDER', 'provider', '  Provider  ', 'pRoViDeR']) {
+      expect(uncoverableReason(spelling), spelling).not.toBeNull();
+    }
+  });
+
+  it('blocks nothing else, so this is a policy and not a freeze', () => {
+    for (const kind of LEAD_SOURCE_KINDS.filter((k) => k !== 'PROVIDER')) {
+      expect(uncoverableReason(kind), kind).toBeNull();
+    }
+    for (const nonsense of ['', '   ', 'APOLLO', null, undefined, 42, {}]) {
+      expect(uncoverableReason(nonsense), JSON.stringify(nonsense)).toBeNull();
+    }
   });
 });
 

@@ -26,6 +26,37 @@ assessment that is stored and signed:
 
 ---
 
+## Document control
+
+Every field here is on the reviewer's checklist. A blank one is a blank one — it is not filled in
+with a plausible value, because a document control block that invents its own approver is worse
+than one that admits it has none.
+
+| Field | Value |
+|---|---|
+| **Owner** | _(unassigned — the person accountable for this document being correct and current)_ |
+| **Reviewer / approver** | _(unassigned — must be the privacy or legal reviewer, and must not be the author)_ |
+| **Author** | Drafted in the Abedin Growth AI repository by the engineer who built the enforcement. Accurate about what the system does; unqualified on whether the balance is correctly struck. |
+| **Version** | 1 |
+| **Status** | **DRAFT — not signed, not in force** |
+| **Effective from** | _(set at signature)_ |
+| **Supersedes** | Nothing. First assessment for this route. |
+| **Review due** | Twelve months after signature, unless a shorter date is given at signing |
+| **Countries covered** | `GB` |
+| **Routes covered (`sourceKinds`)** | `LINKEDIN` only |
+| **Article 14 handling** | § Article 14 handling, below |
+| **Retention** | § Retention, below |
+| **Objection route** | § How a person objects, below |
+
+**What the system can and cannot record about this approval.** When signed, it stores the signer,
+the signature timestamp, the review date, the frozen text, and the exact `sourceKinds`. It does
+**not** yet store a content hash, a separate effective date, or a link to a superseded version.
+Those three are on the reviewer's list and the software cannot preserve them today — so they must
+be built before a signed assessment is loaded, not after, or the evidence is lost at the moment it
+is created. Flagged rather than worked around.
+
+---
+
 ## Title
 
 Outreach to UK business contacts identified from LinkedIn profiles, 2026
@@ -44,6 +75,59 @@ change to make before signing rather than after.
 ## Routes of acquisition covered
 
 `LINKEDIN` only.
+
+## The two facts this assessment must not lose
+
+These are the two things that make this route different from the scraped-website one. They are
+the reason a separate assessment exists, they are what the balancing limb below turns on, and
+they are singled out here so that a later revision cannot quietly drop them while keeping the
+signature.
+
+**1. The email address was not published on LinkedIn.**
+
+The profile is public. The address is not on it. Somebody had to obtain it elsewhere — and that is
+a step the person took no part in and did not invite. Every argument in Limb 2 and Limb 3 is
+downstream of this one fact, and an assessment that stopped mentioning it would be describing the
+scraped-address case under a different title.
+
+*How the system holds it:* a prospect record has **no email field at all** — supplying one is a
+refusal rather than an ignore. The address arrives only at promotion, as a separate act, and
+`emailSource` records where it came from and is **required**. The Article 14 notice says it to the
+person in as many words: "we found your work email address separately".
+
+**2. The profile relates to an individual, not an organisational inbox.**
+
+A scraped contact is usually `info@` at a business — an organisational mailbox, read by whoever is
+on duty. A LinkedIn contact is a named person, and the message lands in the mailbox they read.
+The legal category is the same, a corporate subscriber; the data protection weight is not. This is
+the principal reason the balance here is closer than in the other assessment.
+
+*How the system holds it:* `addressType` is recorded per contact and an unstated one is refused
+outright — `LI_ADDRESS_TYPE_UNKNOWN` — so the category of personal data being processed is always
+a known fact rather than an assumption. Note that it is **not** forced to `PERSONAL` for this
+route: a profile can legitimately lead to a role inbox, and pretending otherwise would put a
+falsehood in the record. What is guaranteed is that somebody stated which it is.
+
+### A gap in fact 1 that is not yet mechanical, and needs a decision before LP4
+
+`sourceKinds` records how the **person** was identified. `emailSource` records how the **address**
+was obtained — and it is free text, so nothing checks it.
+
+That means a contact identified on LinkedIn whose address was **purchased** would still pass under
+this assessment, because its route is `LINKEDIN` and this assessment covers `LINKEDIN`. This
+document says in Limb 2 that it does not cover a purchased address. The gate cannot currently
+tell.
+
+It is not reachable in the initial release, because purchased data is blocked outright by policy
+(`UNCOVERABLE_SOURCE_KINDS` in `server/domain/leadSource.ts`). It becomes reachable the moment
+enrichment is built, which is LP4 — so it is a decision to take before LP4 and not after, exactly
+as the route gap was.
+
+The fix has the same shape as the one that closed the route gap: a second closed vocabulary for
+how an address was obtained (derived from a published convention / published for that individual
+/ supplied by a provider / entered by a person), declared by the assessment and checked at the
+gate. It has deliberately **not** been built yet, because it widens the lawful-basis gate again
+and the owner should decide whether this route is worth that before more machinery is added to it.
 
 ## Limb 1 — the purpose test: what is the interest, and whose?
 
@@ -83,8 +167,13 @@ done:
   the only one this system should perform.
 - **Bought from a data provider.** Then the record is a purchased record, and the provider's own
   collection and notice obligations are in the chain. **This assessment does not cover that.**
-  Such a contact's `source` would be `PROVIDER:<name>`, which is a different route and needs a
-  third assessment. That is a consequence of the route field, and it is the intended one.
+
+  Two things follow, and only one of them is mechanical today. Where the PERSON was found through
+  a provider, the route is `PROVIDER:<name>`, no assessment may cover it (a recorded policy
+  decision, not an omission), and the gate refuses. Where the person was found on LinkedIn and
+  only the ADDRESS was purchased, the route is still `LINKEDIN` and the gate cannot yet tell —
+  see § A gap in fact 1, above. Until that is closed, this limb is a commitment kept by the
+  operator rather than by the software, and it is flagged as such rather than assumed.
 
 Could we reach the same end less intrusively? Two alternatives deserve an answer:
 
@@ -197,6 +286,52 @@ alone. Both are required; neither substitutes for the other.
 > Reply to any message from us and say so, or email privacy@abedin.example, or use the unsubscribe
 > link in any message. We will remove the record and not contact that person again. We do not ask
 > for a reason and we do not ask you to confirm twice.
+
+## Article 14 handling
+
+Article 14 applies to every record here, because none of it was obtained from the person
+themselves. The system treats the notice as a precondition rather than a policy: a contact with no
+`article14NoticeSentAt` is refused at the gate with `LI_NOTICE_NOT_SENT`, and that refusal cannot
+be bypassed by a setting.
+
+- **What is sent.** A notice naming the controller, the source of the record in terms the person
+  can picture, the categories held, the basis and this assessment's id and signature date, the
+  retention statement, the rights, and how to object. Built by
+  `server/domain/article14Notice.ts`; it refuses to build at all if any controller field is
+  missing, rather than emitting a notice with a gap in it.
+- **When.** Before or with first contact. Mechanically: the notice send is a separate action type
+  through the gateway, and the marketing send stays refused until it has succeeded.
+- **The source sentence for LinkedIn specifically.** “We identified you from your public LinkedIn profile, recorded as <the profile URL>, and found your work email address separately. Neither was given to us by you.” Both halves are deliberate — see § The two facts this assessment must not lose.
+- **If the send is ambiguous** — a provider timeout, an unreadable response — the contact is
+  marked ambiguous and stays unmailable. The notice is never recorded as sent on a maybe, because
+  recording "sent" when it was not marks somebody mailable who was never told where we got their
+  data. A duplicate notice is the harmless direction.
+- **What is NOT automated.** A person exercising a right in reply to the notice — access,
+  rectification, erasure — is handled by a human reading the mailbox. Objection and unsubscribe
+  are the exceptions and are mechanical.
+
+## Retention
+
+**Nothing in the system enforces any of this today.** The `retentionPolicy` controller setting is
+a sentence an operator writes, and it is quoted verbatim to the recipient under "HOW LONG WE KEEP
+IT". There is no deletion job. That makes the schedule below a commitment made to people in
+writing and kept by hand, which is exactly the shape of control this repository exists to remove
+— it is recorded here as an open gap rather than presented as a safeguard.
+
+Proposed, for the approver to accept or change:
+
+| Record | Kept for | Why |
+|---|---|---|
+| A contact who never replied | 12 months from last contact, then deleted | Past that, the record is neither a live prospect nor evidence of anything. |
+| A contact who replied or became a customer | Per the ordinary customer record, outside this assessment | Different purpose, different basis. |
+| A contact who objected or unsubscribed | **Indefinitely, minimised**: address hash, date, and that they objected. Nothing else. | Required to honour the objection. Deleting it would let the same person be re-imported and contacted again, which is the harm the objection exists to stop. |
+| A prospect with no address found | 6 months, then deleted | A prospect is a person we have identified and cannot email. Holding one indefinitely on the chance an address turns up is not a purpose. |
+| Evidence a notice was sent | Life of the contact record plus 2 years | It is the proof the Article 14 obligation was met. |
+| This assessment, signed | Indefinitely | It is the record of what rules the system operated under, and when. |
+
+The middle row is the one worth arguing about: a suppression record is personal data kept forever
+in order to protect the person it concerns. Minimising it to a hash and a date is the answer this
+document proposes, and it is the approver's to accept.
 
 ## Review
 

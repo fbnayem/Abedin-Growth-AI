@@ -372,8 +372,15 @@ export const promoteProspectSchema = z
     consentSource: z.string().trim().min(1).max(500).optional(),
     country: z.string().trim().min(2).max(2).optional(),
     addressType: z.enum(['PERSONAL', 'ROLE']).optional(),
-    /** Where the ADDRESS came from, which is usually not where the person came from. */
-    emailSource: z.string().trim().min(1).max(500).optional(),
+    /**
+     * Where the ADDRESS came from, which is usually not where the person came from.
+     *
+     * REQUIRED. The LinkedIn balancing assessment covers an address derived from the employer's
+     * published naming convention and not one purchased from a provider, so this field is what
+     * decides which document applies — and the Article 14 notice tells the person their address
+     * was found separately, which is half an answer on its own.
+     */
+    emailSource: z.string().trim().min(1).max(500),
     mode: z.enum(['PREVIEW', 'COMMIT']).optional(),
   })
   .strict();

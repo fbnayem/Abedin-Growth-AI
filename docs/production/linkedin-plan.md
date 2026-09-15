@@ -414,9 +414,36 @@ One mutant survived the first run and found a real gap in a test I had just writ
 could hard-code the COUNTRY and nothing noticed, because every resolver test passed `'GB'`. That
 is the same defect one field to the left, and it predates this work. Closed.
 
+### Decisions the owner took on this, recorded
+
+1. **PROVIDER is not supported in the initial release.** It stays in the vocabulary — recognised
+   by the classifier, with its own Article 14 sentence — but no assessment may declare it, so the
+   gate refuses it by name rather than by silence. That is a recorded decision in
+   `UNCOVERABLE_SOURCE_KINDS` (`server/domain/leadSource.ts`) with the reason and the way back
+   written next to it, rather than a refusal that would have evaporated the first time somebody
+   added one word to a request body. Reversing it takes a commit, which is the whole mechanism.
+
+   The clean rule is now: LinkedIn → only under the LinkedIn LIA. Scraped public website → only
+   under the website LIA. Purchased data → blocked.
+
+2. **The named cases are a permanent regression suite**, `server/tests/lawfulRoute.regression.test.ts`,
+   duplicating assertions that live in four other suites. The duplication is the point: a boundary
+   scattered across four files can be weakened in any of them without anybody noticing it moved.
+
+3. **`emailSource` is required at promotion.** It was optional, which meant the LinkedIn
+   assessment's necessity limb — an address DERIVED from a published convention, not BOUGHT — made
+   a claim about every record that the data could not support for any of them.
+
 ### What it still does not do
 
-The check is on the ROUTE, not on the audience. An assessment covering `SCRAPE` covers every
+**The route says how the PERSON was found, not how the ADDRESS was obtained.** A contact
+identified on LinkedIn whose address was purchased still has the route `LINKEDIN`, so the
+LinkedIn assessment covers it as far as the gate can tell — while the document itself says it does
+not. Not reachable now, because purchased data is blocked outright; reachable the moment
+enrichment exists, which is LP4. The fix has the same shape as the one that closed the route gap:
+a second closed vocabulary for how an address was obtained. **Decide before LP4, not after.**
+
+The check is also on the ROUTE, not on the audience. An assessment covering `SCRAPE` covers every
 scraped contact, whether the site belonged to a two-person dental practice or a multinational. If
 the two audiences need different balancing arguments for reasons other than how they were found —
 and they might — that is a distinction no field here captures, and it stays a human judgement.

@@ -45,6 +45,7 @@ export type ProspectWriteRefusal =
   | 'ATTRIBUTION_REQUIRED'
   | 'NOT_FOUND'
   | 'NO_SOURCE_EVIDENCE'
+  | 'ADDRESS_ORIGIN_NOT_RECORDED'
   | 'ALREADY_PROMOTED'
   | 'VALIDATION_ERROR';
 
@@ -301,7 +302,19 @@ export type PromotionOutcome =
  * happens to be doing at the time.
  *
  * The address itself is a separate fact and is recorded as one: `emailSource` says where the
- * address came from, which is usually not LinkedIn.
+ * address came from, which is usually not LinkedIn. IT IS REQUIRED, and it was not always.
+ *
+ * WHY IT BECAME REQUIRED. `lia-linkedin-2026.md` rests its necessity limb on a distinction:
+ * an address DERIVED from the employer's own published naming convention is defensible under
+ * that assessment, and an address BOUGHT from a data provider is a different route which it
+ * does not cover. That distinction is the assessment's central argument — and while this field
+ * was optional, the system recorded which of the two had happened only when somebody
+ * volunteered it. The document made a claim about every record that the data could not
+ * support for any of them.
+ *
+ * The Article 14 notice compounds it: it tells the person we "found your work email address
+ * separately", and a person entitled to know the source of their data is entitled to more than
+ * an admission that it came from somewhere.
  */
 export async function promoteProspect(
   orgId: string,
@@ -323,6 +336,24 @@ export async function promoteProspect(
         `Promoting a prospect needs an identified operator: ` +
         `${by.kind === 'UNATTRIBUTED' ? by.why : 'no actor on the credential'}. It creates a ` +
         `contact under a lawful basis, and the actor is recorded as who decided that.`,
+    };
+  }
+
+  // Checked here and not only in the request contract, because a service that trusts its schema
+  // to have run is a service whose rule disappears the first time it is called from anywhere
+  // else — a script, a job, a future route.
+  const emailSource = trimmed(options.emailSource);
+  if (emailSource === null) {
+    return {
+      ok: false,
+      code: 'ADDRESS_ORIGIN_NOT_RECORDED',
+      message:
+        `Promoting a prospect needs \`emailSource\`: where this address came from, in a form a ` +
+        `person could check. It is not a detail. The balancing assessment for LinkedIn-sourced ` +
+        `contacts covers an address derived from the employer's published naming convention and ` +
+        `does NOT cover one bought from a data provider, so which of the two happened decides ` +
+        `whether this contact has a lawful basis at all — and the Article 14 notice tells the ` +
+        `person we found their address separately, which is only half an answer without this.`,
     };
   }
 
@@ -368,7 +399,7 @@ export async function promoteProspect(
     source: trimmed(prospect.source) ?? 'LINKEDIN',
     sourceEvidence:
       `${trimmed(prospect.sourceEvidence) ?? 'LinkedIn'} — profile ${trimmed(prospect.profileUrl) ?? '(unrecorded)'}` +
-      `${trimmed(options.emailSource) === null ? '' : `; address from ${trimmed(options.emailSource)}`}`,
+      `; address from ${emailSource}`,
     sourceCollectedAt: trimmed(prospect.sourceCollectedAt) ?? trimmed(prospect.createdAt) ?? now.toISOString(),
     importBatchId: trimmed(prospect.importBatchId) ?? undefined,
   };
