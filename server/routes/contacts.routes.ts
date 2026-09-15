@@ -12,6 +12,7 @@ import { createQuote, quotesForEmail } from '../services/quote.service';
 import { recordArticle14Notice, recordLawfulBasis, revokeConsent } from '../services/lawfulBasis.service';
 import { importLeads } from '../services/leadImport.service';
 import { previewScore, scoreContacts } from '../services/leadScore.service';
+import { discoverLeads } from '../services/discovery.service';
 import { buildContactDocument } from '../domain/contactDocument';
 import { attributionFor, operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
@@ -319,6 +320,58 @@ contactsRouter.post('/leads/score', async (req: Request, res: Response) => {
  * company brain is edited, the contact is enriched. An operator looking at one lead should be
  * able to see the current answer without deciding to overwrite the recorded one.
  */
+/**
+ * Paid lead discovery, preview or commit.
+ *
+ * This is what the dead "Discover with AI" button used to call. That endpoint answered 501
+ * because the implementation behind it fabricated records; this one calls a registered provider
+ * or refuses, and the refusals are the interesting part — the flag is off by default, no
+ * adapter ships with this repository, and the tenant's spend cap is checked before the network.
+ */
+contactsRouter.post('/leads/discover', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/leads/discover');
+    if (body === null) return;
+    const gate = operatorGate(req.user, isProduction);
+    if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+
+    const outcome = await discoverLeads(
+      orgScope(req),
+      {
+        country: body.country,
+        industry: body.industry,
+        titles: body.titles,
+        companySizeMin: body.companySizeMin,
+        companySizeMax: body.companySizeMax,
+        limit: body.limit,
+      },
+      {
+        basis: body.basis,
+        liaId: body.liaId,
+        addressType: body.addressType,
+        sourceEvidence: body.sourceEvidence,
+        type: body.type,
+      },
+      gate.attribution,
+      { mode: body.mode }
+    );
+
+    if (outcome.ok === false) {
+      const code =
+        outcome.code === 'ATTRIBUTION_REQUIRED' ? 'ATTRIBUTION_REQUIRED'
+        : outcome.code === 'STORE_UNAVAILABLE' ? 'STORE_UNAVAILABLE'
+        : outcome.code === 'DISCOVERY_DISABLED' || outcome.code === 'NO_PROVIDER' ? 'NOT_IMPLEMENTED'
+        : outcome.code === 'SPEND_CAPPED' ? 'POLICY_BLOCKED'
+        : 'VALIDATION_ERROR';
+      return sendError(req, res, code, outcome.message, {
+        details: { discoveryRefusal: outcome.code, sideEffect: outcome.sideEffect ?? null },
+      });
+    }
+
+    res.json(outcome);
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
 contactsRouter.get('/leads/:id/score', async (req: Request, res: Response) => {
   try {
     const outcome = await previewScore(orgScope(req), req.params.id);

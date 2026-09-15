@@ -1,7 +1,11 @@
-import { neutralizeCsvValue } from '../../shared/lib/csvSafety';
-import { tryContactDocId } from '../lib/identity';
-import { timeZoneRejection } from '../../shared/domain/time';
-import { ADDRESS_TYPES, normaliseCountry } from './lawfulBasis';
+import {
+  CANDIDATE_FIELDS,
+  MAX_CANDIDATE_FIELD,
+  MAX_CANDIDATE_NOTES,
+  validateCandidate,
+  type CandidateField,
+  type CandidateRefusalCode,
+} from './leadCandidate';
 
 /**
  * CSV / LIST IMPORT — THE PLANNER (§11, §14, §16, §18).
@@ -59,11 +63,9 @@ export const MAX_IMPORT_BYTES = 2_000_000;
  */
 export const MAX_IMPORT_ROWS = 2_000;
 
-/** Per-cell length, matching the short-string bound the create schema already enforces. */
-export const MAX_IMPORT_FIELD = 500;
-
-/** Longest single cell for the free-text note column. */
-export const MAX_IMPORT_NOTES = 10_000;
+/** Per-cell length. Owned by `leadCandidate`, so every source enforces the same bound. */
+export const MAX_IMPORT_FIELD = MAX_CANDIDATE_FIELD;
+export const MAX_IMPORT_NOTES = MAX_CANDIDATE_NOTES;
 
 /** The most columns a header may declare. A file wider than this is not a contact list. */
 export const MAX_IMPORT_COLUMNS = 64;
@@ -71,33 +73,12 @@ export const MAX_IMPORT_COLUMNS = 64;
 /**
  * THE ALLOWLIST. A header maps to one of these or to nothing at all.
  *
- * Absent by design: `consentGiven`, `suppressed`, `unsubscribed`, `hardBounced`, `complained`,
- * `lawfulBasis`, `organizationId`, `id`, `type`, `status`, `version`, `aiScore`. The first five
- * are the suppression and consent state that outreach safety depends on; the rest are
- * server-controlled. None of them is something a spreadsheet gets to assert.
+ * Re-exported from `leadCandidate`, which every lead source shares, rather than restated here.
+ * A second copy is how the file importer and the discovery adapter would come to disagree about
+ * which fields an outside party may set.
  */
-export const IMPORT_FIELDS = [
-  'email',
-  'firstName',
-  'lastName',
-  'name',
-  'title',
-  'phone',
-  'linkedinUrl',
-  'companyName',
-  'companyWebsite',
-  'industry',
-  'country',
-  'employeeCount',
-  'timeZone',
-  'notes',
-  'addressType',
-  'consentEvidence',
-  'consentSource',
-  'article14NoticeSentAt',
-] as const;
-
-export type ImportField = (typeof IMPORT_FIELDS)[number];
+export const IMPORT_FIELDS = CANDIDATE_FIELDS;
+export type ImportField = CandidateField;
 
 /**
  * Header spellings seen in the wild, normalised to lower case with every non-alphanumeric
@@ -171,16 +152,8 @@ export type ParseRefusalCode =
   | 'DUPLICATE_COLUMN'
   | 'UNTERMINATED_QUOTE';
 
-export type RowRefusalCode =
-  | 'NO_EMAIL'
-  | 'UNUSABLE_EMAIL'
-  | 'DUPLICATE_IN_FILE'
-  | 'FIELD_TOO_LONG'
-  | 'RAGGED_ROW'
-  | 'BAD_COUNTRY'
-  | 'BAD_ADDRESS_TYPE'
-  | 'BAD_TIME_ZONE'
-  | 'BAD_NOTICE_TIMESTAMP';
+/** Everything a candidate can be refused for, plus the two that only a FILE can produce. */
+export type RowRefusalCode = CandidateRefusalCode | 'DUPLICATE_IN_FILE' | 'RAGGED_ROW';
 
 export interface PlannedRow {
   /** 1-based line number in the source text, so a refusal can be found in the file. */
@@ -329,10 +302,6 @@ export function detectDelimiter(text: string): ',' | ';' | '\t' {
   return best;
 }
 
-function tooLong(field: string, value: string): boolean {
-  return value.length > (field === 'notes' ? MAX_IMPORT_NOTES : MAX_IMPORT_FIELD);
-}
-
 /**
  * Turn a block of delimited text into a plan.
  *
@@ -462,55 +431,26 @@ export function planImport(
       continue;
     }
 
-    const values: Record<string, string> = {};
-    let rowRefusal: RefusedRow | null = null;
-
+    // Raw values, allowlisted by POSITION: the header names a column, and the field it writes
+    // comes from the shared allowlist. The header text itself never becomes a field name.
+    const raw: Record<string, string> = {};
     for (let c = 0; c < cells.length; c++) {
       const field = columnField[c];
-      if (field === null) continue;
-      const raw = cells[c].trim();
-      if (raw === '') continue;
-      if (tooLong(field, raw)) {
-        rowRefusal = {
-          line,
-          code: 'FIELD_TOO_LONG',
-          message:
-            `${field} is ${raw.length} characters, above the limit for that field. Refused ` +
-            `rather than truncated: half a value stored as if it were whole is worse than none.`,
-          email: null,
-        };
-        break;
-      }
-      // Neutralised on the way IN. A formula stored verbatim survives to the next export.
-      values[field] = field === 'email' ? raw : neutralizeCsvValue(raw);
+      if (field !== null) raw[field] = cells[c];
     }
 
-    if (rowRefusal !== null) {
-      refused.push({ ...rowRefusal, email: values.email ?? null });
-      continue;
-    }
-
-    const email = values.email ?? '';
-    if (email === '') {
+    // The same validation a discovery provider's records and a scraper's records go through.
+    const outcome = validateCandidate(raw);
+    if (outcome.ok === false) {
       refused.push({
         line,
-        code: 'NO_EMAIL',
-        message: 'The row has no email address, which is the identity key for a contact.',
-        email: null,
+        code: outcome.code,
+        message: outcome.message,
+        email: typeof raw.email === 'string' && raw.email.trim() !== '' ? raw.email.trim() : null,
       });
       continue;
     }
-
-    const contactId = tryContactDocId(email);
-    if (contactId === null) {
-      refused.push({
-        line,
-        code: 'UNUSABLE_EMAIL',
-        message: `${JSON.stringify(email)} is not a usable email address.`,
-        email,
-      });
-      continue;
-    }
+    const { email, contactId } = outcome.candidate;
 
     const firstSeen = seen.get(contactId);
     if (firstSeen !== undefined) {
@@ -525,63 +465,8 @@ export function planImport(
       continue;
     }
 
-    if (values.country !== undefined && normaliseCountry(values.country) === null) {
-      refused.push({
-        line,
-        code: 'BAD_COUNTRY',
-        message:
-          `country ${JSON.stringify(values.country)} is not an ISO-3166 alpha-2 code. Storing ` +
-          `it would produce a record the outreach gate refuses for a reason nobody can read.`,
-        email,
-      });
-      continue;
-    }
-
-    if (
-      values.addressType !== undefined &&
-      !(ADDRESS_TYPES as readonly string[]).includes(values.addressType.toUpperCase())
-    ) {
-      refused.push({
-        line,
-        code: 'BAD_ADDRESS_TYPE',
-        message: `addressType must be one of ${ADDRESS_TYPES.join(', ')}; received ${JSON.stringify(values.addressType)}.`,
-        email,
-      });
-      continue;
-    }
-
-    if (values.timeZone !== undefined && timeZoneRejection(values.timeZone) !== null) {
-      refused.push({
-        line,
-        code: 'BAD_TIME_ZONE',
-        message: `timeZone must be an IANA identifier such as Europe/London; received ${JSON.stringify(values.timeZone)}.`,
-        email,
-      });
-      continue;
-    }
-
-    if (values.article14NoticeSentAt !== undefined) {
-      const at = Date.parse(values.article14NoticeSentAt);
-      if (Number.isNaN(at)) {
-        refused.push({
-          line,
-          code: 'BAD_NOTICE_TIMESTAMP',
-          message:
-            `article14NoticeSentAt ${JSON.stringify(values.article14NoticeSentAt)} is not a ` +
-            `timestamp. This column records that a notice was ALREADY sent, so an unreadable ` +
-            `value cannot be read as "sent".`,
-          email,
-        });
-        continue;
-      }
-      values.article14NoticeSentAt = new Date(at).toISOString();
-    }
-
-    if (values.country !== undefined) values.country = normaliseCountry(values.country) as string;
-    if (values.addressType !== undefined) values.addressType = values.addressType.toUpperCase();
-
     seen.set(contactId, line);
-    rows.push({ line, email, contactId, fields: Object.freeze({ ...values }) });
+    rows.push({ line, email, contactId, fields: outcome.candidate.fields });
   }
 
   return { ok: true, delimiter, header, mapped, ignored, rows, refused };

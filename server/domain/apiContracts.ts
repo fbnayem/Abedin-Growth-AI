@@ -324,6 +324,29 @@ export const scoreLeadsSchema = z
   })
   .strict();
 
+/**
+ * A paid discovery search.
+ *
+ * `country` is required rather than optional: the outreach gate refuses an unknown jurisdiction,
+ * so a search without one spends money on records that can never be used.
+ */
+export const discoverLeadsSchema = z
+  .object({
+    mode: z.enum(['PREVIEW', 'COMMIT']),
+    country: z.string().trim().regex(/^[A-Za-z]{2}$/, 'country must be an ISO-3166 alpha-2 code'),
+    industry: z.string().trim().min(1).max(200).optional(),
+    titles: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
+    companySizeMin: z.number().int().min(0).max(1_000_000).optional(),
+    companySizeMax: z.number().int().min(0).max(1_000_000).optional(),
+    limit: z.number().int().min(1).max(200),
+    basis: z.enum(LAWFUL_BASES),
+    liaId: z.string().trim().min(1).max(200).optional(),
+    addressType: z.enum(ADDRESS_TYPES).optional(),
+    sourceEvidence: z.string().trim().min(1).max(2000),
+    type: z.enum(['LEAD', 'INVESTOR', 'PARTNER']).optional(),
+  })
+  .strict();
+
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
   'POST /api/company-brain/generate': companyBrainGenerateSchema,
@@ -340,6 +363,7 @@ export const BODY_SCHEMAS = {
   'POST /api/leads/import': leadImportSchema,
   'POST /api/leads/notice-sent': noticeSentSchema,
   'POST /api/leads/score': scoreLeadsSchema,
+  'POST /api/leads/discover': discoverLeadsSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

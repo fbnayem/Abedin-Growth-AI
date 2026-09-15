@@ -557,6 +557,10 @@ describe('lead import: the preview path contains no write', () => {
    * empty AFTER a preview; this one proves the preview branch cannot write at all, which is the
    * property that survives someone adding a "just record the preview" line later.
    *
+   * It reads `leadIngest.service.ts`, which is where the write lives: the CSV importer, the
+   * discovery provider and the scrape worker all end at that one function, so this assertion
+   * covers all three rather than only the source it was written for.
+   *
    * Comments are stripped first: the module's own documentation describes the writes it does
    * not perform, and an assertion that matched that text would pass for the wrong reason. That
    * is not hypothetical — it is exactly how `suppression.invariant` came to hold a false green.
@@ -564,11 +568,13 @@ describe('lead import: the preview path contains no write', () => {
   const stripComments = (source: string) =>
     source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 
-  const source = stripComments(readFileSync('server/services/leadImport.service.ts', 'utf8'));
-  const previewBranch = source.slice(
-    source.indexOf("if (mode === 'PREVIEW')"),
-    source.indexOf('  } else {')
-  );
+  const source = stripComments(readFileSync('server/services/leadIngest.service.ts', 'utf8'));
+  // The preview branch ends at its own return. Slicing to "for (const record of records)"
+  // would end it at the FIRST such loop, which is inside the preview branch itself — and a
+  // one-line slice would then satisfy "contains no write" for the wrong reason, which is why
+  // the length floor below is an assertion rather than a comment.
+  const previewEnd = source.indexOf('return { outcomes, wouldCreate, created, duplicates, failed, mailable };');
+  const previewBranch = source.slice(source.indexOf("if (options.mode === 'PREVIEW')"), previewEnd);
 
   it('the preview branch calls no write function', () => {
     expect(previewBranch.length).toBeGreaterThan(200);
@@ -582,7 +588,16 @@ describe('lead import: the preview path contains no write', () => {
   });
 
   it('the commit branch does call the create-or-refuse transaction', () => {
-    const commitBranch = source.slice(source.indexOf('  } else {'));
+    const commitBranch = source.slice(previewEnd);
     expect(commitBranch).toContain('createContactIfAbsent');
+  });
+
+  it('the importer itself holds no write of its own', () => {
+    // The refactor that moved the write out is only a gain if nothing grew a second one here.
+    const importer = stripComments(readFileSync('server/services/leadImport.service.ts', 'utf8'));
+    for (const writer of ['createContactIfAbsent', 'setDoc', 'updateDoc', 'addDoc', 'runTransaction', 'tx.set']) {
+      expect(importer).not.toContain(writer);
+    }
+    expect(importer).toContain('ingestRecords');
   });
 });

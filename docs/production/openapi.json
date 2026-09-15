@@ -2064,7 +2064,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:576"
+        "x-source": "server/routes/contacts.routes.ts:629"
       }
     },
     "/api/contacts/{id}/quotes": {
@@ -2152,7 +2152,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:635"
+        "x-source": "server/routes/contacts.routes.ts:688"
       },
       "post": {
         "operationId": "post_api_contacts_id_quotes",
@@ -2299,7 +2299,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:541"
+        "x-source": "server/routes/contacts.routes.ts:594"
       }
     },
     "/api/contacts/{id}/revoke-consent": {
@@ -2410,7 +2410,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:609"
+        "x-source": "server/routes/contacts.routes.ts:662"
       }
     },
     "/api/contacts/{id}/time-zone": {
@@ -2524,7 +2524,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:517"
+        "x-source": "server/routes/contacts.routes.ts:570"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -2613,7 +2613,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/contacts.routes.ts:342"
+        "x-source": "server/routes/contacts.routes.ts:395"
       }
     },
     "/api/csp-report": {
@@ -4316,7 +4316,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:645"
+        "x-source": "server/routes/contacts.routes.ts:698"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -4500,7 +4500,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:654"
+        "x-source": "server/routes/contacts.routes.ts:707"
       }
     },
     "/api/investors/batch-generate": {
@@ -4578,7 +4578,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:416"
+        "x-source": "server/routes/contacts.routes.ts:469"
       }
     },
     "/api/knowledge": {
@@ -4846,7 +4846,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:35"
+        "x-source": "server/routes/contacts.routes.ts:36"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -5030,7 +5030,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:192"
+        "x-source": "server/routes/contacts.routes.ts:193"
       }
     },
     "/api/leads/batch-followup": {
@@ -5108,7 +5108,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:473"
+        "x-source": "server/routes/contacts.routes.ts:526"
       }
     },
     "/api/leads/batch-generate": {
@@ -5186,7 +5186,177 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:391"
+        "x-source": "server/routes/contacts.routes.ts:444"
+      }
+    },
+    "/api/leads/discover": {
+      "post": {
+        "operationId": "post_api_leads_discover",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "addressType": {
+                    "enum": [
+                      "PERSONAL",
+                      "ROLE"
+                    ],
+                    "type": "string"
+                  },
+                  "basis": {
+                    "enum": [
+                      "CONSENT",
+                      "LEGITIMATE_INTEREST"
+                    ],
+                    "type": "string"
+                  },
+                  "companySizeMax": {
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "companySizeMin": {
+                    "maximum": 1000000,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "country": {
+                    "pattern": "^[A-Za-z]{2}$",
+                    "type": "string"
+                  },
+                  "industry": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "liaId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "limit": {
+                    "maximum": 200,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "mode": {
+                    "enum": [
+                      "PREVIEW",
+                      "COMMIT"
+                    ],
+                    "type": "string"
+                  },
+                  "sourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "titles": {
+                    "items": {
+                      "maxLength": 200,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "type": "array"
+                  },
+                  "type": {
+                    "enum": [
+                      "LEAD",
+                      "INVESTOR",
+                      "PARTNER"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "mode",
+                  "country",
+                  "limit",
+                  "basis",
+                  "sourceEvidence"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/contacts.routes.ts:331"
       }
     },
     "/api/leads/import": {
@@ -5345,7 +5515,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:211"
+        "x-source": "server/routes/contacts.routes.ts:212"
       }
     },
     "/api/leads/notice-sent": {
@@ -5455,7 +5625,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:268"
+        "x-source": "server/routes/contacts.routes.ts:269"
       }
     },
     "/api/leads/research": {
@@ -5533,7 +5703,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:466"
+        "x-source": "server/routes/contacts.routes.ts:519"
       }
     },
     "/api/leads/score": {
@@ -5638,7 +5808,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:300"
+        "x-source": "server/routes/contacts.routes.ts:301"
       }
     },
     "/api/leads/{id}/email": {
@@ -5726,7 +5896,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:496"
+        "x-source": "server/routes/contacts.routes.ts:549"
       }
     },
     "/api/leads/{id}/score": {
@@ -5814,7 +5984,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:322"
+        "x-source": "server/routes/contacts.routes.ts:375"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -5902,7 +6072,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:489"
+        "x-source": "server/routes/contacts.routes.ts:542"
       }
     },
     "/api/linkedin-config": {
@@ -7385,7 +7555,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:660"
+        "x-source": "server/routes/contacts.routes.ts:713"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -7569,7 +7739,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:669"
+        "x-source": "server/routes/contacts.routes.ts:722"
       }
     },
     "/api/partners/batch-generate": {
@@ -7647,7 +7817,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:441"
+        "x-source": "server/routes/contacts.routes.ts:494"
       }
     },
     "/api/pipeline": {
@@ -9742,7 +9912,7 @@
     "rawBody": 2,
     "readingBodyWithoutSchema": 14,
     "responsesDescribed": 0,
-    "routes": 104,
-    "withRequestContract": 20
+    "routes": 105,
+    "withRequestContract": 21
   }
 }

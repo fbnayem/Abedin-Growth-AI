@@ -17,7 +17,13 @@
 // 2 — S37: the per-reply cost ceiling is integer cents and enforced from the provider's price
 //     table; an unpriced call is partial at the reply and charged the whole ceiling in the
 //     tenant ledger. Version 1 had a float in dollars that nothing compared.
-export const POLICY_VERSION = 2;
+// 3 — P2c/P2d: the set of production-action flags grew from five to seven. Paid lead discovery
+//     and web scraping are real actions — one spends a tenant's money, the other makes requests
+//     to somebody else's servers under this system's name — so both sit in REAL_ACTION_FLAGS,
+//     both default off, and `isFullySafeMode()` now covers them. A run governed by version 2
+//     was governed by a narrower definition of "can this system touch anything outside itself",
+//     which is exactly the kind of change this number exists to make visible.
+export const POLICY_VERSION = 3;
 
 export const POLICY_SOURCES = [
   'server/domain/adjudication.ts',

@@ -25,7 +25,12 @@ const RECORDED: Record<string, string> = {
   // policy@1 stays recorded: it is what runs before S37 were governed by, and a row saying
   // policyVersion 1 must remain answerable.
   'policy@1': 'b34d34da5829493c',
+  // policy@2 stays recorded for the same reason policy@1 does: runs logged under it must
+  // remain answerable, and a fingerprint moved under an old key would let one version describe
+  // two texts.
   'policy@2': '6156e38d29cd11f1',
+  // policy@3 — REAL_ACTION_FLAGS grew from five to seven with paid discovery and scraping.
+  'policy@3': '645d6c9bfc213bd9',
 };
 
 const read = (path: string) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n');

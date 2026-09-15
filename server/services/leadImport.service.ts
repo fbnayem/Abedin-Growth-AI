@@ -1,32 +1,31 @@
 import { createHash } from 'node:crypto';
-import { doc, getDoc, store } from '../store';
-import { orgPath } from '../tenancy/orgScope';
-import { createContactIfAbsent } from '../lib/identityStore';
-import { buildContactDocument, type ContactProvenance } from '../domain/contactDocument';
-import {
-  evaluateLawfulBasis,
-  type AddressType,
-  type LawfulBasis,
-} from '../domain/lawfulBasis';
+import { store } from '../store';
+import type { ContactProvenance } from '../domain/contactDocument';
+import type { AddressType, LawfulBasis } from '../domain/lawfulBasis';
 import {
   planImport,
   type ImportPlan,
   type ParseRefusalCode,
-  type PlannedRow,
   type RefusedRow,
 } from '../domain/leadImport';
+import { ingestRecords, type IngestMode, type IngestRecord, type IngestStatus } from './leadIngest.service';
 import type { Attribution } from '../domain/operatorAction';
 
 /**
  * CSV / LIST IMPORT — THE EXECUTION (§2, §14, §16, §32).
  *
- * THE ONE RULE THIS FILE EXISTS TO KEEP
- * -------------------------------------
+ * THIS FILE IS THE CSV-SHAPED HALF. The write itself — dedup, no-overwrite, provenance and the
+ * basis verdict — lives in `server/services/leadIngest.service.ts`, which every lead source
+ * ends at. What is here is everything that is specific to a file: the plan, the approval
+ * fingerprint, and the refusal report.
+ *
+ * THE ONE RULE BOTH HALVES KEEP
+ * -----------------------------
  * A PREVIEW WRITES NOTHING. Not a contact, not an account, not a counter. The operator is
  * shown exactly what a commit would do, decides, and only then does anything reach the store.
  * This is the difference between an import an operator can trust and one they find out about
- * afterwards, and it is enforced structurally: the preview path never touches a write function.
- * `importLeads` branches once, at the top, and the branch that previews calls only `getDoc`.
+ * afterwards, and it is enforced structurally: the preview branch of `ingestRecords` calls only
+ * `getDoc`.
  *
  * THE SECOND RULE: THE FILE THE OPERATOR APPROVED IS THE FILE THAT IS COMMITTED
  * ----------------------------------------------------------------------------
@@ -51,7 +50,7 @@ import type { Attribution } from '../domain/operatorAction';
  * overwrite-shaped hole `createContactIfAbsent` was built to close.
  */
 
-export type ImportMode = 'PREVIEW' | 'COMMIT';
+export type ImportMode = IngestMode;
 
 export interface ImportBatchSettings {
   /** One deliberate decision for the whole file. Never read from a column. */
@@ -68,7 +67,8 @@ export interface ImportBatchSettings {
   readonly type?: 'LEAD' | 'INVESTOR' | 'PARTNER';
 }
 
-export type RowStatus = 'WOULD_CREATE' | 'CREATED' | 'DUPLICATE' | 'FAILED';
+/** The shared type, re-exported so a caller of this module needs only one import. */
+export type RowStatus = IngestStatus;
 
 export interface RowOutcome {
   readonly line: number;
@@ -119,9 +119,6 @@ export type ImportOutcome =
       readonly message: string;
     };
 
-/** How many existence checks run at once during a preview. */
-const PREVIEW_CONCURRENCY = 20;
-
 /**
  * A stable fingerprint of exactly what the operator approved.
  *
@@ -151,85 +148,6 @@ export function planFingerprint(text: string, batch: ImportBatchSettings): strin
 /** The batch id, derived from the fingerprint so the same approved plan groups the same way. */
 function batchIdFor(hash: string): string {
   return `imp_${hash.slice(0, 16)}`;
-}
-
-/**
- * The prospective document for a row: what the store would hold if this row were committed.
- *
- * Built once and used for BOTH the mailability verdict and the write, so the verdict shown in
- * the preview is a verdict about the document that will actually exist. Evaluating a
- * hand-assembled facts object instead is how a preview comes to promise something the commit
- * does not deliver.
- */
-function documentFor(
-  row: PlannedRow,
-  batch: ImportBatchSettings,
-  orgId: string,
-  actor: string,
-  batchId: string,
-  now: Date
-): Record<string, unknown> {
-  const f = row.fields;
-  const provenance: ContactProvenance = {
-    source: 'IMPORT',
-    sourceEvidence: batch.sourceEvidence,
-    sourceCollectedAt: now.toISOString(),
-    importBatchId: batchId,
-  };
-
-  return buildContactDocument(
-    {
-      email: row.email,
-      name: f.name,
-      firstName: f.firstName,
-      lastName: f.lastName,
-      title: f.title,
-      phone: f.phone,
-      linkedinUrl: f.linkedinUrl,
-      companyName: f.companyName,
-      companyWebsite: f.companyWebsite,
-      industry: f.industry,
-      // A row's own country wins over the batch default; the batch fills the gaps.
-      country: f.country ?? batch.country,
-      employeeCount: f.employeeCount,
-      notes: f.notes,
-      timeZone: f.timeZone,
-    },
-    {
-      id: row.contactId,
-      organizationId: orgId,
-      type: batch.type ?? 'LEAD',
-      status: 'NEW',
-      now,
-      provenance,
-      basis: {
-        basis: batch.basis,
-        addressType: (f.addressType as AddressType | undefined) ?? batch.addressType,
-        consentEvidence: f.consentEvidence ?? batch.consentEvidence,
-        consentSource: f.consentSource ?? batch.consentSource,
-        liaId: batch.liaId,
-        // Only ever per row. A batch-level "the notice was sent" checkbox is an assertion made
-        // in the moment; a per-row timestamp came from a system that recorded the sending.
-        article14NoticeSentAt: f.article14NoticeSentAt,
-        recordedBy: actor,
-      },
-    }
-  );
-}
-
-/** Existence checks, bounded. A 2,000-row preview must not open 2,000 reads at once. */
-async function existingIds(orgId: string, ids: readonly string[]): Promise<Set<string>> {
-  const found = new Set<string>();
-  for (let i = 0; i < ids.length; i += PREVIEW_CONCURRENCY) {
-    const slice = ids.slice(i, i + PREVIEW_CONCURRENCY);
-    const snaps = await Promise.all(
-      slice.map((id) => getDoc(doc(store, orgPath(orgId, 'contacts'), id)))
-    );
-    snaps.forEach((snap, n) => {
-      if (snap.exists()) found.add(slice[n]);
-    });
-  }
-  return found;
 }
 
 /**
@@ -334,93 +252,49 @@ export async function importLeads(
     };
   }
 
-  const now = options.now ?? new Date();
-  const outcomes: RowOutcome[] = [];
-  let created = 0;
-  let duplicates = 0;
-  let failed = 0;
-  let mailable = 0;
+  const provenance: ContactProvenance = {
+    source: 'IMPORT',
+    sourceEvidence: batch.sourceEvidence,
+    sourceCollectedAt: (options.now ?? new Date()).toISOString(),
+    importBatchId: batchId,
+  };
 
-  const verdictOf = (document: Record<string, unknown>) => evaluateLawfulBasis(document);
+  // Every candidate row goes through the one write path, which is also what the discovery
+  // provider and the scrape worker use. Dedup, no-overwrite and the basis verdict are
+  // properties of that function rather than of this one.
+  const records: IngestRecord[] = plan.rows.map((row) => ({
+    ref: `line ${row.line}`,
+    line: row.line,
+    email: row.email,
+    contactId: row.contactId,
+    fields: row.fields,
+  }));
 
-  if (mode === 'PREVIEW') {
-    // Reads only. Nothing below this line writes, and that is the invariant the suite pins.
-    const present = await existingIds(
-      orgId,
-      plan.rows.map((r) => r.contactId)
-    );
-    for (const row of plan.rows) {
-      const document = documentFor(row, batch, orgId, actor, batchId, now);
-      const verdict = verdictOf(document);
-      const isDuplicate = present.has(row.contactId);
-      if (isDuplicate) duplicates++;
-      if (!isDuplicate && verdict.ok) mailable++;
-      outcomes.push({
-        line: row.line,
-        email: row.email,
-        contactId: row.contactId,
-        status: isDuplicate ? 'DUPLICATE' : 'WOULD_CREATE',
-        mailable: !isDuplicate && verdict.ok,
-        reason: isDuplicate
-          ? 'A contact with this address already exists and would be left exactly as it is.'
-          : verdict.ok
-            ? verdict.why
-            : verdict.message,
-        refusalCode: isDuplicate ? 'ALREADY_EXISTS' : verdict.ok ? null : verdict.code,
-      });
-    }
-  } else {
-    for (const row of plan.rows) {
-      const document = documentFor(row, batch, orgId, actor, batchId, now);
-      const verdict = verdictOf(document);
-      const result = await createContactIfAbsent(orgId, row.email, () => document);
+  const result = await ingestRecords(
+    orgId,
+    records,
+    {
+      basis: batch.basis,
+      liaId: batch.liaId,
+      consentEvidence: batch.consentEvidence,
+      consentSource: batch.consentSource,
+      country: batch.country,
+      addressType: batch.addressType,
+    },
+    provenance,
+    actor,
+    { mode, type: batch.type ?? 'LEAD', now: options.now }
+  );
 
-      if (result.ok) {
-        created++;
-        if (verdict.ok) mailable++;
-        outcomes.push({
-          line: row.line,
-          email: row.email,
-          contactId: result.id,
-          status: 'CREATED',
-          mailable: verdict.ok,
-          reason: verdict.ok ? verdict.why : verdict.message,
-          refusalCode: verdict.ok ? null : verdict.code,
-        });
-        continue;
-      }
-
-      if (result.code === 'ALREADY_EXISTS') {
-        duplicates++;
-        outcomes.push({
-          line: row.line,
-          email: row.email,
-          contactId: result.id,
-          status: 'DUPLICATE',
-          mailable: false,
-          reason:
-            'A contact with this address already exists. It was left exactly as it is: an ' +
-            'import that updated it would be a way to undo an unsubscribe.',
-          refusalCode: 'ALREADY_EXISTS',
-        });
-        continue;
-      }
-
-      // UNUSABLE_EMAIL should be unreachable — the planner derived an id from this address —
-      // and STORE_UNAVAILABLE is a real runtime condition. Neither is allowed to abort the
-      // run: the rows already created are real, and the report has to account for every row.
-      failed++;
-      outcomes.push({
-        line: row.line,
-        email: row.email,
-        contactId: row.contactId,
-        status: 'FAILED',
-        mailable: false,
-        reason: result.message,
-        refusalCode: result.code,
-      });
-    }
-  }
+  const outcomes: RowOutcome[] = result.outcomes.map((o) => ({
+    line: o.line ?? 0,
+    email: o.email,
+    contactId: o.contactId,
+    status: o.status,
+    mailable: o.mailable,
+    reason: o.reason,
+    refusalCode: o.refusalCode,
+  }));
 
   return {
     ok: true,
@@ -432,12 +306,12 @@ export async function importLeads(
     ignoredColumns: plan.ignored,
     counts: {
       dataRows: plan.rows.length + plan.refused.length,
-      wouldCreate: mode === 'PREVIEW' ? outcomes.filter((o) => o.status === 'WOULD_CREATE').length : 0,
-      created: mode === 'COMMIT' ? created : 0,
-      duplicates,
+      wouldCreate: result.wouldCreate,
+      created: result.created,
+      duplicates: result.duplicates,
       refused: plan.refused.length,
-      failed,
-      mailable,
+      failed: result.failed,
+      mailable: result.mailable,
       notYetMailable: outcomes.filter((o) => !o.mailable && o.status !== 'DUPLICATE').length,
     },
     outcomes,

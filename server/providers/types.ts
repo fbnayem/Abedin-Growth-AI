@@ -118,3 +118,68 @@ export interface RefreshableCredential {
 export type Implements<TContract, TImpl extends TContract> = TImpl;
 
 export type { ProviderError, Capability };
+
+/**
+ * P2c — DISCOVERY: finding contacts that are not yet in the database.
+ *
+ * The narrowest contract that lets the service refuse before the network and account for what
+ * was spent afterwards. Three obligations beyond the common ones:
+ *
+ *   1. `providerRecordId` IS THE PROVIDER'S. Never minted here. The same rule P0.8 established
+ *      for message ids, for the same reason: an id this system invented cannot afterwards be
+ *      distinguished from one a provider returned, so "where did this lead come from?" stops
+ *      having a checkable answer.
+ *
+ *   2. THE COST IS REPORTED, NOT ESTIMATED BY THE CALLER. A provider knows what it charged; a
+ *      caller guessing lets a tenant's ledger drift from the invoice. Where the provider will
+ *      not say, the adapter reports a CEILING and flags it, so the spend gate errs towards
+ *      refusing rather than towards overspending.
+ *
+ *   3. FAILURES ARE `ProviderError`, ALREADY CLASSIFIED. A discovery lookup that times out may
+ *      still have been charged, which is the §32 question — and a bare Error pushes it back on
+ *      a caller that has no way to answer it.
+ */
+export interface DiscoveryQuery {
+  /** ISO-3166 alpha-2. The basis gate refuses an unknown country, so this is not optional. */
+  readonly country: string;
+  readonly industry?: string;
+  readonly titles?: readonly string[];
+  readonly companySizeMin?: number;
+  readonly companySizeMax?: number;
+  /** The most records to return. A provider that returns more has broken its contract. */
+  readonly limit: number;
+}
+
+export interface DiscoveredRecord {
+  /** The PROVIDER's id for this record. Never minted by this system. */
+  readonly providerRecordId: string;
+  readonly email: string;
+  readonly firstName?: string;
+  readonly lastName?: string;
+  readonly title?: string;
+  readonly companyName?: string;
+  readonly companyWebsite?: string;
+  readonly industry?: string;
+  readonly country?: string;
+  readonly employeeCount?: string;
+  readonly linkedinUrl?: string;
+  /** Where the provider says it got this, if it says. Stored as evidence, never as authority. */
+  readonly sourceUrl?: string;
+}
+
+export interface DiscoverOutput {
+  readonly records: readonly DiscoveredRecord[];
+  /** What the provider charged, in USD cents. */
+  readonly costMinor: number;
+  /** True when the adapter could only bound the cost. The ledger then holds a ceiling. */
+  readonly costIsUpperBound: boolean;
+  /** The provider's own id for this lookup, so a result can be traced back to its query. */
+  readonly queryId: string;
+}
+
+/** @throws {ProviderError} for every failure. */
+export interface DiscoveryProvider extends ProviderAdapter {
+  /** What this provider can filter on. A query using anything else is refused before the call. */
+  readonly supportedFilters: readonly (keyof DiscoveryQuery)[];
+  discover(input: DiscoveryQuery): Promise<DiscoverOutput>;
+}

@@ -42,14 +42,32 @@ export type RealActionFlag =
   | 'REAL_CALENDAR_CREATE_ENABLED'
   | 'REAL_PAYMENT_ENABLED'
   | 'REAL_SIGNATURE_ENABLED'
-  | 'REAL_LINKEDIN_SEND_ENABLED';
+  | 'REAL_LINKEDIN_SEND_ENABLED'
+  | 'REAL_DISCOVERY_ENABLED'
+  | 'REAL_SCRAPE_ENABLED';
 
+/**
+ * DISCOVERY AND SCRAPING ARE REAL ACTIONS, and they are in this list rather than in a list of
+ * their own for a reason worth stating.
+ *
+ * Neither sends anything to a prospect, so it is tempting to treat them as reads. They are not.
+ * A discovery lookup spends money on a third-party API against a tenant's budget. A scrape
+ * makes requests to somebody else's servers from this system's address, under this system's
+ * user agent, and the consequence of getting it wrong is a blocked IP or a breached term of
+ * service — an effect in the world that cannot be undone by deleting a row.
+ *
+ * Being in REAL_ACTION_FLAGS means `isFullySafeMode()` is false while either is on, and that
+ * `/api/readiness` reports them. An operator asking "can this system touch anything outside
+ * itself?" gets one answer covering all seven.
+ */
 export const REAL_ACTION_FLAGS: RealActionFlag[] = [
   'REAL_EMAIL_SEND_ENABLED',
   'REAL_CALENDAR_CREATE_ENABLED',
   'REAL_PAYMENT_ENABLED',
   'REAL_SIGNATURE_ENABLED',
   'REAL_LINKEDIN_SEND_ENABLED',
+  'REAL_DISCOVERY_ENABLED',
+  'REAL_SCRAPE_ENABLED',
 ];
 
 /**
@@ -86,6 +104,8 @@ export function safeModeSnapshot(): Record<RealActionFlag, boolean> {
     REAL_PAYMENT_ENABLED: isRealActionEnabled('REAL_PAYMENT_ENABLED'),
     REAL_SIGNATURE_ENABLED: isRealActionEnabled('REAL_SIGNATURE_ENABLED'),
     REAL_LINKEDIN_SEND_ENABLED: isRealActionEnabled('REAL_LINKEDIN_SEND_ENABLED'),
+    REAL_DISCOVERY_ENABLED: isRealActionEnabled('REAL_DISCOVERY_ENABLED'),
+    REAL_SCRAPE_ENABLED: isRealActionEnabled('REAL_SCRAPE_ENABLED'),
   };
 }
 
