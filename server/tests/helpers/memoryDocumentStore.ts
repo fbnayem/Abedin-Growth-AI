@@ -105,9 +105,16 @@ function buildModule(m: MemoryDocumentStore) {
       // A read that fails fails whichever shape it takes: a lookup that reads a collection must
       // report the failure the same way one that reads a document does.
       if (m.failReadsWith !== null) throw new Error(m.failReadsWith);
-      const prefix = q.collectionPath + '/';
-      const docs = Object.entries(m.collection(q.collectionPath))
-        .filter(([, data]) => q.filters.every((f: any) => (data as any)[f.field] === f.value))
+      // A BARE COLLECTION REFERENCE IS A VALID ARGUMENT. The real `getDocs` accepts either a
+      // query or a collection reference, and `GET /api/leads` passes the latter. This double
+      // used to read `q.collectionPath` only, so a bare reference produced the prefix
+      // "undefined/" and returned an empty result — no error, no matches, and a suite that
+      // read "the collection is empty" as a fact about the data rather than about the double.
+      const collectionPath = q.collectionPath ?? q.path;
+      const filters = q.filters ?? [];
+      const prefix = collectionPath + '/';
+      const docs = Object.entries(m.collection(collectionPath))
+        .filter(([, data]) => filters.every((f: any) => (data as any)[f.field] === f.value))
         .slice(0, q.limit ?? Infinity)
         .map(([id, data]) => ({ id, ref: { path: prefix + id }, data: () => ({ ...data }) }));
       return { docs, size: docs.length, empty: docs.length === 0, forEach: (fn: any) => docs.forEach(fn) };

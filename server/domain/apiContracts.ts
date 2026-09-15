@@ -310,6 +310,20 @@ export const noticeSentSchema = z
   })
   .strict();
 
+/**
+ * Score contacts against the declared ideal customer profile.
+ *
+ * An empty `contactIds` means every contact in the organisation, which is the normal case after
+ * an import. The response says how many were beyond the limit rather than appearing to have
+ * done all of them.
+ */
+export const scoreLeadsSchema = z
+  .object({
+    contactIds: z.array(z.string().trim().min(1).max(255)).max(500).optional(),
+    limit: z.number().int().min(1).max(500).optional(),
+  })
+  .strict();
+
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
   'POST /api/company-brain/generate': companyBrainGenerateSchema,
@@ -325,6 +339,7 @@ export const BODY_SCHEMAS = {
   'POST /api/contacts/:id/revoke-consent': revokeConsentSchema,
   'POST /api/leads/import': leadImportSchema,
   'POST /api/leads/notice-sent': noticeSentSchema,
+  'POST /api/leads/score': scoreLeadsSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

@@ -11,6 +11,7 @@ import { expectedVersionFrom, mutateWithVersion, sendMutationOutcome, sendVersio
 import { createQuote, quotesForEmail } from '../services/quote.service';
 import { recordArticle14Notice, recordLawfulBasis, revokeConsent } from '../services/lawfulBasis.service';
 import { importLeads } from '../services/leadImport.service';
+import { previewScore, scoreContacts } from '../services/leadScore.service';
 import { buildContactDocument } from '../domain/contactDocument';
 import { attributionFor, operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
@@ -285,6 +286,44 @@ contactsRouter.post('/leads/notice-sent', async (req: Request, res: Response) =>
       mailable: outcome.outcomes.filter((o) => o.mailable).length,
       outcomes: outcome.outcomes,
     });
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * Score contacts against the declared ideal customer profile.
+ *
+ * The rubric is in `server/domain/leadScore.ts`, and the property that matters is what it
+ * REFUSES to do: a component with no input is not scored, so the response carries a confidence
+ * alongside the score. The generator this replaces produced a number between 79 and 89 for
+ * every lead, from the loop index, with three paragraphs of reasons.
+ */
+contactsRouter.post('/leads/score', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/leads/score');
+    if (body === null) return;
+    const gate = operatorGate(req.user, isProduction);
+    if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+
+    const outcome = await scoreContacts(orgScope(req), body.contactIds ?? [], gate.attribution, {
+      limit: body.limit,
+    });
+    if (outcome.ok === false) return sendError(req, res, outcome.code, outcome.message);
+    res.json(outcome);
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * What this contact would score right now, without storing anything.
+ *
+ * Separate from the write above because a stored score goes stale: the rubric moves, the
+ * company brain is edited, the contact is enriched. An operator looking at one lead should be
+ * able to see the current answer without deciding to overwrite the recorded one.
+ */
+contactsRouter.get('/leads/:id/score', async (req: Request, res: Response) => {
+  try {
+    const outcome = await previewScore(orgScope(req), req.params.id);
+    if (outcome.ok === false) return sendError(req, res, outcome.code, outcome.message);
+    res.json({ contactId: outcome.contactId, ...outcome.result });
   } catch (e: any) { sendCaught(req, res, e); }
 });
 

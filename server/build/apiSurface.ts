@@ -45,6 +45,7 @@ export const CONTRACT_EVIDENCE: Readonly<Record<string, RegExp>> = {
   'POST /api/contacts/:id/revoke-consent': /parsedBodyOr400\(req, res, 'POST \/api\/contacts\/:id\/revoke-consent'\)/,
   'POST /api/leads/import': /parsedBodyOr400\(req, res, 'POST \/api\/leads\/import'\)/,
   'POST /api/leads/notice-sent': /parsedBodyOr400\(req, res, 'POST \/api\/leads\/notice-sent'\)/,
+  'POST /api/leads/score': /parsedBodyOr400\(req, res, 'POST \/api\/leads\/score'\)/,
   'POST /api/knowledge': /parseOrRespond\(createKnowledgeItemSchema, req, res\)/,
   'POST /api/pipeline': /parseOrRespond\(createOpportunitySchema, req, res\)/,
   'POST /api/leads': /createContact\(req, res, /,
