@@ -13,6 +13,7 @@ import { recordArticle14Notice, recordLawfulBasis, revokeConsent } from '../serv
 import { importLeads } from '../services/leadImport.service';
 import { previewScore, scoreContacts } from '../services/leadScore.service';
 import { discoverLeads } from '../services/discovery.service';
+import { scrapeSite } from '../services/scrapeWorker.service';
 import { buildContactDocument } from '../domain/contactDocument';
 import { attributionFor, operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
@@ -365,6 +366,52 @@ contactsRouter.post('/leads/discover', async (req: Request, res: Response) => {
         : 'VALIDATION_ERROR';
       return sendError(req, res, code, outcome.message, {
         details: { discoveryRefusal: outcome.code, sideEffect: outcome.sideEffect ?? null },
+      });
+    }
+
+    res.json(outcome);
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * Scrape one company site for published contact addresses.
+ *
+ * Off by default (REAL_SCRAPE_ENABLED), and the refusals are most of the behaviour: the URL is
+ * checked for server-side request forgery and resolved before anything is fetched, robots.txt
+ * decides what may be read, a per-host interval decides how often, and a page budget decides
+ * when to stop. See `server/services/scrapeWorker.service.ts`.
+ */
+contactsRouter.post('/leads/scrape', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/leads/scrape');
+    if (body === null) return;
+    const gate = operatorGate(req.user, isProduction);
+    if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+
+    const outcome = await scrapeSite(
+      orgScope(req),
+      body.url,
+      {
+        basis: body.basis,
+        liaId: body.liaId,
+        country: body.country,
+        sourceEvidence: body.sourceEvidence,
+        includePersonalAddresses: body.includePersonalAddresses,
+        type: body.type,
+      },
+      gate.attribution,
+      { mode: body.mode, pageBudget: body.pageBudget }
+    );
+
+    if (outcome.ok === false) {
+      const code =
+        outcome.code === 'ATTRIBUTION_REQUIRED' ? 'ATTRIBUTION_REQUIRED'
+        : outcome.code === 'STORE_UNAVAILABLE' ? 'STORE_UNAVAILABLE'
+        : outcome.code === 'SCRAPE_DISABLED' ? 'NOT_IMPLEMENTED'
+        : outcome.code === 'ROBOTS_DISALLOWED' || outcome.code === 'TARGET_REFUSED' ? 'POLICY_BLOCKED'
+        : 'VALIDATION_ERROR';
+      return sendError(req, res, code, outcome.message, {
+        details: { scrapeRefusal: outcome.code },
       });
     }
 

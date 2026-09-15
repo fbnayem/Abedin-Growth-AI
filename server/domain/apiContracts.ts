@@ -347,6 +347,27 @@ export const discoverLeadsSchema = z
   })
   .strict();
 
+/**
+ * A scrape run against one site.
+ *
+ * `url` is a single seed, not a list: a run that took a list would be a crawler, and the page
+ * budget, the rate limit and the robots decision are all per-site properties.
+ */
+export const scrapeSiteSchema = z
+  .object({
+    mode: z.enum(['PREVIEW', 'COMMIT']),
+    url: z.string().trim().min(4).max(2000),
+    pageBudget: z.number().int().min(1).max(20).optional(),
+    basis: z.enum(LAWFUL_BASES),
+    liaId: z.string().trim().min(1).max(200).optional(),
+    country: z.string().trim().regex(/^[A-Za-z]{2}$/, 'country must be an ISO-3166 alpha-2 code'),
+    sourceEvidence: z.string().trim().min(1).max(2000),
+    /** Off by default: role addresses only is the materially lower-risk half. */
+    includePersonalAddresses: z.boolean().optional(),
+    type: z.enum(['LEAD', 'INVESTOR', 'PARTNER']).optional(),
+  })
+  .strict();
+
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
   'POST /api/company-brain/generate': companyBrainGenerateSchema,
@@ -364,6 +385,7 @@ export const BODY_SCHEMAS = {
   'POST /api/leads/notice-sent': noticeSentSchema,
   'POST /api/leads/score': scoreLeadsSchema,
   'POST /api/leads/discover': discoverLeadsSchema,
+  'POST /api/leads/scrape': scrapeSiteSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

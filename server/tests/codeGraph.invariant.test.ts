@@ -49,6 +49,14 @@ const OWNERS: Record<string, string[]> = {
     'server/lib/providerError.ts',
     'server/services/calendar.service.ts',
     'server/services/gmail.service.ts',
+    // P2d — the scrape worker is the first module that makes outbound requests to addresses an
+    // OPERATOR supplies rather than to a configured provider. Recorded here deliberately: that
+    // is a new kind of owner of this capability, not another instance of an existing one, and
+    // what makes it defensible is `server/domain/crawlTarget.ts` — the URL is checked and its
+    // hostname RESOLVED before any request, on every page, and the whole feature is behind
+    // REAL_SCRAPE_ENABLED. A future module importing this to fetch a user-supplied URL without
+    // that check should fail here and be argued about rather than added to this list.
+    'server/services/scrapeWorker.service.ts',
   ],
   'server/geminiClient.ts': [
     'server/agents/companyBrainAgent.ts',
