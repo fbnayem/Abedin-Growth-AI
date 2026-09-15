@@ -187,3 +187,24 @@ export function suggestedBaseAddress(email: unknown): string | null {
   if (plus <= 0) return null;
   return `${local.slice(0, plus)}${key.slice(at)}`;
 }
+
+/**
+ * Is this address at a free-mail provider — that is, an individual rather than an organisation?
+ *
+ * Returns null when the address is not usable at all, which is a DIFFERENT answer from "not
+ * free-mail" and must not be collapsed into one. `accountDomain` returns null for both, which
+ * is right for its own question and wrong for this one: a caller asking "may I treat this as a
+ * business recipient?" needs "no" for a gmail address and "I cannot tell" for `not-an-email`,
+ * and answering "no" to both would let an unparseable address pass as a business one.
+ *
+ * The single owner of this question. `server/domain/lawfulBasis.ts` asks it to decide whether
+ * legitimate interest is available, and a second copy of the domain list is how the two would
+ * stop agreeing.
+ */
+export function isFreeMailAddress(email: unknown): boolean | null {
+  const key = normalizeEmailKey(email);
+  if (key === null) return null;
+  const domain = key.slice(key.indexOf('@') + 1);
+  if (domain.length === 0) return null;
+  return PUBLIC_EMAIL_DOMAINS.has(domain);
+}

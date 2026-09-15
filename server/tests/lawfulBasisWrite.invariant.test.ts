@@ -259,7 +259,11 @@ describe('6. success is never reported for a contact that is still unmailable', 
       ORG, ID, { basis: 'LEGITIMATE_INTEREST', addressType: 'ROLE', liaId: 'lia_1' }, NAMED, NOW
     );
     expect(outcome.ok).toBe(true);
-    if (outcome.ok && !outcome.verdict.ok) expect(outcome.verdict.code).toBe('LI_NOTICE_NOT_SENT');
+    // Unconditional. `if (!verdict.ok) expect(code)` passes vacuously the moment the record
+    // becomes mailable, which is the one outcome this test exists to catch.
+    if (!outcome.ok) throw new Error('expected the record to be written');
+    expect(outcome.verdict.ok).toBe(false);
+    if (!outcome.verdict.ok) expect(outcome.verdict.code).toBe('LI_NOTICE_NOT_SENT');
   });
 
   it('the verdict the caller is given is the verdict of the record that was stored', async () => {

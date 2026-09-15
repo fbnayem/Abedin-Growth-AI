@@ -2064,7 +2064,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:420"
+        "x-source": "server/routes/contacts.routes.ts:537"
       }
     },
     "/api/contacts/{id}/quotes": {
@@ -2152,7 +2152,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:479"
+        "x-source": "server/routes/contacts.routes.ts:596"
       },
       "post": {
         "operationId": "post_api_contacts_id_quotes",
@@ -2299,7 +2299,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:385"
+        "x-source": "server/routes/contacts.routes.ts:502"
       }
     },
     "/api/contacts/{id}/revoke-consent": {
@@ -2410,7 +2410,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:453"
+        "x-source": "server/routes/contacts.routes.ts:570"
       }
     },
     "/api/contacts/{id}/time-zone": {
@@ -2524,7 +2524,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:361"
+        "x-source": "server/routes/contacts.routes.ts:478"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -2613,7 +2613,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/contacts.routes.ts:186"
+        "x-source": "server/routes/contacts.routes.ts:303"
       }
     },
     "/api/csp-report": {
@@ -4316,7 +4316,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:489"
+        "x-source": "server/routes/contacts.routes.ts:606"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -4325,11 +4325,32 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "addressType": {
+                    "enum": [
+                      "PERSONAL",
+                      "ROLE"
+                    ],
+                    "type": "string"
+                  },
+                  "article14NoticeSentAt": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
                   "companyName": {
                     "maxLength": 500,
                     "type": "string"
                   },
                   "companyWebsite": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
+                  "consentEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "consentSource": {
                     "maxLength": 500,
                     "type": "string"
                   },
@@ -4357,6 +4378,17 @@
                     "maxLength": 500,
                     "type": "string"
                   },
+                  "lawfulBasis": {
+                    "enum": [
+                      "CONSENT",
+                      "LEGITIMATE_INTEREST"
+                    ],
+                    "type": "string"
+                  },
+                  "liaId": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
                   "linkedinUrl": {
                     "maxLength": 500,
                     "type": "string"
@@ -4371,6 +4403,11 @@
                   },
                   "phone": {
                     "maxLength": 500,
+                    "type": "string"
+                  },
+                  "sourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "timeZone": {
@@ -4463,7 +4500,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:498"
+        "x-source": "server/routes/contacts.routes.ts:615"
       }
     },
     "/api/investors/batch-generate": {
@@ -4541,7 +4578,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:260"
+        "x-source": "server/routes/contacts.routes.ts:377"
       }
     },
     "/api/knowledge": {
@@ -4809,7 +4846,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:23"
+        "x-source": "server/routes/contacts.routes.ts:34"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -4818,11 +4855,32 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "addressType": {
+                    "enum": [
+                      "PERSONAL",
+                      "ROLE"
+                    ],
+                    "type": "string"
+                  },
+                  "article14NoticeSentAt": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
                   "companyName": {
                     "maxLength": 500,
                     "type": "string"
                   },
                   "companyWebsite": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
+                  "consentEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "consentSource": {
                     "maxLength": 500,
                     "type": "string"
                   },
@@ -4850,6 +4908,17 @@
                     "maxLength": 500,
                     "type": "string"
                   },
+                  "lawfulBasis": {
+                    "enum": [
+                      "CONSENT",
+                      "LEGITIMATE_INTEREST"
+                    ],
+                    "type": "string"
+                  },
+                  "liaId": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
                   "linkedinUrl": {
                     "maxLength": 500,
                     "type": "string"
@@ -4864,6 +4933,11 @@
                   },
                   "phone": {
                     "maxLength": 500,
+                    "type": "string"
+                  },
+                  "sourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "timeZone": {
@@ -4956,7 +5030,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:168"
+        "x-source": "server/routes/contacts.routes.ts:191"
       }
     },
     "/api/leads/batch-followup": {
@@ -5034,7 +5108,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:317"
+        "x-source": "server/routes/contacts.routes.ts:434"
       }
     },
     "/api/leads/batch-generate": {
@@ -5112,7 +5186,276 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:235"
+        "x-source": "server/routes/contacts.routes.ts:352"
+      }
+    },
+    "/api/leads/import": {
+      "post": {
+        "operationId": "post_api_leads_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "addressType": {
+                    "enum": [
+                      "PERSONAL",
+                      "ROLE"
+                    ],
+                    "type": "string"
+                  },
+                  "basis": {
+                    "enum": [
+                      "CONSENT",
+                      "LEGITIMATE_INTEREST"
+                    ],
+                    "type": "string"
+                  },
+                  "consentEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "consentSource": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "country": {
+                    "pattern": "^[A-Za-z]{2}$",
+                    "type": "string"
+                  },
+                  "expectedPlanHash": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "liaId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "mode": {
+                    "enum": [
+                      "PREVIEW",
+                      "COMMIT"
+                    ],
+                    "type": "string"
+                  },
+                  "sourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "text": {
+                    "maxLength": 4000000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": {
+                    "enum": [
+                      "LEAD",
+                      "INVESTOR",
+                      "PARTNER"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "text",
+                  "mode",
+                  "basis",
+                  "sourceEvidence"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/contacts.routes.ts:210"
+      }
+    },
+    "/api/leads/notice-sent": {
+      "post": {
+        "operationId": "post_api_leads_notice_sent",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "contactIds": {
+                    "items": {
+                      "maxLength": 255,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 500,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  "evidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "contactIds",
+                  "evidence"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/contacts.routes.ts:267"
       }
     },
     "/api/leads/research": {
@@ -5190,7 +5533,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:310"
+        "x-source": "server/routes/contacts.routes.ts:427"
       }
     },
     "/api/leads/{id}/email": {
@@ -5278,7 +5621,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:340"
+        "x-source": "server/routes/contacts.routes.ts:457"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -5366,7 +5709,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:333"
+        "x-source": "server/routes/contacts.routes.ts:450"
       }
     },
     "/api/linkedin-config": {
@@ -6849,7 +7192,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:504"
+        "x-source": "server/routes/contacts.routes.ts:621"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -6858,11 +7201,32 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "addressType": {
+                    "enum": [
+                      "PERSONAL",
+                      "ROLE"
+                    ],
+                    "type": "string"
+                  },
+                  "article14NoticeSentAt": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
                   "companyName": {
                     "maxLength": 500,
                     "type": "string"
                   },
                   "companyWebsite": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
+                  "consentEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "consentSource": {
                     "maxLength": 500,
                     "type": "string"
                   },
@@ -6890,6 +7254,17 @@
                     "maxLength": 500,
                     "type": "string"
                   },
+                  "lawfulBasis": {
+                    "enum": [
+                      "CONSENT",
+                      "LEGITIMATE_INTEREST"
+                    ],
+                    "type": "string"
+                  },
+                  "liaId": {
+                    "maxLength": 500,
+                    "type": "string"
+                  },
                   "linkedinUrl": {
                     "maxLength": 500,
                     "type": "string"
@@ -6904,6 +7279,11 @@
                   },
                   "phone": {
                     "maxLength": 500,
+                    "type": "string"
+                  },
+                  "sourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "timeZone": {
@@ -6996,7 +7376,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:513"
+        "x-source": "server/routes/contacts.routes.ts:630"
       }
     },
     "/api/partners/batch-generate": {
@@ -7074,7 +7454,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:285"
+        "x-source": "server/routes/contacts.routes.ts:402"
       }
     },
     "/api/pipeline": {
@@ -9169,7 +9549,7 @@
     "rawBody": 2,
     "readingBodyWithoutSchema": 14,
     "responsesDescribed": 0,
-    "routes": 100,
-    "withRequestContract": 17
+    "routes": 102,
+    "withRequestContract": 19
   }
 }

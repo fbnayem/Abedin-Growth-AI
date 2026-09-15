@@ -38,6 +38,7 @@ const CONSENTED: BasisFacts = {
 /** A contact that passes on LEGITIMATE_INTEREST. Tests below remove exactly one thing. */
 const LEGITIMATE: BasisFacts = {
   lawfulBasis: 'LEGITIMATE_INTEREST',
+  email: 'info@acme.example',
   country: 'GB',
   addressType: 'ROLE',
   liaId: 'lia_2026_q3_uk_b2b',
@@ -157,10 +158,45 @@ describe('lawful basis: LEGITIMATE_INTEREST', () => {
     }
   });
 
-  it('an unstated address type is treated as personal and refuses', () => {
+  it('an unstated address type refuses', () => {
     for (const addressType of [undefined, null, '', 'business', 'CORPORATE', 7]) {
-      expect(refusal({ ...LEGITIMATE, addressType }).code).toBe('LI_PERSONAL_ADDRESS');
+      expect(refusal({ ...LEGITIMATE, addressType }).code).toBe('LI_ADDRESS_TYPE_UNKNOWN');
     }
+  });
+
+  it('it refuses at a free-mail address, which is an individual subscriber', () => {
+    for (const email of [
+      'jane@gmail.com',
+      'JANE@GMAIL.COM',
+      'jane@googlemail.com',
+      'jane@outlook.com',
+      'jane@proton.me',
+      'jane@qq.com',
+    ]) {
+      expect(refusal({ ...LEGITIMATE, email }).code).toBe('LI_INDIVIDUAL_SUBSCRIBER');
+    }
+  });
+
+  it('it refuses when the address is missing or unparseable, rather than assuming a company', () => {
+    // The dangerous reading is that "not a known free-mail domain" means "a business". An
+    // address that cannot be parsed is not a business address; it is no information at all.
+    for (const email of [undefined, null, '', '   ', 'not-an-email', '@nowhere', 42, {}]) {
+      expect(refusal({ ...LEGITIMATE, email }).code).toBe('LI_INDIVIDUAL_SUBSCRIBER');
+    }
+  });
+
+  it('it passes at an organisation address', () => {
+    for (const email of ['jane@acme.example', 'jane.doe@sub.acme.co.uk', 'info@acme.example']) {
+      expect(evaluateLawfulBasis({ ...LEGITIMATE, email, addressType: 'PERSONAL' }).ok).toBe(true);
+    }
+  });
+
+  it('the country check runs before the address check, so a refusal names the stronger reason', () => {
+    // Both would refuse. Reporting the free-mail domain for a German contact would send the
+    // operator off to find a work address for someone who needs consent either way.
+    expect(refusal({ ...LEGITIMATE, country: 'DE', email: 'jane@gmail.com' }).code).toBe(
+      'LI_NOT_AVAILABLE_IN_COUNTRY'
+    );
   });
 
   it('it refuses without a balancing assessment on file', () => {
@@ -170,6 +206,12 @@ describe('lawful basis: LEGITIMATE_INTEREST', () => {
   it('it refuses until the data-subject notice has been sent', () => {
     expect(refusal({ ...LEGITIMATE, article14NoticeSentAt: undefined }).code).toBe('LI_NOTICE_NOT_SENT');
     expect(refusal({ ...LEGITIMATE, article14NoticeSentAt: '  ' }).code).toBe('LI_NOTICE_NOT_SENT');
+  });
+
+  it('consent at a free-mail address still passes: the restriction is on LEGITIMATE_INTEREST only', () => {
+    // A person who signed up with their gmail address consented. Applying the corporate
+    // subscriber test to consent would refuse a basis the person themselves gave.
+    expect(evaluateLawfulBasis({ ...CONSENTED, email: 'jane@gmail.com' }).ok).toBe(true);
   });
 
   it('a personal address is permitted only because it is declared, not assumed', () => {

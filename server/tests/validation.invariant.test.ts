@@ -32,7 +32,6 @@ describe('§16 — a caller cannot set fields the server controls', () => {
     email: 'a@b.com',
     // Every one of these was previously persisted verbatim.
     consentGiven: true,
-    consentSource: 'forged',
     suppressed: false,
     suppressionReason: null,
     organizationId: 'someone-elses-org',
@@ -50,7 +49,6 @@ describe('§16 — a caller cannot set fields the server controls', () => {
 
     for (const field of [
       'consentGiven',
-      'consentSource',
       'suppressed',
       'suppressionReason',
       'organizationId',
@@ -62,6 +60,42 @@ describe('§16 — a caller cannot set fields the server controls', () => {
     ]) {
       expect(parsed.value, `${field} survived parsing`).not.toHaveProperty(field);
     }
+  });
+
+  /**
+   * P2b — `consentSource` MOVED from this list to the one below, deliberately.
+   *
+   * It was refused when the schema had no concept of a lawful basis, so the only thing a
+   * caller could do with it was to dress up a record the gate would refuse anyway. The create
+   * path now records a basis, and `consentSource` is part of that record: "where they signed
+   * up". It is DESCRIPTION, not permission.
+   *
+   * What still cannot be asserted is the permission itself. `consentGiven` is derived from the
+   * basis by `buildContactDocument` and is not an input at any layer, and `consentRecordedBy`
+   * comes from the credential — so the claim is always attributable to a named operator, and
+   * the handler refuses the basis fields outright when it cannot name one.
+   */
+  it('a basis field is accepted, but the permission flag never is', () => {
+    const parsed = parseBody(createContactSchema, {
+      email: 'a@b.com',
+      lawfulBasis: 'CONSENT',
+      consentSource: 'pricing-page',
+      consentEvidence: 'webform 2026-09-01T10:00:00.000Z ip=203.0.113.7',
+      consentGiven: true,
+      consentRecordedBy: 'somebody-else',
+    });
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok === false) return;
+    expect(parsed.value.consentSource).toBe('pricing-page');
+    expect(parsed.value).not.toHaveProperty('consentGiven');
+    expect(parsed.value).not.toHaveProperty('consentRecordedBy');
+  });
+
+  it('an unrecognised lawful basis is refused rather than dropped', () => {
+    // Dropping it would create the contact and report success while the thing the caller asked
+    // for — that this person may be emailed — silently did not happen.
+    const parsed = parseBody(createContactSchema, { email: 'a@b.com', lawfulBasis: 'CONTRACT' });
+    expect(parsed.ok).toBe(false);
   });
 
   it('keeps the fields a caller is entitled to set', () => {

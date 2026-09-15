@@ -18,9 +18,24 @@
  * -------------
  *   CONSENT              the person agreed. Needs evidence and a recorded actor, and a
  *                        revocation outranks everything.
- *   LEGITIMATE_INTEREST  the B2B basis. Needs ALL of: a country whose regime permits it, a
- *                        business address rather than a personal one, a legitimate interests
- *                        assessment on file, and the data-subject notice already sent.
+ *   LEGITIMATE_INTEREST  the B2B basis. Needs ALL of: a country whose regime permits it, an
+ *                        address at an organisation rather than at a free-mail provider, a
+ *                        STATED address type, a legitimate interests assessment on file, and
+ *                        the data-subject notice already sent.
+ *
+ * THE TWO SEPARATE QUESTIONS ABOUT AN ADDRESS, WHICH ARE EASY TO CONFLATE
+ * ----------------------------------------------------------------------
+ * `addressType` asks whether the mailbox belongs to a named person (`jane@acme.example`) or to
+ * a role (`info@acme.example`). That is a data-protection question about what category of
+ * personal data the record holds, and BOTH answers are compatible with legitimate interest:
+ * a named employee at a company is still a corporate subscriber. What refuses is an address
+ * type nobody has stated, because unknown is not permission.
+ *
+ * Whether the recipient is a corporate subscriber at all is a DIFFERENT question, and it is
+ * answered by the domain: `jane@gmail.com` is an individual subscriber however business-like
+ * the message, and under PECR and its equivalents that is the case legitimate interest does
+ * not reach. An earlier draft of this module conflated the two, documented the stricter rule
+ * and implemented the looser one, so a bought list of free-mail addresses would have passed.
  *
  * WHY THE NOTICE IS A GATE AND NOT A POLICY DOCUMENT
  * -------------------------------------------------
@@ -32,6 +47,8 @@
  * Making both mechanical preconditions is the same move this repository makes everywhere else:
  * a rule that is enforced cannot be forgotten, and a rule that lives only in a document will be.
  */
+
+import { isFreeMailAddress } from '../lib/identity';
 
 /** The bases this system recognises. Anything else is not a basis. */
 export const LAWFUL_BASES = ['CONSENT', 'LEGITIMATE_INTEREST'] as const;
@@ -111,7 +128,8 @@ export type BasisRefusalCode =
   | 'CONSENT_UNEVIDENCED'
   | 'CONSENT_UNATTRIBUTED'
   | 'LI_NOT_AVAILABLE_IN_COUNTRY'
-  | 'LI_PERSONAL_ADDRESS'
+  | 'LI_ADDRESS_TYPE_UNKNOWN'
+  | 'LI_INDIVIDUAL_SUBSCRIBER'
   | 'LI_NO_ASSESSMENT'
   | 'LI_NOTICE_NOT_SENT';
 
@@ -129,6 +147,8 @@ export type BasisVerdict =
 /** The fields this decision reads. Everything is `unknown` because it arrives from a document. */
 export interface BasisFacts {
   readonly lawfulBasis?: unknown;
+  /** The recipient address. Read only to tell a corporate subscriber from an individual one. */
+  readonly email?: unknown;
   readonly country?: unknown;
   readonly addressType?: unknown;
   readonly consentGiven?: unknown;
@@ -269,11 +289,31 @@ export function evaluateLawfulBasis(facts: BasisFacts): BasisVerdict {
   if (addressType !== 'ROLE' && addressType !== 'PERSONAL') {
     return {
       ok: false,
-      code: 'LI_PERSONAL_ADDRESS',
+      code: 'LI_ADDRESS_TYPE_UNKNOWN',
       message:
-        `Legitimate interest applies to business recipients, and this record does not say ` +
-        `whether the address is a business role address or a personal one ` +
-        `(addressType=${JSON.stringify(facts.addressType)}). Unknown is treated as personal.`,
+        `This record does not say whether the address belongs to a named person or to a role ` +
+        `such as info@ (addressType=${JSON.stringify(facts.addressType)}). Both are compatible ` +
+        `with legitimate interest, but an unstated one is not: the category of personal data ` +
+        `being processed has to be known before it can be justified.`,
+    };
+  }
+
+  // A free-mail address is an individual subscriber, whatever the message is about, and that
+  // is the case the B2B basis does not reach. `null` — an address too broken to classify —
+  // refuses too, because "I cannot tell" is not "it is a company".
+  const freeMail = isFreeMailAddress(facts.email);
+  if (freeMail !== false) {
+    return {
+      ok: false,
+      code: 'LI_INDIVIDUAL_SUBSCRIBER',
+      message:
+        freeMail === null
+          ? `Cannot tell whether ${JSON.stringify(facts.email)} is an organisation address, so ` +
+            `legitimate interest cannot be established. A usable address is a precondition, not ` +
+            `a detail.`
+          : `${JSON.stringify(facts.email)} is at a free-mail provider, which makes the ` +
+            `recipient an individual subscriber rather than a corporate one. Legitimate ` +
+            `interest does not reach that case; consent does.`,
     };
   }
 

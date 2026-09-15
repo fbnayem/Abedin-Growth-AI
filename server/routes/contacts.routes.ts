@@ -9,7 +9,9 @@ import { sendCaught, sendError } from '../lib/errors';
 import { parsedBodyOr400 } from '../lib/parsedBody';
 import { expectedVersionFrom, mutateWithVersion, sendMutationOutcome, sendVersionRequired, versionOf } from '../lib/concurrency';
 import { createQuote, quotesForEmail } from '../services/quote.service';
-import { recordLawfulBasis, revokeConsent } from '../services/lawfulBasis.service';
+import { recordArticle14Notice, recordLawfulBasis, revokeConsent } from '../services/lawfulBasis.service';
+import { importLeads } from '../services/leadImport.service';
+import { buildContactDocument } from '../domain/contactDocument';
 import { attributionFor, operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
 
@@ -19,6 +21,15 @@ import { isProduction } from '../config/environment';
  * Moved out of server.ts on 2026-09-12, text unchanged; mounted there at `/api`.
  */
 export const contactsRouter = Router();
+
+/**
+ * The one path that accepts a body larger than the global 100kb.
+ *
+ * Exported so `server.ts` mounts its parser against the same string this router registers,
+ * rather than a copy that could drift by one character and silently fall back to the small
+ * limit. A mismatch here would not fail loudly: imports would just start returning 413.
+ */
+export const LEAD_IMPORT_PATH = '/api/leads/import';
 
 contactsRouter.get('/leads', async (req: Request, res: Response) => {
   try {
@@ -31,52 +42,50 @@ contactsRouter.get('/leads', async (req: Request, res: Response) => {
 });
 
 /**
- * P1.10 — Build a contact from validated input.
+ * P1.10 / P2b — Build a contact from validated input.
  *
- * The three contact endpoints (leads, investors, partners) each did
- * `{ ...req.body, id, type, status }`, so any field a caller sent was persisted. The one
- * that matters is `consentGiven`: the action gateway reads it to decide whether a contact
- * may be emailed, so spreading the body let a caller create a contact that was already
- * consented to receive mail. `suppressed`, `organizationId` and `aiScore` were equally
- * writable.
+ * The shape itself moved to `server/domain/contactDocument.ts` when the import path became a
+ * second caller. What stays here is the part that is specific to a request: the basis is
+ * honoured only for an IDENTIFIED operator, because `consentRecordedBy` is part of what makes
+ * a consent record defensible and "somebody" is not a recorder.
  *
- * Consent is not an input. It records something that happened in the world, and a request
- * that creates a contact cannot also be evidence that the contact agreed to be contacted
- * (§14). New contacts are created with consent explicitly ABSENT, which the gateway reads as
- * "no consent record" and refuses to send to.
+ * Consent is still not an input. What a caller may state is the BASIS and its evidence; the
+ * `consentGiven` flag is derived from the basis, so the two can never disagree (§14).
  */
-function buildContactDocument(
+function contactDocumentFor(
   input: import("../lib/validation").CreateContactInput,
-  idPrefix: string,
+  id: string,
+  organizationId: string,
   type: 'LEAD' | 'INVESTOR' | 'PARTNER',
-  status: string
+  status: string,
+  recordedBy: string | null
 ) {
-  const emailKey = normalizeEmailKey(input.email);
-  return {
-    id: `${idPrefix}_${Date.now()}`,
+  return buildContactDocument(input, {
+    id,
+    organizationId,
     type,
     status,
-    // Server-controlled. Never taken from the request.
-    version: 0,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    // Caller-supplied, but only these fields, and only after parsing.
-    name: input.name ?? [input.firstName, input.lastName].filter(Boolean).join(' ') ?? '',
-    firstName: input.firstName ?? null,
-    lastName: input.lastName ?? null,
-    email: input.email,
-    emailKey,
-    title: input.title ?? null,
-    phone: input.phone ?? null,
-    linkedinUrl: input.linkedinUrl ?? null,
-    companyName: input.companyName ?? null,
-    companyWebsite: input.companyWebsite ?? null,
-    industry: input.industry ?? null,
-    country: input.country ?? null,
-    employeeCount: input.employeeCount ?? null,
-    notes: input.notes ?? null,
-    timeZone: input.timeZone ?? null,
-  };
+    now: new Date(),
+    provenance: {
+      source: 'MANUAL',
+      sourceEvidence:
+        input.sourceEvidence ??
+        (recordedBy === null ? 'Entered through the API.' : `Entered by ${recordedBy}.`),
+      sourceCollectedAt: new Date().toISOString(),
+    },
+    basis:
+      input.lawfulBasis !== undefined && recordedBy !== null
+        ? {
+            basis: input.lawfulBasis,
+            addressType: input.addressType,
+            consentEvidence: input.consentEvidence,
+            consentSource: input.consentSource,
+            liaId: input.liaId,
+            article14NoticeSentAt: input.article14NoticeSentAt,
+            recordedBy,
+          }
+        : undefined,
+  });
 }
 
 /**
@@ -96,19 +105,33 @@ function buildContactDocument(
 async function createContact(
   req: Request,
   res: Response,
-  idPrefix: string,
   type: 'LEAD' | 'INVESTOR' | 'PARTNER',
   status: string
 ) {
   const input = parseOrRespond(createContactSchema, req, res);
   if (input === null) return;
 
+  const attribution = attributionFor(req.user);
+  const recordedBy = attribution.kind === 'IDENTIFIED' ? attribution.actor : null;
+
+  // A basis claimed by a caller nobody can name is refused rather than dropped. Dropping it
+  // would create the contact and report success while the thing the operator asked for — that
+  // this person may be emailed — silently did not happen.
+  if (input.lawfulBasis !== undefined && recordedBy === null) {
+    return sendError(
+      req,
+      res,
+      'ATTRIBUTION_REQUIRED',
+      'Recording a lawful basis needs an identified operator: a consent whose recorder cannot ' +
+        'be named is one that cannot be defended. Create the contact without a basis and record ' +
+        'it separately, or authenticate.'
+    );
+  }
+
   const orgId = orgScope(req);
-  const outcome = await createContactIfAbsent(orgId, input.email, (id) => ({
-    ...buildContactDocument(input, idPrefix, type, status),
-    id,
-    organizationId: orgId,
-  }));
+  const outcome = await createContactIfAbsent(orgId, input.email, (id) =>
+    contactDocumentFor(input, id, orgId, type, status, recordedBy)
+  );
 
   if (outcome.ok === false) {
     if (outcome.code === 'ALREADY_EXISTS') {
@@ -167,8 +190,102 @@ async function createContact(
 
 contactsRouter.post('/leads', async (req: Request, res: Response) => {
   try {
-    await createContact(req, res, 'lead', 'LEAD', 'NEW');
+    await createContact(req, res, 'LEAD', 'NEW');
   } catch(e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * CSV / list import — preview, then commit.
+ *
+ * ONE ENDPOINT, TWO MODES, AND THE MODE IS NOT A DETAIL. A preview reads and reports; a commit
+ * writes. They share this handler so the plan the operator approved and the plan that is
+ * executed are produced by the same code — two endpoints would be two planners, and the one
+ * that drifted would be the one nobody previewed with.
+ *
+ * `operatorGate` rather than `attributionFor`: the importer's name is written into every
+ * record's consent trail, and an import by "somebody" produces records whose basis cannot be
+ * defended. The service refuses an unattributed caller as well; the gate here is what turns
+ * that into a 403 rather than a 200 carrying a refusal.
+ */
+contactsRouter.post('/leads/import', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/leads/import');
+    if (body === null) return;
+    const gate = operatorGate(req.user, isProduction);
+    if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+
+    if (body.mode === 'COMMIT' && body.expectedPlanHash === undefined) {
+      return sendError(
+        req,
+        res,
+        'VALIDATION_ERROR',
+        'A commit must name the plan it is committing (expectedPlanHash, from the preview). ' +
+          'Committing without one would be approving a preview nobody ran.'
+      );
+    }
+
+    const outcome = await importLeads(
+      orgScope(req),
+      body.text,
+      {
+        basis: body.basis,
+        liaId: body.liaId,
+        consentEvidence: body.consentEvidence,
+        consentSource: body.consentSource,
+        country: body.country,
+        addressType: body.addressType,
+        sourceEvidence: body.sourceEvidence,
+        type: body.type,
+      },
+      gate.attribution,
+      { mode: body.mode, expectedPlanHash: body.expectedPlanHash }
+    );
+
+    if (outcome.ok === false) {
+      const status =
+        outcome.code === 'ATTRIBUTION_REQUIRED' ? 'ATTRIBUTION_REQUIRED'
+        : outcome.code === 'STORE_UNAVAILABLE' ? 'STORE_UNAVAILABLE'
+        : 'VALIDATION_ERROR';
+      return sendError(req, res, status, outcome.message, {
+        details: { importRefusal: outcome.code },
+      });
+    }
+
+    res.json(outcome);
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * Record that the Article 14 notice has been sent, for up to 500 contacts.
+ *
+ * Without this, legitimate interest is unreachable in practice: the gate requires the notice,
+ * the importer refuses to assert it on the operator's behalf, and recording it one contact at
+ * a time through the basis endpoint is not a workflow anyone would complete for a 900-row list.
+ *
+ * The timestamp is the moment of the call, never a parameter — see the service.
+ */
+contactsRouter.post('/leads/notice-sent', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/leads/notice-sent');
+    if (body === null) return;
+    const gate = operatorGate(req.user, isProduction);
+    if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+
+    const outcome = await recordArticle14Notice(
+      orgScope(req),
+      body.contactIds,
+      body.evidence,
+      gate.attribution
+    );
+    if (outcome.ok === false) return sendError(req, res, outcome.code, outcome.message);
+
+    res.json({
+      recorded: outcome.outcomes.filter((o) => o.recorded).length,
+      unchanged: outcome.outcomes.filter((o) => !o.recorded).length,
+      mailable: outcome.outcomes.filter((o) => o.mailable).length,
+      outcomes: outcome.outcomes,
+    });
+  } catch (e: any) { sendCaught(req, res, e); }
 });
 
 /**
@@ -497,7 +614,7 @@ contactsRouter.get('/investors', async (req: Request, res: Response) => {
 
 contactsRouter.post('/investors', async (req: Request, res: Response) => {
   try {
-    await createContact(req, res, 'inv', 'INVESTOR', 'DISCOVERED');
+    await createContact(req, res, 'INVESTOR', 'DISCOVERED');
   } catch(e: any) { sendCaught(req, res, e); }
 });
 
@@ -512,6 +629,6 @@ contactsRouter.get('/partners', async (req: Request, res: Response) => {
 
 contactsRouter.post('/partners', async (req: Request, res: Response) => {
   try {
-    await createContact(req, res, 'part', 'PARTNER', 'DISCOVERED');
+    await createContact(req, res, 'PARTNER', 'DISCOVERED');
   } catch(e: any) { sendCaught(req, res, e); }
 });

@@ -292,3 +292,100 @@ export async function revokeConsent(
     };
   });
 }
+
+export interface NoticeOutcome {
+  readonly contactId: string;
+  readonly recorded: boolean;
+  readonly reason: string;
+  /** What the gate says about this contact now. Often still a refusal, for other reasons. */
+  readonly mailable: boolean;
+}
+
+/**
+ * Record that the Article 14 notice has been sent, for a batch of contacts.
+ *
+ * WHY THE TIMESTAMP IS NOT A PARAMETER
+ * ------------------------------------
+ * It is the moment this function runs. The notice is a thing that happens in the world, and
+ * the field it writes is a precondition for outreach on legitimate interest — so a
+ * caller-supplied timestamp would be an unverifiable assertion about the past standing between
+ * a bought list and a send. The importer deliberately refuses a batch-level notice timestamp
+ * for the same reason; a per-row one from an exporting system is a record, a checkbox is not.
+ *
+ * WHY IT DOES NOT RE-STAMP
+ * ------------------------
+ * A contact that already has a notice timestamp keeps the original. The obligation is to tell
+ * someone once, promptly; moving the date forward on every run would erase the evidence of
+ * whether that actually happened within the window.
+ *
+ * Requires an identified actor, like every other write in this file except a revocation.
+ */
+export async function recordArticle14Notice(
+  orgId: string,
+  contactIds: readonly string[],
+  evidence: string,
+  by: Attribution,
+  now: Date = new Date()
+): Promise<{ ok: true; outcomes: NoticeOutcome[] } | { ok: false; code: 'ATTRIBUTION_REQUIRED' | 'STORE_UNAVAILABLE'; message: string }> {
+  if (!store) {
+    return { ok: false, code: 'STORE_UNAVAILABLE', message: 'The datastore is not available.' };
+  }
+  const actor = identifiedActor(by);
+  if (actor === null) {
+    return {
+      ok: false,
+      code: 'ATTRIBUTION_REQUIRED',
+      message:
+        `Recording that a notice was sent needs an identified operator: ` +
+        `${by.kind === 'UNATTRIBUTED' ? by.why : 'no actor on the credential'}.`,
+    };
+  }
+
+  const detail = trimmed(evidence);
+  if (detail === null) {
+    return {
+      ok: false,
+      code: 'ATTRIBUTION_REQUIRED',
+      message: 'Recording a notice needs evidence of what was sent and how.',
+    };
+  }
+
+  const iso = now.toISOString();
+  const outcomes: NoticeOutcome[] = [];
+
+  for (const contactId of contactIds) {
+    const outcome = await runTransaction(store, async (tx) => {
+      const snap = await tx.get(contactRef(orgId, contactId));
+      if (!snap.exists()) {
+        return { recorded: false, reason: `No contact ${contactId} in this organisation.`, mailable: false };
+      }
+      const current = snap.data() as Record<string, unknown>;
+      const already = trimmed(current.article14NoticeSentAt);
+      if (already !== null) {
+        return {
+          recorded: false,
+          reason: `A notice was already recorded as sent at ${already}; the original date stands.`,
+          mailable: evaluateLawfulBasis(current).ok,
+        };
+      }
+      const next = {
+        ...current,
+        article14NoticeSentAt: iso,
+        article14NoticeEvidence: detail,
+        article14NoticeRecordedBy: actor,
+        version: (typeof current.version === 'number' ? current.version : 0) + 1,
+        updatedAt: iso,
+      };
+      tx.set(contactRef(orgId, contactId), next);
+      const verdict = evaluateLawfulBasis(next);
+      return {
+        recorded: true,
+        reason: verdict.ok ? verdict.why : verdict.message,
+        mailable: verdict.ok,
+      };
+    });
+    outcomes.push({ contactId, ...outcome });
+  }
+
+  return { ok: true, outcomes };
+}

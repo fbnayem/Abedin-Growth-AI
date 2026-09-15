@@ -3,6 +3,7 @@ import { timeZoneRejection } from '../../shared/domain/time';
 import type { Request, Response } from 'express';
 import { sendError } from './errors';
 import { csvField, neutralizeCsvValue } from '../../shared/lib/csvSafety';
+import { ADDRESS_TYPES, LAWFUL_BASES } from '../domain/lawfulBasis';
 
 export { neutralizeCsvValue };
 
@@ -70,6 +71,26 @@ export const createContactSchema = z.object({
   notes: longText.optional(),
   // S26 — stated, never guessed; the campaign engine's QUIET_HOURS guard refuses without it.
   timeZone: shortText.refine((zone) => timeZoneRejection(zone) === null, { message: 'timeZone must be an IANA time zone identifier such as Europe/London' }).optional(),
+
+  // LEAD GENERATION P2b — the lawful basis, at the moment the contact is created.
+  //
+  // `consentGiven` is STILL not here and never will be. What is accepted is the BASIS and its
+  // supporting evidence; the flag is derived from the basis by `buildContactDocument`, and
+  // `consentRecordedBy` comes from the authenticated operator rather than the body. So the
+  // request can say "this person consented on the pricing page on the 1st", which is a claim
+  // an identified person is making and is recorded as such — and cannot say "this person is
+  // consented", which is the assertion §14 exists to refuse.
+  //
+  // The handler requires an identified operator before any of these are honoured. A contact
+  // created without them has no basis at all, which the gate reads as a refusal.
+  lawfulBasis: z.enum(LAWFUL_BASES).optional(),
+  addressType: z.enum(ADDRESS_TYPES).optional(),
+  consentEvidence: z.string().trim().min(1).max(2000).optional(),
+  consentSource: shortText.optional(),
+  liaId: shortText.optional(),
+  article14NoticeSentAt: z.string().datetime({ offset: true }).optional(),
+  /** Where this contact came from. Free text, and required when a basis is claimed. */
+  sourceEvidence: z.string().trim().min(1).max(2000).optional(),
 });
 
 export const createKnowledgeItemSchema = z.object({

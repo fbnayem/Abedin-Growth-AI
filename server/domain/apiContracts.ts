@@ -261,6 +261,55 @@ export const createQuoteSchema = z
   })
   .strict();
 
+/**
+ * CSV / list import.
+ *
+ * `text` carries the file contents rather than a multipart upload: one code path, no temporary
+ * files on disk, and the same body-validation the rest of the surface uses. The size ceiling is
+ * enforced twice over — by the route's own body parser and by `planImport` — because a limit
+ * that exists in one place only is a limit that moves when someone remounts a parser.
+ *
+ * NOT ACCEPTED, and this is the point of the strict object: `consentGiven`, any suppression
+ * flag, `organizationId`, `consentRecordedBy`. The importer's identity comes from the
+ * credential, never from the body.
+ */
+export const leadImportSchema = z
+  .object({
+    text: z.string().min(1).max(4_000_000),
+    mode: z.enum(['PREVIEW', 'COMMIT']),
+    /** Required for COMMIT: the fingerprint of the plan that was previewed and approved. */
+    expectedPlanHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    basis: z.enum(LAWFUL_BASES),
+    liaId: z.string().trim().min(1).max(200).optional(),
+    consentEvidence: z.string().trim().min(1).max(2000).optional(),
+    consentSource: z.string().trim().min(1).max(200).optional(),
+    country: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{2}$/, 'country must be an ISO-3166 alpha-2 code')
+      .optional(),
+    addressType: z.enum(ADDRESS_TYPES).optional(),
+    sourceEvidence: z.string().trim().min(1).max(2000),
+    type: z.enum(['LEAD', 'INVESTOR', 'PARTNER']).optional(),
+  })
+  .strict();
+
+/**
+ * Record that the Article 14 notice has been sent, for a batch of contacts.
+ *
+ * The timestamp is NOT a parameter. It is the moment this endpoint is called, because the
+ * endpoint is meant to be called by the thing that sent the notices. A caller-supplied
+ * timestamp is an assertion about the past that nothing can check, and the field it writes is
+ * a precondition for outreach.
+ */
+export const noticeSentSchema = z
+  .object({
+    contactIds: z.array(z.string().trim().min(1).max(255)).min(1).max(500),
+    /** What was sent and how, so the record can be explained later. */
+    evidence: z.string().trim().min(1).max(2000),
+  })
+  .strict();
+
 export const BODY_SCHEMAS = {
   'POST /api/company-brain': companyBrainSchema,
   'POST /api/company-brain/generate': companyBrainGenerateSchema,
@@ -274,6 +323,8 @@ export const BODY_SCHEMAS = {
   'POST /api/contacts/:id/quotes': createQuoteSchema,
   'POST /api/contacts/:id/lawful-basis': lawfulBasisSchema,
   'POST /api/contacts/:id/revoke-consent': revokeConsentSchema,
+  'POST /api/leads/import': leadImportSchema,
+  'POST /api/leads/notice-sent': noticeSentSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

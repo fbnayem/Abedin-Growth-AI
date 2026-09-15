@@ -24,6 +24,7 @@ import { unsubscribeRouter } from "./server/routes/unsubscribe.routes";
 import { isUnauthenticatedApiPath } from "./server/middleware/authAllowlist";
 import { cspReportRouter } from "./server/routes/cspReport.routes";
 import { CSP_REPORT_PATH } from "./server/middleware/securityHeaders";
+import { LEAD_IMPORT_PATH } from "./server/routes/contacts.routes";
 import { resolvePort } from "./server/config/port";
 import { actionTrailRouter } from "./server/routes/actionTrail.routes";
 import { spendRouter } from "./server/routes/spend.routes";
@@ -98,6 +99,21 @@ async function startServer() {
     CSP_REPORT_PATH,
     express.json({ limit: '16kb', type: ['application/csp-report', 'application/reports+json', 'application/json'] })
   );
+
+  // LEAD IMPORT — a bigger body, on one authenticated path, mounted BEFORE the global parser.
+  //
+  // `express.json()` defaults to 100kb, which is a few hundred contact rows. Raising the global
+  // limit to suit one endpoint would raise it for every unauthenticated surface too, so the
+  // larger ceiling is scoped to the path that needs it.
+  //
+  // BEFORE the global parser, for the reason S33 recorded: `express.json()` sets `req._body`,
+  // and a second parser mounted after it is silently skipped. A route-level parser that looks
+  // mounted and does nothing is worse than none, because the limit appears to be in place.
+  //
+  // 4mb against `MAX_IMPORT_BYTES` of 2mb: the JSON envelope and escaping make the encoded body
+  // larger than the file, and the real refusal — the one with a message an operator can act on
+  // — belongs in `planImport`, not in a 413 from the parser.
+  app.use(LEAD_IMPORT_PATH, express.json({ limit: '4mb' }));
 
   app.use(express.json());
 
