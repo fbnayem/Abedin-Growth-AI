@@ -1,6 +1,11 @@
-# Lead generation: the plan
+# Lead generation: the plan, and what was built against it
 
-**Status: proposed, not started.** Written 2026-09-15 against commit `dde849d`.
+**Status: delivered.** Proposed 2026-09-15 against commit `dde849d`; completed the same day
+across seven commits, `6a05e9a` to `f2ecd26`. Section 9 records what each phase actually
+produced and what proves it; section 10 records what is still an owner decision.
+
+The plan below is left as it was written, including the parts it got wrong, because a plan
+edited to match its outcome stops being evidence of anything.
 
 This plan is written to the same standard as the rest of `docs/production/`: it states what is
 true now, what will change, and what will prove it. Nothing here is complete until an executable
@@ -221,3 +226,107 @@ the gateway refuses at the final hop because sending is off.
    the others make safe.
 
 Phase 5 is not a stage at the end. Each phase closes with its own proof before the next starts.
+
+---
+
+## 9. What was built, and what proves it
+
+Seven commits, `6a05e9a` through `f2ecd26`. The gate at the end: **97 suites, 2,489 tests, exit
+0**; client bundle 1,321,122 bytes with no development markers; OpenAPI 106 routes, 22 with a
+request contract; the code graph clean at 212 live modules and zero dead files.
+
+| Phase | Delivered | Proven by | Mutation |
+|---|---|---|---|
+| 1. Lawful basis | `server/domain/lawfulBasis.ts`, `services/lawfulBasis.service.ts`, two endpoints | `lawfulBasis.invariant` (28), `lawfulBasisWrite.invariant` (30) | 12/12, 3/3 + control, 12/12 |
+| 2a. CSV import | `domain/leadImport.ts`, `domain/leadCandidate.ts`, `services/leadImport.service.ts`, `POST /api/leads/import` | `leadImport.invariant` (48) | 23/23, one control |
+| 2b. Manual entry | basis fields on `createContactSchema`, refused without an identified operator | `validation.invariant` | covered above |
+| 2c. Discovery | `providers/types.ts` contract, `services/discovery.service.ts`, `POST /api/leads/discover` | `discoveryProvider.invariant` (28) | 19/19, two controls |
+| 2d. Scraping | `domain/crawlTarget.ts`, `domain/robots.ts`, `domain/pageExtraction.ts`, `services/scrapeWorker.service.ts`, `POST /api/leads/scrape` | `scrapeWorker.invariant` (44) | 35/35, one control |
+| 3. Qualification | `domain/leadScore.ts`, `services/leadScore.service.ts`, two endpoints | `leadScore.invariant` (32) | 19/19, one control |
+| 4. Console | `LeadSourcesView`, `LawfulBasisPanel`, `LeadScoreCard`, `EnrolInCampaignModal` | `leadConsole.invariant` (20) | 7/7, one control |
+
+**131 mutants, every one behaving as required**, seven of them controls that had to survive.
+
+### The four things the plan did not anticipate
+
+1. **Legitimate interest accepted a free-mail address.** The module header documented "a business
+   address rather than a personal one" while the code accepted `addressType: PERSONAL`, so a
+   bought list of gmail addresses would have passed. Two different questions had been conflated:
+   `addressType` is about what category of personal data a record holds, and both answers are
+   compatible with the basis; corporate-versus-individual subscriber is answered by the domain.
+   `LI_PERSONAL_ADDRESS` became `LI_ADDRESS_TYPE_UNKNOWN`, which is what it actually tests, and
+   `LI_INDIVIDUAL_SUBSCRIBER` was added.
+
+2. **Four sources meant one write path, or it meant nothing.** The plan said so; making it true
+   required extracting `services/leadIngest.service.ts` and `domain/leadCandidate.ts` after the
+   importer was already written. A test now asserts the importer holds no write of its own.
+
+3. **Server-side request forgery is the scraper's real hazard**, and the plan did not mention it.
+   `domain/crawlTarget.ts` refuses IP literals, non-web ports, credentials in a URL and reserved
+   names, and then RESOLVES the hostname and checks every address — because a hostname is not a
+   promise about an address, and `metadata.attacker.example` can have an A record pointing at
+   `169.254.169.254`. DNS rebinding remains open and is written down in the module rather than
+   left to be discovered.
+
+4. **A batch notice endpoint was necessary for legitimate interest to be usable at all.**
+   Recording the Article 14 notice one contact at a time through the basis endpoint is not a
+   workflow anyone completes for a 900-row list, so `POST /api/leads/notice-sent` exists. Its
+   timestamp is the moment of the call, never a parameter.
+
+### Live verification, 2026-09-15
+
+Against a running server on the real database, using preview and refusal paths only, so nothing
+was written:
+
+| Probe | Result |
+|---|---|
+| Readiness | seven flags, all false, `allExternalActionsDisabled: true` |
+| Import body claiming `consentGiven` | 400, `Unrecognized key: "consentGiven"` |
+| File columns named `consentGiven`, `unsubscribed`, `organizationId` | ignored and reported; `consentGiven` written as `false` from the basis |
+| Import preview, complete legitimate-interest batch | 1 would be created, **0 contactable**, `LI_NOTICE_NOT_SENT` |
+| Commit carrying another file's plan hash | 400, `PLAN_CHANGED` |
+| Row with `country: United Kingdom` | refused, `BAD_COUNTRY`, named with its line number |
+| Discovery, flag off | 501, nothing called, nothing charged |
+| Scrape, flag off | 501, no request left the process |
+| Scrape `http://169.254.169.254/...`, flag ON | 403 `IP_LITERAL`, refused before the network |
+| Scrape `http://localhost:5432/`, flag ON | 403 `BAD_PORT` |
+| Scrape `file:///etc/passwd`, flag ON | 403 `BAD_SCHEME` |
+
+With the scrape flag on, `allExternalActionsDisabled` correctly read `false` — the aggregate
+covers the two new flags. It was switched off again immediately; neither flag is in `.env`.
+
+---
+
+## 10. What is still an owner decision
+
+Nothing below is a gap in the code. Each is something only the owner can settle.
+
+1. **The country table in `server/domain/lawfulBasis.ts` needs legal review before it is relied
+   on.** Six countries, deny-by-default, drawn from the commonly stated position in each
+   jurisdiction and marked as needing checking. The distinctions are genuinely fine — under UK
+   PECR a sole trader and a limited company at the same address are treated differently — and
+   this is not the right source for that.
+
+2. **A legitimate interests assessment has to exist.** The system requires an `liaId` and stores
+   it; it does not and cannot write the assessment. Importing on legitimate interest without one
+   on file means the id references nothing.
+
+3. **The Article 14 notice has to actually be sent.** The endpoint records that you sent it. It
+   does not send it, and the timestamp is the moment of the call precisely so that it cannot be
+   a claim about a past nobody can check.
+
+4. **No discovery adapter ships with this repository.** The contract, the flag, the spend cap and
+   the ambiguity handling are all in place; an adapter for a specific vendor is a registration
+   against `registerDiscoveryProvider`. Writing one against an API nobody has bought would be
+   code whose behaviour nothing could check.
+
+5. **Scraping LinkedIn remains the decision section 4 described.** The architecture supports it;
+   the trade-off is unchanged, and the lower-risk equivalents — their partner APIs or a licensed
+   vendor — fit the 2c adapter without any change to this design. Company-website scraping, which
+   is what the worker is built and tested for, carries materially less risk.
+
+6. **Sending is still off.** `REAL_EMAIL_SEND_ENABLED` is false, as are the other six. Leads can
+   now be created, qualified, made lawfully contactable and enrolled into a campaign; the gateway
+   refuses at the final hop by design, and turning that off is a separate decision with its own
+   preconditions — Google Postmaster verification and the deliverability items in
+   `addendum-status.md`.

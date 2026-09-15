@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   isRealActionEnabled,
@@ -76,6 +77,22 @@ describe('§46 — flags are read lazily, so display and enforcement cannot dive
     expect(isRealActionEnabled('REAL_EMAIL_SEND_ENABLED')).toBe(true);
     process.env.REAL_EMAIL_SEND_ENABLED = 'false';
     expect(isRealActionEnabled('REAL_EMAIL_SEND_ENABLED')).toBe(false);
+  });
+
+  it('every flag in the snapshot is reported by /api/readiness', () => {
+    // The aggregate and the per-flag view must not disagree about what the aggregate covers.
+    // `allExternalActionsDisabled` already counted discovery and scraping before the readiness
+    // handler listed them, so an operator reading five booleans beside a claim covering seven
+    // had no way to see the other two.
+    // Comments stripped first: the handler's own comment names the aggregate, so slicing to
+    // the first mention of it would end the block inside the prose rather than at the field.
+    const handler = readFileSync('server/routes/health.routes.ts', 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
+    const block = handler.slice(handler.indexOf('safeRebuildMode: {'), handler.indexOf('allExternalActionsDisabled'));
+    for (const flag of REAL_ACTION_FLAGS) {
+      expect(block, flag).toContain(`flags.${flag}`);
+    }
   });
 
   it('safeModeSnapshot() agrees with isRealActionEnabled() for every flag', () => {

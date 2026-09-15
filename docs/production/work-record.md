@@ -3443,3 +3443,37 @@ What these scripts do not claim is stated in the scripts themselves: `check-gate
 | `DNS_RESOLVERS` | Resolver addresses for the SPF, DKIM and DMARC lookups | The system resolver is used; a malformed entry throws rather than being silently dropped | malformed refuses |
 
 Two gaps in this file are worth stating here because a deployment configured from it alone would hit them. `OUTBOUND_MESSAGE_ID_DOMAIN` is read on the send path, and without a valid value an email send is refused before the network; `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are read by the Gmail token refresh. None of the three is in `.env.example`. The `OUTBOUND_MESSAGE_ID_DOMAIN` gap is carried in section 9.2; the `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` gap is carried in section 8. Further keys beyond those three are read by code without being documented here, including the development tenant bootstrap, the worker's tenant list, the alert webhook and the three build-provenance variables that CI injects; no exact count of them is established here.
+
+---
+
+## 12. Postscript: the lead generation work, 2026-09-15
+
+**Everything above describes the tree at `dde849d`.** This section is appended rather than folded
+in, because editing the body to match a later tree would turn a record of what was found into a
+description of what is, and those are different documents. What follows names the claims above
+that have since changed, and points at where the new work is recorded.
+
+The full account is `docs/production/lead-generation-plan.md`, sections 9 and 10: what each phase
+produced, what proves it, the four things the plan did not anticipate, the live probe results,
+and what remains an owner decision. The work is seven commits, `6a05e9a` through `f2ecd26`.
+
+### What the body above says that is no longer true
+
+| Where | What it says | What is true at `f2ecd26` |
+|---|---|---|
+| §4, §5 passim | `consentGiven !== true` is the gate, and a create cannot set it | The gate is `evaluateLawfulBasis`, which recognises CONSENT and LEGITIMATE_INTEREST and refuses on eleven named codes. `consentGiven` is still not an input anywhere — it is DERIVED from the basis — so the mass-assignment closure the body describes is intact and now also applies to imports, provider records and scraped pages |
+| §9 | Lead generation is absent; the three `batch-generate` routes answer 501 | Those three still answer 501. Four real sources now exist behind their own endpoints: CSV import, manual entry, a discovery provider adapter, and a scrape worker — each previewing before it commits, all ending at one write path |
+| §9 | Nothing scores a lead; the fabricating generator was deleted | `server/domain/leadScore.ts` computes the five declared components from fields that exist. A component with no input is NOT scored, and every score carries its confidence and its rubric version |
+| §8 | Five Safe Rebuild Mode flags | Seven. `REAL_DISCOVERY_ENABLED` and `REAL_SCRAPE_ENABLED` joined them, both default false, both covered by `isFullySafeMode()` and reported by `/api/readiness`. The policy fingerprint moved from version 2 to version 3 because of it |
+| §6 | The suite counts and the proof machinery | 97 suites, 2,489 tests. Six new invariant suites; 131 mutants across the work, seven of them controls that had to survive |
+
+### What did not change
+
+Sending is still off, and every item in §9.1 — the undeployed Firestore rules, the published
+Firebase credentials, the unaudited datastore, the missing CA certificate, Postmaster
+verification — stands exactly as recorded. None of them is closable from this repository, and
+none of them was touched.
+
+The one claim in §9 that this work strengthens rather than retires: a lead created today could
+never be emailed, by any path. That was correct when it was written, and it was the finding the
+whole of the lead generation work was built around.

@@ -31,6 +31,13 @@ healthRouter.get('/readiness', async (req: Request, res: Response) => {
         payment: flags.REAL_PAYMENT_ENABLED,
         signature: flags.REAL_SIGNATURE_ENABLED,
         linkedIn: flags.REAL_LINKEDIN_SEND_ENABLED,
+        // P2c/P2d — neither sends anything to a prospect, and both are real actions: one
+        // spends this tenant's money at a third party, the other makes requests to somebody
+        // else's servers under this system's name. `allExternalActionsDisabled` already
+        // covered them through `isFullySafeMode()`; they are listed here so the aggregate and
+        // the per-flag view cannot disagree about what it aggregates.
+        discovery: flags.REAL_DISCOVERY_ENABLED,
+        scrape: flags.REAL_SCRAPE_ENABLED,
         allExternalActionsDisabled: isFullySafeMode(),
       },
       // NOTE (S47, tracked in the P3 roadmap): the checks above still test object existence
