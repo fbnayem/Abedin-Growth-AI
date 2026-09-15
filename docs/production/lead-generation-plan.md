@@ -231,13 +231,13 @@ Phase 5 is not a stage at the end. Each phase closes with its own proof before t
 
 ## 9. What was built, and what proves it
 
-Seven commits, `6a05e9a` through `f2ecd26`. The gate at the end: **97 suites, 2,489 tests, exit
-0**; client bundle 1,321,122 bytes with no development markers; OpenAPI 106 routes, 22 with a
+Eight commits, `6a05e9a` through the one carrying this section. The gate at the end:
+**97 suites, 2,498 tests, exit 0**; client bundle 1,321,122 bytes with no development markers; OpenAPI 106 routes, 22 with a
 request contract; the code graph clean at 212 live modules and zero dead files.
 
 | Phase | Delivered | Proven by | Mutation |
 |---|---|---|---|
-| 1. Lawful basis | `server/domain/lawfulBasis.ts`, `services/lawfulBasis.service.ts`, two endpoints | `lawfulBasis.invariant` (28), `lawfulBasisWrite.invariant` (30) | 12/12, 3/3 + control, 12/12 |
+| 1. Lawful basis | `server/domain/lawfulBasis.ts`, `services/lawfulBasis.service.ts`, three endpoints | `lawfulBasis.invariant` (28), `lawfulBasisWrite.invariant` (39) | 17/17 + control, 3/3 + control, 17/17 |
 | 2a. CSV import | `domain/leadImport.ts`, `domain/leadCandidate.ts`, `services/leadImport.service.ts`, `POST /api/leads/import` | `leadImport.invariant` (48) | 23/23, one control |
 | 2b. Manual entry | basis fields on `createContactSchema`, refused without an identified operator | `validation.invariant` | covered above |
 | 2c. Discovery | `providers/types.ts` contract, `services/discovery.service.ts`, `POST /api/leads/discover` | `discoveryProvider.invariant` (28) | 19/19, two controls |
@@ -245,7 +245,35 @@ request contract; the code graph clean at 212 live modules and zero dead files.
 | 3. Qualification | `domain/leadScore.ts`, `services/leadScore.service.ts`, two endpoints | `leadScore.invariant` (32) | 19/19, one control |
 | 4. Console | `LeadSourcesView`, `LawfulBasisPanel`, `LeadScoreCard`, `EnrolInCampaignModal` | `leadConsole.invariant` (20) | 7/7, one control |
 
-**131 mutants, every one behaving as required**, seven of them controls that had to survive.
+**142 mutants, every one behaving as required**, eight of them controls that had to survive.
+
+### The mutation harness was wrong, and it was wrong in the flattering direction
+
+The first run of the decision module reported its control as KILLED — a mutant that adds only a
+COMMENT, which cannot change behaviour. It had not been killed. `vitest` exits non-zero both when
+a test fails and when the runner itself falls over, and eighteen runs back to back made the
+second happen: `Cannot read properties of undefined (reading 'config')`, suite never loaded, zero
+tests executed, exit 1. The harness read that as a kill.
+
+That is the worst possible direction for a measurement error, because it credits a suite with
+catching something it never ran. Every harness now re-runs a suspected crash once — a real kill
+is deterministic, a flaky worker is not — and reports it separately if it recurs. **Every batch
+above was then re-run from scratch under the corrected harness**, and the figures are those runs,
+not the earlier ones.
+
+Two further things fell out of the re-run, both of which had been silently unproven:
+
+- **Four import mutants had stopped applying.** Their anchors moved into `leadCandidate.ts`
+  during the one-write-path refactor, and an anchor that matches zero times is skipped with a
+  note that is easy to read past. The field-length cap, the formula neutralisation, the malformed
+  country and the unreadable notice timestamp were all unverified in that run. Repointed; all
+  four kill.
+
+- **`recordArticle14Notice` had no test at all.** Found the same way: adding it beside
+  `recordLawfulBasis` made two writer anchors match twice. It is the one call that turns a record
+  the gate refuses into one it permits, in batches of up to five hundred, and nothing asserted
+  that it requires a named actor, that it refuses without evidence, that it does not re-stamp an
+  existing notice, or that it writes nothing else. Nine tests and five mutants now cover it.
 
 ### The four things the plan did not anticipate
 

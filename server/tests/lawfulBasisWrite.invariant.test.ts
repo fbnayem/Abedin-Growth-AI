@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { memory } from './helpers/memoryDocumentStore';
-import { recordLawfulBasis, revokeConsent } from '../services/lawfulBasis.service';
+import { recordArticle14Notice, recordLawfulBasis, revokeConsent } from '../services/lawfulBasis.service';
 import { evaluateLawfulBasis } from '../domain/lawfulBasis';
 import { lawfulBasisSchema } from '../domain/apiContracts';
 import type { Attribution } from '../domain/operatorAction';
@@ -25,6 +25,10 @@ vi.mock('../store', async () => (await import('./helpers/memoryDocumentStore')).
  * that returns the right shape while writing the wrong fields passes every test that only reads
  * what it was handed back.
  */
+
+/** The house stripper: a source assertion that matches the fix's own comment proves nothing. */
+const stripComments = (source: string) =>
+  source.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1 ');
 
 const ORG = 'org-a';
 const ID = 'ct_ada';
@@ -291,5 +295,148 @@ describe('7. the request contract cannot be used to set the flags directly', () 
 
   it('an unknown basis is refused by the contract before it reaches the service', () => {
     expect(lawfulBasisSchema.safeParse({ basis: 'CONTRACT' }).success).toBe(false);
+  });
+});
+
+/**
+ * THE ARTICLE 14 NOTICE, WHICH IS THE WRITE THAT MAKES PEOPLE MAILABLE.
+ *
+ * Added late, and it should have been added with the function. `recordArticle14Notice` is the
+ * one call in this system that turns a record the outreach gate refuses into one it permits, in
+ * batches of up to five hundred, and it shipped with no test of its own — found by a mutation
+ * run, where two anchors in the writer suite started matching twice because this function had
+ * been added beside them.
+ *
+ * FOUR PROPERTIES, EACH OF WHICH IS A WAY IT COULD BE WRONG
+ * --------------------------------------------------------
+ * 1. THE TIMESTAMP IS NOT A PARAMETER. It is the moment of the call, because the field is a
+ *    precondition for outreach and a caller-supplied date is an unverifiable assertion about
+ *    the past standing between a bought list and a send.
+ *
+ * 2. IT DOES NOT RE-STAMP. A contact that already has a notice keeps the original date. The
+ *    obligation is to tell someone once, promptly; moving the date forward on every run erases
+ *    the evidence of whether that actually happened inside the window.
+ *
+ * 3. IT REQUIRES A NAMED ACTOR, like every other write in this file except a revocation.
+ *
+ * 4. IT WRITES NOTHING ELSE. Not a suppression flag, not a basis, not a consent. It records one
+ *    fact and recomputes the verdict.
+ */
+describe('the Article 14 notice', () => {
+  const NOTICE = 'Sent by email from the Q3 UK dental batch, template a14-v2.';
+
+  /** A contact one notice away from being mailable on legitimate interest. */
+  function seedAwaitingNotice() {
+    seed({
+      lawfulBasis: 'LEGITIMATE_INTEREST',
+      addressType: 'ROLE',
+      liaId: 'lia_2026_q3_uk_b2b',
+      email: 'info@analytical.example',
+      emailKey: 'info@analytical.example',
+    });
+  }
+
+  it('refuses an unnamed recorder, and writes nothing', async () => {
+    seedAwaitingNotice();
+    const before = JSON.stringify(stored());
+    const outcome = await recordArticle14Notice(ORG, [ID], NOTICE, NOBODY, NOW);
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.code).toBe('ATTRIBUTION_REQUIRED');
+    expect(JSON.stringify(stored())).toBe(before);
+  });
+
+  it('refuses without evidence of what was sent', async () => {
+    seedAwaitingNotice();
+    for (const evidence of ['', '   ']) {
+      const outcome = await recordArticle14Notice(ORG, [ID], evidence, NAMED, NOW);
+      expect(outcome.ok).toBe(false);
+    }
+    expect(stored()!.article14NoticeSentAt).toBeUndefined();
+  });
+
+  it('records the notice, and the contact becomes mailable', async () => {
+    seedAwaitingNotice();
+    expect(evaluateLawfulBasis(stored()!).ok).toBe(false);
+
+    const outcome = await recordArticle14Notice(ORG, [ID], NOTICE, NAMED, NOW);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.outcomes[0]).toMatchObject({ contactId: ID, recorded: true, mailable: true });
+    expect(evaluateLawfulBasis(stored()!).ok).toBe(true);
+  });
+
+  it('the timestamp is the moment of the call, not anything a caller supplied', async () => {
+    seedAwaitingNotice();
+    await recordArticle14Notice(ORG, [ID], NOTICE, NAMED, NOW);
+    expect(stored()!.article14NoticeSentAt).toBe(NOW.toISOString());
+    expect(stored()!.article14NoticeRecordedBy).toBe('ops@abedin.example');
+    expect(stored()!.article14NoticeEvidence).toBe(NOTICE);
+  });
+
+  it('a second run does NOT move the date forward', async () => {
+    // The obligation is to tell someone once, promptly. Re-stamping on every run would erase
+    // whether that happened inside the window, which is the only thing the date is evidence of.
+    seedAwaitingNotice();
+    await recordArticle14Notice(ORG, [ID], NOTICE, NAMED, NOW);
+    const later = new Date('2026-11-01T09:00:00.000Z');
+    const outcome = await recordArticle14Notice(ORG, [ID], 'sent again', NAMED, later);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.outcomes[0].recorded).toBe(false);
+    expect(outcome.outcomes[0].reason).toContain('original date stands');
+    expect(stored()!.article14NoticeSentAt).toBe(NOW.toISOString());
+    expect(stored()!.article14NoticeEvidence).toBe(NOTICE);
+  });
+
+  it('it touches no suppression flag, no basis and no consent', async () => {
+    seed({
+      lawfulBasis: 'LEGITIMATE_INTEREST',
+      addressType: 'ROLE',
+      liaId: 'lia_1',
+      email: 'info@analytical.example',
+      emailKey: 'info@analytical.example',
+      unsubscribed: true,
+      suppressed: true,
+      consentGiven: false,
+    });
+    await recordArticle14Notice(ORG, [ID], NOTICE, NAMED, NOW);
+    const after = stored()!;
+    expect(after.unsubscribed).toBe(true);
+    expect(after.suppressed).toBe(true);
+    expect(after.consentGiven).toBe(false);
+    expect(after.lawfulBasis).toBe('LEGITIMATE_INTEREST');
+  });
+
+  it('a contact that does not exist is reported, not silently counted', async () => {
+    seedAwaitingNotice();
+    const outcome = await recordArticle14Notice(ORG, [ID, 'ct_nobody'], NOTICE, NAMED, NOW);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.outcomes).toHaveLength(2);
+    const missing = outcome.outcomes.find((o) => o.contactId === 'ct_nobody')!;
+    expect(missing.recorded).toBe(false);
+    expect(missing.mailable).toBe(false);
+    expect(missing.reason).toContain('No contact');
+  });
+
+  it('a notice does not make an otherwise incomplete record mailable', async () => {
+    // The notice is one of four conditions. Recording it must not be read as satisfying the
+    // others — a record with no balancing assessment stays refused, and says which condition.
+    seed({ lawfulBasis: 'LEGITIMATE_INTEREST', addressType: 'ROLE', email: 'info@analytical.example', emailKey: 'info@analytical.example' });
+    const outcome = await recordArticle14Notice(ORG, [ID], NOTICE, NAMED, NOW);
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.outcomes[0].recorded).toBe(true);
+    expect(outcome.outcomes[0].mailable).toBe(false);
+    expect(evaluateLawfulBasis(stored()!)).toMatchObject({ ok: false, code: 'LI_NO_ASSESSMENT' });
+  });
+
+  it('the write names no field outside the notice, which a source scan confirms', () => {
+    const source = stripComments(readFileSync('server/services/lawfulBasis.service.ts', 'utf8'));
+    const fn = source.slice(source.indexOf('export async function recordArticle14Notice'));
+    for (const forbidden of ['suppressed', 'unsubscribed', 'hardBounced', 'complained', 'consentGiven', 'lawfulBasis:']) {
+      expect(fn).not.toContain(forbidden);
+    }
+    expect(fn).toContain('article14NoticeSentAt: iso');
   });
 });

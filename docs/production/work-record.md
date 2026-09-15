@@ -3465,7 +3465,7 @@ and what remains an owner decision. The work is seven commits, `6a05e9a` through
 | §9 | Lead generation is absent; the three `batch-generate` routes answer 501 | Those three still answer 501. Four real sources now exist behind their own endpoints: CSV import, manual entry, a discovery provider adapter, and a scrape worker — each previewing before it commits, all ending at one write path |
 | §9 | Nothing scores a lead; the fabricating generator was deleted | `server/domain/leadScore.ts` computes the five declared components from fields that exist. A component with no input is NOT scored, and every score carries its confidence and its rubric version |
 | §8 | Five Safe Rebuild Mode flags | Seven. `REAL_DISCOVERY_ENABLED` and `REAL_SCRAPE_ENABLED` joined them, both default false, both covered by `isFullySafeMode()` and reported by `/api/readiness`. The policy fingerprint moved from version 2 to version 3 because of it |
-| §6 | The suite counts and the proof machinery | 97 suites, 2,489 tests. Six new invariant suites; 131 mutants across the work, seven of them controls that had to survive |
+| §6 | The suite counts and the proof machinery | 97 suites, 2,498 tests. Six new invariant suites; 142 mutants across the work, eight of them controls. The mutation harness itself had to be corrected mid-way — it was reading a crashed `vitest` worker as a kill, which is the flattering direction — and every batch was re-run under the fix |
 
 ### What did not change
 
