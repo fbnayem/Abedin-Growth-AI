@@ -14,9 +14,9 @@ Capability ownership is reported as *which live modules import the provider*, an
 | Entrypoint | Live modules reached |
 |---|---|
 | `server.ts` | 166 |
-| `src/main.tsx` | 63 |
+| `src/main.tsx` | 64 |
 
-Live modules in total: **222**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
+Live modules in total: **223**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
 
 ## 3. Capability providers and their live importers
 
@@ -353,7 +353,7 @@ The server's dependency surface by importer: every package a live module outside
 
 | Module | Imported by (live) | Reached from |
 |---|---|---|
-| `src/lib/apiFetch.ts` | 19 | main.tsx |
+| `src/lib/apiFetch.ts` | 20 | main.tsx |
 | `src/lib/emptyCompanyBrain.ts` | 1 | main.tsx |
 | `src/lib/firebase.ts` | 2 | main.tsx |
 | `src/lib/firebaseConfig.ts` | 1 | main.tsx |
@@ -380,6 +380,7 @@ The server's dependency surface by importer: every package a live module outside
 | `src/pages/MeetingsView.tsx` | 1 | main.tsx |
 | `src/pages/OnboardingModal.tsx` | 1 | main.tsx |
 | `src/pages/OutboxView.tsx` | 1 | main.tsx |
+| `src/pages/OutreachReadinessView.tsx` | 1 | main.tsx |
 | `src/pages/PartnerDetailModal.tsx` | 1 | main.tsx |
 | `src/pages/PartnersView.tsx` | 1 | main.tsx |
 | `src/pages/PipelineView.tsx` | 1 | main.tsx |

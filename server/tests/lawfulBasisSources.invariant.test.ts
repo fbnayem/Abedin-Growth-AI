@@ -205,7 +205,69 @@ describe('4. the table still denies by default', () => {
   });
 });
 
-describe('5. the source says what the tests say', () => {
+describe('5. the review pack describes the table it is asking about', () => {
+  const pack = readFileSync('docs/production/legal-review-pack.md', 'utf8');
+
+  /**
+   * A DOCUMENT ASKING FOR A SIGN-OFF HAS TO DESCRIBE WHAT IS ACTUALLY BEING SIGNED OFF.
+   *
+   * The failure this prevents is quiet and complete: somebody adds a seventh country, nobody
+   * updates the pack, a reviewer signs the six they can see, and the seventh goes live having
+   * been reviewed by nobody. The pack is the only artefact in this system a person outside it
+   * reads, so it is the one most likely to drift and the one where drift costs most.
+   */
+  it('names every country in the table', () => {
+    for (const [code, rule] of entries) {
+      expect(pack, code).toContain(code);
+      // And says which regime the system actually applies there, in the reviewer's words rather
+      // than in ours — a pack that listed the country without saying what we do would be asking
+      // them to sign off a blank.
+      const wanted =
+        rule.regime === 'CONSENT_REQUIRED' ? 'consent required'
+        : rule.regime === 'OPT_OUT' ? 'opt-out'
+        : 'legitimate interest';
+      expect(pack.toLowerCase(), `${code} regime`).toContain(wanted);
+    }
+  });
+
+  /**
+   * COUNTED, NOT MATCHED VERBATIM.
+   *
+   * The first version of this test looked for a fragment of each question's own wording in the
+   * pack. That couples a prose document to code strings, and the way such a test gets "fixed"
+   * when it fails is by weakening it — so it would end up proving nothing while looking strict.
+   *
+   * Counting is the property that actually matters: a question added to the table forces a
+   * question added to the pack. It cannot check that they are the SAME question, and says so
+   * rather than implying otherwise.
+   */
+  it('asks the reviewer at least as many questions as the table records', () => {
+    const sections = pack.split(/^### /m).slice(1);
+    for (const [code, rule] of entries) {
+      const section = sections.find((s) => s.includes(`(\`${code}\`)`));
+      expect(section, `no section for ${code}`).toBeDefined();
+      const numbered = (section ?? '').match(/^\d+\. /gm) ?? [];
+      expect(numbered.length, `${code} asks ${numbered.length}, table records ${rule.openQuestions.length}`)
+        .toBeGreaterThanOrEqual(rule.openQuestions.length);
+    }
+  });
+
+  it('says plainly that nothing has been checked yet', () => {
+    expect(pack).toContain('Nothing here has been checked');
+  });
+
+  it('states what it is NOT asking the reviewer to check', () => {
+    // A sign-off read as covering more than it does is worse than no sign-off, because it is
+    // relied on.
+    // Whitespace-normalised: the pack is hard-wrapped prose, so a phrase spans a newline and a
+    // raw `toContain` would fail on formatting rather than on substance.
+    const flat = pack.replace(/\s+/g, ' ');
+    expect(flat).toContain('What we are not asking you to check');
+    expect(flat).toContain('It cannot check that the reasoning is sound');
+  });
+});
+
+describe('6. the source says what the tests say', () => {
   const gate = stripComments(readFileSync('server/domain/lawfulBasis.ts', 'utf8'));
 
   it('there is exactly one country table, re-exported rather than copied', () => {

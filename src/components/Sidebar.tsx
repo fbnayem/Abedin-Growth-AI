@@ -1,5 +1,6 @@
 import React from "react";
-import { ShieldCheck, 
+import {
+  ShieldCheck,
   LayoutDashboard,
   Users,
   Building2,
@@ -24,6 +25,7 @@ export type NavTab =
   | "home"
   | "leads"
   | "sources"
+  | "readiness"
   | "companies"
   | "investors"
   | "partners"
@@ -64,6 +66,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: "home", label: "Home", icon: LayoutDashboard, badge: attentionCount > 0 ? attentionCount : undefined, hot: attentionCount > 0 },
     { id: "leads", label: "Leads", icon: Users },
     { id: "sources", label: "Lead Sources", icon: Upload },
+    { id: "readiness", label: "Outreach Readiness", icon: ShieldCheck },
     { id: "companies", label: "Companies", icon: Building2 },
     { id: "investors", label: "Investors", icon: TrendingUp },
     { id: "partners", label: "Partners", icon: Handshake },

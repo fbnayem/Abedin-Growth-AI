@@ -3477,3 +3477,88 @@ none of them was touched.
 The one claim in §9 that this work strengthens rather than retires: a lead created today could
 never be emailed, by any path. That was correct when it was written, and it was the finding the
 whole of the lead generation work was built around.
+
+---
+
+## 13. Second postscript: the compliance controls that were documents, 2026-09-15
+
+Section 12 closed with six items marked "an owner decision". Asked whether all six could be
+completed, four turned out not to be decisions at all — they were rules this repository STATED and
+did not ENFORCE, which is the one defect shape the addendum exists to name and which had not been
+applied to the lead system's own compliance controls.
+
+### The four, and what each actually was
+
+| Stated as | What it actually was | Now |
+|---|---|---|
+| "The country table needs legal review" | A comment. Nothing stopped a seventh country being added with no source, and nothing could tell a reviewed row from an unreviewed one | The citation is the row — the type requires an instrument, a provision and what it says. A `review` field needs a name, a date and a traceable reference. Unreviewed rows refuse once `REAL_EMAIL_SEND_ENABLED` is on |
+| "A legitimate interests assessment has to exist" | `nonEmptyString(facts.liaId)`. The letter `x` satisfied it, under a comment reading "the assessment is what makes the basis defensible" | A stored document: three limbs with length floors, countries covered, signed by a named person from the credential, expiring, immutable once signed. The gate resolves it rather than trusting it |
+| "The notice has to actually be sent" | An endpoint that recorded a notice nothing could send. The field it wrote is the precondition for outreach, so the route to a mailable contact was to assert the notice had happened | `PRIVACY_NOTICE_SEND` on the gateway, assembled per person from the controller settings, the signed assessment and that contact's own provenance |
+| "No discovery adapter ships" | True of a vendor-specific client; not true of the shape every vendor shares | A configured HTTPS adapter. The field map cannot name a consent or suppression field; the endpoint is SSRF-checked |
+
+### Three decisions in this work worth recording, because each could have gone the other way
+
+**1. The strict checks are tied to the send flag, not made unconditional.** Every country row is
+unreviewed and no assessment is signed, so an unconditional check would make the entire system
+unmailable in development. The pressure that creates is to forge a sign-off to get moving, and a
+control people are motivated to defeat is worse than one placed where the motivation runs the
+other way. So `ActionGateway.executeEmailSend` passes
+`requireReviewedRegime: isRealActionEnabled('REAL_EMAIL_SEND_ENABLED')` and the check costs
+nothing until somebody turns sending on. The whole safety property therefore rests on one call
+site, which is asserted directly in `suppression.invariant`.
+
+**2. The Article 14 notice leans the OPPOSITE way from a marketing send on an ambiguous outcome
+(§32).** Recording "sent" when it was not marks somebody mailable who was never told where we got
+their data — a silent legal failure. Recording "unsent" when it was sent means a duplicate notice,
+which harms nobody. Same rule underneath as everywhere else in this repository — never let an
+unknown become a permission — pointing the other way because the permission is on the other side.
+
+**3. An unreadable discovery response is AMBIGUOUS, not a clean failure.** Bytes came back, so the
+provider ran the query and probably charged. Classifying it NOT_APPLIED would record no spend and
+permit an immediate retry, which is how a capped budget is spent twice over.
+
+### The proof, and the six survivors
+
+103 suites, 2,672 tests. 96 mutants across five batches plus 5 controls, all behaving.
+
+Six mutants survived the first run and **every one was closed by adding the test it exposed, not
+by arguing the mutant equivalent.** Three of the six shared a shape worth naming: *a guard only
+reachable once another guard has already failed is a guard nothing is testing.* The gateway's
+suppression check, its opt-out refusal, and a coverage guard reachable only on a malformed stored
+record all fell into that class — each was caught earlier by a different check in the happy path,
+so no test ever executed them. They now have a suite that exercises the gateway executor rather
+than reading its source, and writing it turned up a real defect: a notice body of three spaces
+passed the emptiness check, because it compared against `''` without trimming.
+
+Two further notes, recorded because they are the kind that get quietly dropped:
+
+- One mutant crashed and the harness **refused to score it** — the crash guard added in the
+  previous session working as intended. It was a malformed mutant of mine (unbalanced parentheses,
+  so the suite failed to compile rather than to pass) and was rewritten.
+- Two anchors stopped applying when the `check-no-verdict-arithmetic` guardrail made me rewrite
+  `count > 0 ? 'PASS'` as a presence check. They were **repointed rather than left as a note in
+  the output**, which is the exact failure the previous session found.
+
+### Live verification, 2026-09-15
+
+Read-only and refusal paths only; nothing was written to the database, confirmed by re-reading the
+assessments collection after the probes and finding it still empty.
+
+| Probe | Result |
+|---|---|
+| `GET /api/outreach/preflight` | 10 blocking of 11 checks, against the real database |
+| Sender identity within that | `UNKNOWN`, because DNS could not be resolved in this environment — reported as blocking, which is the case a two-state design would have rendered as a tick |
+| `GET /api/lia` | `{"assessments":[]}` before and after every probe |
+| `POST /api/lia` with a three-character balancing limb | `VALIDATION_ERROR: LIA_LIMB_TOO_SHORT`, nothing written |
+| `POST /api/leads/notice-send` PREVIEW | refused, naming all seven unconfigured controller fields |
+| Startup registration | `No discovery provider (NOT_CONFIGURED)`, naming the three variables and no value |
+| `/api/readiness` | all seven flags false, `allExternalActionsDisabled: true` |
+
+### What did not change
+
+Sending is still off. Every item in §9.1 stands untouched. The country table and the balancing
+assessment are now **drafted and enforceable but unsigned** — a document exists and a qualified
+person still has to read it and put their name to it, which is not something this repository can
+do for them and not something it should pretend to.
+
+`docs/production/linkedin-decision.md` is the one item that remains a decision rather than a task.

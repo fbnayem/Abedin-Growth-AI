@@ -21,6 +21,7 @@ import { diagnosticFetch } from "./utils/diagnosticFetch";
 import { DashboardView } from "./pages/DashboardView";
 import { LeadsView } from "./pages/LeadsView";
 import { LeadSourcesView } from "./pages/LeadSourcesView";
+import OutreachReadinessView from "./pages/OutreachReadinessView";
 import { EnrolInCampaignModal } from "./components/EnrolInCampaignModal";
 import { LeadDetailModal } from "./pages/LeadDetailModal";
 import { InvestorDetailModal } from "./pages/InvestorDetailModal";
@@ -766,6 +767,14 @@ export function App() {
           {currentTab === "sources" && (
             <LeadSourcesView onImported={() => void syncLiveEngineData()} />
           )}
+
+          {/*
+            Takes no props on purpose. Everything it shows is read from the server at the moment
+            it is opened — a readiness screen fed from client state would be reporting what this
+            browser last heard, which is exactly the kind of stale confidence it exists to
+            replace.
+          */}
+          {currentTab === "readiness" && <OutreachReadinessView />}
 
           {currentTab === "companies" && (
             <CompaniesView

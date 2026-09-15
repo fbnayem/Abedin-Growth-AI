@@ -273,6 +273,59 @@ export const LeadSourcesView: React.FC<{ onImported?: () => void }> = ({ onImpor
     if (outcome !== null && mode === "COMMIT") onImported?.();
   };
 
+  /**
+   * Send the notice, or preview it.
+   *
+   * PREVIEW runs every check — the controller details, suppression, the signed assessment, the
+   * provenance line — and stops before the gateway. The outcomes come back per contact, so a
+   * batch where three records are missing a source says which three rather than failing whole.
+   *
+   * AMBIGUOUS IS REPORTED SEPARATELY, not folded into a refusal total. It is the one outcome
+   * where somebody has to decide something, and a number that buries it is how it gets missed.
+   */
+  const runNoticeSend = async (mode: "PREVIEW" | "SEND") => {
+    if (result === null) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const ids = result.outcomes
+        .map((o) => o.contactId)
+        .filter((id): id is string => typeof id === "string" && id !== "");
+      if (ids.length === 0) {
+        setError("No record in this run is waiting on the Article 14 notice.");
+        return;
+      }
+      const res = await apiFetch("/api/leads/notice-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactIds: ids, mode }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setError(body?.error?.message ?? body?.message ?? "The notice run was refused.");
+        return;
+      }
+      const outcomes: { sent: boolean; code: string }[] = body.outcomes ?? [];
+      const wouldSend = outcomes.filter((o) => o.code === "SENT").length;
+      const refusedCodes = [...new Set(outcomes.filter((o) => o.code !== "SENT").map((o) => o.code))];
+      setNotice(
+        (mode === "PREVIEW"
+          ? `Preview only — nothing was sent. ${wouldSend} of ${outcomes.length} would go out.`
+          : `Sent ${body.sent} of ${outcomes.length}.`) +
+          (body.ambiguous > 0
+            ? ` ${body.ambiguous} neither succeeded nor definitely failed, so they were NOT recorded ` +
+              `as sent and those people stay unmailable. Reconcile, or retry deliberately.`
+            : "") +
+          (refusedCodes.length > 0 ? ` Refused: ${refusedCodes.join(", ")}.` : "")
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The notice run failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const runNotice = async () => {
     if (result === null) return;
     const contactIds = result.outcomes
@@ -605,27 +658,65 @@ export const LeadSourcesView: React.FC<{ onImported?: () => void }> = ({ onImpor
         <div className={card}>
           <div className="flex items-center gap-2 mb-4">
             <MailCheck className="w-4 h-4 text-emerald-400" />
-            <h2 className="text-sm font-semibold text-white">Record that the Article 14 notice has been sent</h2>
+            <h2 className="text-sm font-semibold text-white">The Article 14 notice</h2>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
             Where a record was collected indirectly — imported, purchased or scraped — the person
-            has to be told where their data came from before or at first contact. Until that is
-            recorded, legitimate interest refuses and nobody in the batch can be emailed.
+            has to be told where their data came from before or at first contact. Until that has
+            happened, legitimate interest refuses and nobody in the batch can be emailed.
           </p>
-          <p className="text-xs text-amber-400/90 mt-3 leading-relaxed">
-            This records that you have sent the notice. It does not send it, and the timestamp is
-            the moment you press the button rather than a date you can type — a date nothing can
-            check is not evidence.
-          </p>
-          <button
-            onClick={() => void runNotice()}
-            disabled={busy || result === null}
-            className="mt-4 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xl transition-colors disabled:opacity-40 flex items-center gap-2"
-            title={result === null ? "Run an import, search or scrape first." : undefined}
-          >
-            <MailCheck className="w-4 h-4" />
-            I have sent the notice to everyone in the last run
-          </button>
+
+          {/*
+            TWO ROUTES, AND THE DIFFERENCE BETWEEN THEM IS THE POINT.
+
+            Sending is the ordinary one. Recording exists for an operator who sent the notice
+            another way — by letter, or through a mail merge — because removing that path would
+            not stop them. It would make them tell the system something untrue instead.
+          */}
+          <div className="mt-5 rounded-xl border border-emerald-800/40 bg-emerald-950/20 p-4">
+            <h3 className="text-xs font-semibold text-emerald-200">Send it</h3>
+            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              Assembled per person from your organisation details, the signed balancing assessment,
+              and where this particular record actually came from. Preview first: nothing leaves
+              the system until you press send.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button
+                onClick={() => void runNoticeSend("PREVIEW")}
+                disabled={busy || result === null}
+                className="px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-medium text-xs rounded-xl transition-colors disabled:opacity-40 flex items-center gap-2"
+                title={result === null ? "Run an import, search or scrape first." : undefined}
+              >
+                Preview the notices
+              </button>
+              <button
+                onClick={() => void runNoticeSend("SEND")}
+                disabled={busy || result === null}
+                className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded-xl transition-colors disabled:opacity-40 flex items-center gap-2"
+                title={result === null ? "Run an import, search or scrape first." : undefined}
+              >
+                <MailCheck className="w-4 h-4" />
+                Send the notices
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 rounded-xl border border-slate-700/60 bg-slate-900/40 p-4">
+            <h3 className="text-xs font-semibold text-slate-300">Or record one you sent yourself</h3>
+            <p className="text-xs text-amber-400/90 mt-2 leading-relaxed">
+              This records that you sent it. It does not send anything, and the timestamp is the
+              moment you press the button rather than a date you can type — a date nothing can
+              check is not evidence.
+            </p>
+            <button
+              onClick={() => void runNotice()}
+              disabled={busy || result === null}
+              className="mt-3 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 text-white font-medium text-xs rounded-xl transition-colors disabled:opacity-40 flex items-center gap-2"
+              title={result === null ? "Run an import, search or scrape first." : undefined}
+            >
+              I have sent the notice to everyone in the last run
+            </button>
+          </div>
         </div>
       )}
 

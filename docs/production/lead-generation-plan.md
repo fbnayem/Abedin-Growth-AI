@@ -358,3 +358,236 @@ Nothing below is a gap in the code. Each is something only the owner can settle.
    refuses at the final hop by design, and turning that off is a separate decision with its own
    preconditions — Google Postmaster verification and the deliverability items in
    `addendum-status.md`.
+
+---
+
+## 11. P6 — closing out section 10
+
+Section 10 listed six things that were "an owner decision". Asked to complete all of them, four
+turned out to be things this system could and should have been doing, one was a document that
+could be drafted but not signed, and one is a decision that stays the owner's.
+
+The pattern across the four is the same and worth naming: **each was a rule this repository
+STATED and did not ENFORCE.** A comment saying the country table needs review. A field called
+`liaId` that accepted the letter `x`. An endpoint recording that a notice had been sent, with
+nothing anywhere able to send one. The addendum's own argument — that a rule living only in a
+document will be forgotten — applied to the lead system's compliance controls and had not been
+applied to them.
+
+### 11.1 The country table (was item 1)
+
+The citation is now the row. `CountryRule` requires at least one `LegalSource` — instrument,
+provision, and what that provision says — so adding a country is mechanically an act of citing
+something. Each row also carries the specific questions a reviewer must answer and an honest
+`confidence` marker; two of the six are marked CONTESTED, because they are.
+
+A `review` field records who signed the row off, when, and under what matter reference. All three
+are required: a sign-off nobody can trace is the same as no sign-off. Every row is null today.
+
+**The enforcement is tied to the send flag, not to the environment.** `evaluateLawfulBasis` takes
+`requireReviewedRegime`, and `ActionGateway.executeEmailSend` passes
+`isRealActionEnabled('REAL_EMAIL_SEND_ENABLED')`. Development and preview are unaffected; the
+moment real sending is turned on, an unreviewed country refuses with
+`COUNTRY_NOT_LEGALLY_REVIEWED`.
+
+Making it unconditional was the obvious design and it is wrong. Every row is unreviewed, so an
+unconditional check would make the whole system unmailable until a solicitor had been paid — and
+the pressure that creates is to fill `review` in with something plausible to get moving. A control
+people are motivated to defeat is worse than one placed where the motivation runs the other way.
+
+`docs/production/legal-review-pack.md` is the same material written for the reviewer, and an
+invariant test keeps it from drifting: it must name every country in the table, state the regime
+applied there, and ask at least as many questions as the table records. That test counts rather
+than matching wording — a test coupling prose to code strings gets "fixed" by being weakened.
+
+### 11.2 The balancing assessment (was item 2)
+
+This was the worst of the six, because it read as a check and was a formality:
+
+```ts
+if (nonEmptyString(facts.liaId) === null) { ... 'the assessment is what makes the basis defensible' }
+```
+
+Typing `x` satisfied it. The gate that exists to stop unknowns becoming permissions contained, in
+its own file, exactly the defect it was built to remove.
+
+An assessment is now a stored document with the three limbs of the balancing test as separate
+fields, each with a floor on its length; the countries it covers; the data categories, sources and
+safeguards that are inputs to the test; and a signature. `POST /api/lia`, `POST /api/lia/:id/sign`,
+`/amend`, `/withdraw`, and a listing that says of each one whether it is usable and why not.
+
+Four properties carry the weight:
+
+- **A draft supports nothing.** Unsigned is not a state the old string check could even express.
+- **A signature freezes the text.** Amending a signed assessment is refused inside the
+  transaction, against the stored record — a check outside it is one a concurrent signature walks
+  past. The remedy for a wrong assessment is to withdraw it and write another.
+- **Withdrawal and expiry take effect by being TRUE.** The gate resolves the assessment at send
+  time, so a withdrawal at 09:00 stops the 09:01 send with no write to any contact record.
+- **The signer comes from the credential**, never from a field. A create that could sign itself
+  would make the signature worth what any self-reported field is worth.
+
+The gate's strict mode is again tied to the send flag, and an UNRESOLVED assessment under strict
+mode is a refusal (`LI_ASSESSMENT_NOT_RESOLVED`), not a pass — a caller that asks for the strict
+check and forgets the lookup has a bug, and treating that as permission is the failure that
+matters.
+
+`docs/production/lia-uk-b2b-2026.md` is a drafted assessment. It is explicitly a proposal from the
+engineer who built the system to the person who will own the risk, and it names the two places the
+balance is genuinely uncomfortable rather than presenting a clean pass.
+
+### 11.3 The Article 14 notice (was item 3)
+
+`recordArticle14Notice` recorded that a notice had been sent. Nothing sent one. Since that field
+is the precondition for legitimate-interest outreach, the operator's route to a mailable contact
+was to assert the notice had happened — and the system believed them.
+
+There is now a `PRIVACY_NOTICE_SEND` action type on the gateway. **A separate type, not a
+convenience:** `executeEmailSend` refuses any contact whose notice has not been sent, so routing
+the notice through it would require the lawful basis that the notice itself creates. A circular
+dependency with a legal shape.
+
+The notice is assembled, not templated. Every required element has exactly one source and a
+missing source is a refusal rather than a blank line — the controller details from organisation
+settings, the purpose and data categories from the signed assessment, and **the source line from
+this contact's own provenance record**. That last one is what a generic template always gets
+wrong: telling somebody "from publicly available sources" when the record was bought is a false
+statement in the one document whose entire purpose is to be accurate.
+
+What it checks, and what it deliberately does not, is argued in the module header: suppression
+still refuses; the lawful basis is NOT consulted; the campaign safety guards are NOT run, because
+frequency caps and quiet hours govern marketing volume and this is a legal notice with a deadline.
+
+**The §32 lean is the opposite of a marketing send, and deliberately.** Two harms are available
+and they are not symmetric:
+
+| | |
+|---|---|
+| Record "sent" when it was not | somebody is marked mailable and receives marketing without ever having been told where we got their data. A legal failure, and silent. |
+| Record "unsent" when it was | somebody may receive the same notice twice. Untidy. Nobody harmed. |
+
+So the ambiguous case fails closed on PERMISSION: `article14NoticeSentAt` is not written, the
+contact stays unmailable, and the attempt is recorded separately as ambiguous so it is visible
+rather than lost. A retry then requires `acknowledgesPossibleDuplicate`, so a second copy is a
+decision somebody makes rather than something a backoff loop does for them.
+
+The manual recording endpoint stays. An operator who sent the notice by letter has to be able to
+record that, and removing the path would not stop them — it would make them tell the system
+something untrue instead.
+
+### 11.4 The discovery adapter (was item 4)
+
+Section 10 said writing an adapter against an API nobody has bought would be code nothing could
+check. That is right about a **vendor-specific** client — request shapes, pagination, error
+envelopes and billing semantics all differ. It is not right about the shape every one of them
+shares: an HTTPS endpoint, a bearer credential, a JSON body of filters, and an array of records
+somewhere in the response.
+
+`HttpDiscoveryProvider` implements that shape and is configured rather than hardcoded. Pointing it
+at a vendor is a URL, a key and a field map. The configuration **cannot widen what the system
+accepts**: the map chooses which of THEIR keys fill OUR fields, and ours are a fixed list that
+excludes `consentGiven`, `suppressed`, `lawfulBasis` and `liaId` — so a hostile or careless config
+still cannot introduce them. The mass-assignment defence is in the shape of the mapping, not in
+the care taken writing it.
+
+The endpoint goes through the same `checkCrawlTarget` resolution the scraper uses, plus an HTTPS
+requirement: a configured URL is still an input, and "it was in the environment" is not a
+provenance that makes an address safe.
+
+One decision worth recording: **an unreadable response is AMBIGUOUS, not a clean failure.** Bytes
+came back, so the provider ran the query and in all likelihood charged for it. `INVALID_REQUEST`
+would classify it NOT_APPLIED, record no spend, and licence an immediate retry — which is how a
+capped budget gets spent twice over and the cap never fires.
+
+Startup registers it or says why not, naming variables and never values.
+
+### 11.5 Sending (was item 6) — and what `/api/outreach/preflight` is for
+
+Still off. All seven flags false, `allExternalActionsDisabled` true. Turning it on is a decision
+with real-world consequences and is not one this system should make for anybody.
+
+What was missing was not the flag but the answer to the real question: *if I turned it on right
+now, what would actually happen?* That answer lived across seven flags, an OAuth record, a DNS
+posture, a settings document, a country table, a set of campaign guards and a basis on every
+contact.
+
+`GET /api/outreach/preflight` computes it. Eleven checks, each with what was found and what to do
+about it. The design rule is that **a fact that could not be gathered is UNKNOWN, and UNKNOWN
+BLOCKS** — every `catch` in the gathering service returns `null` rather than a falsy value,
+because "the settings document could not be read" and "the settings document is empty" are
+different facts and only one is fixed by filling in a form.
+
+It also returns `uncheckable`: the four things it knows it cannot verify, named rather than
+omitted, and returned on the ready path too. A caveat that disappears when everything passes is a
+caveat nobody reads at the moment it matters.
+
+Run live against the real database on 2026-09-15, it answered **10 blocking of 11** — including
+reporting the sender-identity check as UNKNOWN because DNS could not be resolved in this
+environment, which is precisely the case a two-state design would have rendered as a tick.
+
+### 11.6 LinkedIn (was item 5) — still the owner's
+
+The one that stays a decision. `docs/production/linkedin-decision.md` sets out four distinct
+things that get called "LinkedIn lead generation", what each actually risks, and which I would
+build. Summarised: the *hiQ* line of cases did not establish a right to scrape LinkedIn, the
+breach-of-contract exposure is personal to whoever accepted the User Agreement, and a profile is a
+much richer body of personal data than a contact page — which makes the balancing test harder, not
+easier.
+
+The recommendation is the Sales Navigator export path: a front door, ingested by the CSV importer
+that already exists, with the source recorded as `IMPORT` like anything else. A day's work if the
+owner wants it. If the owner wants profile scraping instead, it gets built — the decision is
+theirs and the memo asks for it in writing, because a decision of that shape should exist
+somewhere other than a conversation.
+
+### 11.7 Proof
+
+| | |
+|---|---|
+| Suites / tests | 103 / 2,672, exit 0 |
+| New tests | 164 across six suites |
+| Mutants | 96 across five batches, plus 5 controls — all behaving |
+| Server bundle | 925.6 KB; client 1,330,798 bytes, no development markers |
+| Code graph | 223 live modules, 0 dead |
+| OpenAPI | 114 routes, 27 with a request contract |
+
+**Six mutants survived the first run, and every one was closed by adding the test it exposed
+rather than by arguing the mutant was equivalent.** Two were genuinely near-equivalent and were
+still worth the test:
+
+1. **A suppression flag cleared by the notice write.** Only reachable if the unsubscribe lands
+   between the service's read and the transaction's re-read — which is exactly what happens when
+   somebody clicks an opt-out link while a batch is running. The test reproduces the race in the
+   mock dispatch.
+2. **The gateway's own suppression check.** Unreachable in tests because the service's check
+   caught the same case first. A guard only reachable once another guard has failed is a guard
+   nothing is testing; it now has its own suite that exercises the executor rather than reading it.
+3. **The gateway's opt-out refusal**, same shape.
+4. **A coverage guard** reachable only on a malformed stored assessment — one whose `countries`
+   list contains an empty string, which the validator strips but a migration or a hand edit could
+   produce.
+5. **Two discovery tests that reached the right outcome by the wrong route**: `__proto__.polluted`
+   is undefined with or without the guard, and a huge body of `x` characters fails to parse
+   whether or not the size check runs. Both were rewritten to be observable.
+
+Two further notes, because they are the kind that get quietly dropped:
+
+- **One mutant crashed and the harness refused to score it**, which is what the crash guard added
+  in the previous session exists for. It turned out to be a malformed mutant of mine — unbalanced
+  parentheses, so the suite failed to compile rather than to pass — and it was rewritten.
+- **Two anchors stopped applying** when a guardrail (`check-no-verdict-arithmetic`) made me
+  rewrite `count > 0 ? 'PASS'` as a presence check. They were repointed rather than left as a
+  note in the output, which is the failure mode the previous session found.
+
+Exercising the gateway executor rather than reading its source also turned up a real defect in my
+own code: a notice body of three spaces passed the emptiness check, because it compared against
+`''` without trimming.
+
+### 11.8 What is left
+
+One item, and it is the one that was always going to be left: **LinkedIn, A/B/C/D.**
+
+Everything else in section 10 is now either enforced or drafted. Enforced means the system refuses
+when the condition is not met. Drafted means a document exists and a person still has to read it
+and sign it — the country review and the balancing assessment both sit there, and neither can be
+completed by anybody who is not qualified to take responsibility for it.
