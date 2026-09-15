@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ADDRESS_TYPES, LAWFUL_BASES } from './lawfulBasis';
 import { CAMPAIGN, OPPORTUNITY, legalStates } from './stateMachines';
 import { timeZoneRejection } from '../../shared/domain/time';
 import { PRICE_BOOK } from '../../shared/domain/pricing';
@@ -202,6 +203,42 @@ export const contactTimeZoneSchema = z
   .strict();
 
 /**
+ * The lawful basis on which a contact may be emailed.
+ *
+ * `.strict()` matters more here than anywhere else in this file. The fields NOT listed are the
+ * point: `suppressed`, `unsubscribed`, `hardBounced`, `complained` and `consentGiven` itself
+ * cannot be set through this endpoint. A caller states the basis and its evidence; the service
+ * derives the flag. Accepting `consentGiven` from a body is the mass-assignment hole that
+ * `createContactSchema` was written to close, and re-opening it on a second endpoint would be
+ * the same defect wearing a different URL.
+ */
+export const lawfulBasisSchema = z
+  .object({
+    basis: z.enum(LAWFUL_BASES),
+    country: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z]{2}$/, 'country must be an ISO-3166 alpha-2 code')
+      .optional(),
+    addressType: z.enum(ADDRESS_TYPES).optional(),
+    consentEvidence: z.string().trim().min(1).max(2000).optional(),
+    consentSource: z.string().trim().min(1).max(200).optional(),
+    liaId: z.string().trim().min(1).max(200).optional(),
+    article14NoticeSentAt: z.string().datetime({ offset: true }).optional(),
+    acknowledgesRevocation: z.boolean().optional(),
+    expectedVersion: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+/** Revoking consent carries only a reason. It never needs to say more than why. */
+export const revokeConsentSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(500).optional(),
+    expectedVersion: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+
+/**
  * S25 — a quote names tiers and components; it never carries an amount. The price is read
  * from the book by the service, so a body cannot state a price the book does not hold.
  */
@@ -235,6 +272,8 @@ export const BODY_SCHEMAS = {
   'POST /api/campaigns/:id/recipients': enrolRecipientsSchema,
   'POST /api/contacts/:id/time-zone': contactTimeZoneSchema,
   'POST /api/contacts/:id/quotes': createQuoteSchema,
+  'POST /api/contacts/:id/lawful-basis': lawfulBasisSchema,
+  'POST /api/contacts/:id/revoke-consent': revokeConsentSchema,
 } as const;
 
 export type ContractRoute = keyof typeof BODY_SCHEMAS;

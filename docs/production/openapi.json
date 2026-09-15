@@ -1917,6 +1917,156 @@
         "x-source": "server/routes/companyBrain.routes.ts:37"
       }
     },
+    "/api/contacts/{id}/lawful-basis": {
+      "post": {
+        "operationId": "post_api_contacts_id_lawful_basis",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "acknowledgesRevocation": {
+                    "type": "boolean"
+                  },
+                  "addressType": {
+                    "enum": [
+                      "PERSONAL",
+                      "ROLE"
+                    ],
+                    "type": "string"
+                  },
+                  "article14NoticeSentAt": {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+                    "type": "string"
+                  },
+                  "basis": {
+                    "enum": [
+                      "CONSENT",
+                      "LEGITIMATE_INTEREST"
+                    ],
+                    "type": "string"
+                  },
+                  "consentEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "consentSource": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "country": {
+                    "pattern": "^[A-Za-z]{2}$",
+                    "type": "string"
+                  },
+                  "expectedVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "liaId": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "basis"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/contacts.routes.ts:420"
+      }
+    },
     "/api/contacts/{id}/quotes": {
       "get": {
         "operationId": "get_api_contacts_id_quotes",
@@ -2002,7 +2152,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:403"
+        "x-source": "server/routes/contacts.routes.ts:479"
       },
       "post": {
         "operationId": "post_api_contacts_id_quotes",
@@ -2149,7 +2299,118 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:383"
+        "x-source": "server/routes/contacts.routes.ts:385"
+      }
+    },
+    "/api/contacts/{id}/revoke-consent": {
+      "post": {
+        "operationId": "post_api_contacts_id_revoke_consent",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "expectedVersion": {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "reason": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "properties": {
+                        "code": {
+                          "enum": [
+                            "ATTRIBUTION_REQUIRED",
+                            "AUTH_INVALID",
+                            "AUTH_REQUIRED",
+                            "AUTH_UNAVAILABLE",
+                            "CONFIGURATION_ERROR",
+                            "CONTACT_EXISTS",
+                            "ILLEGAL_TRANSITION",
+                            "INTERNAL_ERROR",
+                            "MERGE_REFUSED",
+                            "MODEL_OUTPUT_INVALID",
+                            "NOT_FOUND",
+                            "NOT_IMPLEMENTED",
+                            "POLICY_BLOCKED",
+                            "PROVIDER_RATE_LIMITED",
+                            "PROVIDER_UNAVAILABLE",
+                            "STORE_UNAVAILABLE",
+                            "TENANT_AMBIGUOUS",
+                            "TENANT_FORBIDDEN",
+                            "TENANT_INVALID",
+                            "TENANT_REVOCATION_UNVERIFIABLE",
+                            "TENANT_SUSPENDED",
+                            "TENANT_UNRESOLVED",
+                            "TERMINAL_STATE",
+                            "TOO_MANY_REFERENCES",
+                            "UNKNOWN_CURRENT_STATE",
+                            "UNKNOWN_TARGET_STATE",
+                            "VALIDATION_ERROR",
+                            "VERSION_CONFLICT",
+                            "VERSION_REQUIRED",
+                            "WEBHOOK_VERIFICATION_FAILED"
+                          ],
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "object"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "requestId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "requestId"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Any error, in the envelope server/lib/errors.ts builds; the code is one of the taxonomy."
+          }
+        },
+        "x-body": "contract",
+        "x-source": "server/routes/contacts.routes.ts:453"
       }
     },
     "/api/contacts/{id}/time-zone": {
@@ -2263,7 +2524,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:359"
+        "x-source": "server/routes/contacts.routes.ts:361"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -2352,7 +2613,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/contacts.routes.ts:184"
+        "x-source": "server/routes/contacts.routes.ts:186"
       }
     },
     "/api/csp-report": {
@@ -4055,7 +4316,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:413"
+        "x-source": "server/routes/contacts.routes.ts:489"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -4202,7 +4463,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:422"
+        "x-source": "server/routes/contacts.routes.ts:498"
       }
     },
     "/api/investors/batch-generate": {
@@ -4280,7 +4541,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:258"
+        "x-source": "server/routes/contacts.routes.ts:260"
       }
     },
     "/api/knowledge": {
@@ -4548,7 +4809,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:21"
+        "x-source": "server/routes/contacts.routes.ts:23"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -4695,7 +4956,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:166"
+        "x-source": "server/routes/contacts.routes.ts:168"
       }
     },
     "/api/leads/batch-followup": {
@@ -4773,7 +5034,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:315"
+        "x-source": "server/routes/contacts.routes.ts:317"
       }
     },
     "/api/leads/batch-generate": {
@@ -4851,7 +5112,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:233"
+        "x-source": "server/routes/contacts.routes.ts:235"
       }
     },
     "/api/leads/research": {
@@ -4929,7 +5190,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:308"
+        "x-source": "server/routes/contacts.routes.ts:310"
       }
     },
     "/api/leads/{id}/email": {
@@ -5017,7 +5278,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:338"
+        "x-source": "server/routes/contacts.routes.ts:340"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -5105,7 +5366,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:331"
+        "x-source": "server/routes/contacts.routes.ts:333"
       }
     },
     "/api/linkedin-config": {
@@ -6588,7 +6849,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:428"
+        "x-source": "server/routes/contacts.routes.ts:504"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -6735,7 +6996,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:437"
+        "x-source": "server/routes/contacts.routes.ts:513"
       }
     },
     "/api/partners/batch-generate": {
@@ -6813,7 +7074,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:283"
+        "x-source": "server/routes/contacts.routes.ts:285"
       }
     },
     "/api/pipeline": {
@@ -8908,7 +9169,7 @@
     "rawBody": 2,
     "readingBodyWithoutSchema": 14,
     "responsesDescribed": 0,
-    "routes": 98,
-    "withRequestContract": 15
+    "routes": 100,
+    "withRequestContract": 17
   }
 }

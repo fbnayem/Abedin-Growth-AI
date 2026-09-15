@@ -9,7 +9,9 @@ import { sendCaught, sendError } from '../lib/errors';
 import { parsedBodyOr400 } from '../lib/parsedBody';
 import { expectedVersionFrom, mutateWithVersion, sendMutationOutcome, sendVersionRequired, versionOf } from '../lib/concurrency';
 import { createQuote, quotesForEmail } from '../services/quote.service';
-import { attributionFor } from '../domain/operatorAction';
+import { recordLawfulBasis, revokeConsent } from '../services/lawfulBasis.service';
+import { attributionFor, operatorGate } from '../domain/operatorAction';
+import { isProduction } from '../config/environment';
 
 /**
  * S39 — Contacts: leads, investors, partners, and the merge.
@@ -397,6 +399,80 @@ contactsRouter.post('/contacts/:id/quotes', async (req: Request, res: Response) 
       return sendError(req, res, outcome.code === 'STORE_UNAVAILABLE' ? 'STORE_UNAVAILABLE' : 'VALIDATION_ERROR', outcome.message);
     }
     res.status(201).json(outcome.quote);
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * Record the lawful basis on which this contact may be emailed.
+ *
+ * This is the endpoint whose absence made every lead in the system permanently unmailable: the
+ * gateway refused without a basis, and nothing could write one. See `server/domain/lawfulBasis.ts`
+ * for the decision and `server/services/lawfulBasis.service.ts` for the four rules the write
+ * enforces.
+ *
+ * `operatorGate` rather than `attributionFor`, because a consent record whose recorder cannot be
+ * named is not a consent record. That is the same rule quote approval uses.
+ *
+ * The response carries the evaluated verdict, so an operator who records a basis and still
+ * cannot send is told why immediately. Answering "saved" to a record that remains unmailable is
+ * the fabricated-success shape this repository keeps removing.
+ */
+contactsRouter.post('/contacts/:id/lawful-basis', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/contacts/:id/lawful-basis');
+    if (body === null) return;
+    const gate = operatorGate(req.user, isProduction);
+    if (gate.allowed === false) return sendError(req, res, 'ATTRIBUTION_REQUIRED', gate.message);
+    const outcome = await recordLawfulBasis(orgScope(req), req.params.id, body, gate.attribution);
+    if (outcome.ok === false) {
+      const code =
+        outcome.code === 'NOT_FOUND' ? 'NOT_FOUND'
+        : outcome.code === 'STORE_UNAVAILABLE' ? 'STORE_UNAVAILABLE'
+        : outcome.code === 'ATTRIBUTION_REQUIRED' ? 'ATTRIBUTION_REQUIRED'
+        : 'VALIDATION_ERROR';
+      return sendError(req, res, code, outcome.message);
+    }
+    res.json({
+      contactId: outcome.contactId,
+      basis: outcome.basis,
+      mailable: outcome.verdict.ok,
+      // Why, in both directions. A refusal names the condition that is still unmet.
+      reason: outcome.verdict.ok ? outcome.verdict.why : outcome.verdict.message,
+      refusalCode: outcome.verdict.ok ? null : outcome.verdict.code,
+    });
+  } catch (e: any) { sendCaught(req, res, e); }
+});
+
+/**
+ * Revoke consent for this contact.
+ *
+ * Deliberately NOT behind `operatorGate`: this moves in the safe direction, and a control that
+ * refuses to stop something because it cannot name who asked is the wrong failure. The actor is
+ * recorded as `unattributed` rather than the action being refused.
+ */
+contactsRouter.post('/contacts/:id/revoke-consent', async (req: Request, res: Response) => {
+  try {
+    const body = parsedBodyOr400(req, res, 'POST /api/contacts/:id/revoke-consent');
+    if (body === null) return;
+    const outcome = await revokeConsent(
+      orgScope(req),
+      req.params.id,
+      attributionFor(req.user),
+      body.reason ?? null
+    );
+    if (outcome.ok === false) {
+      return sendError(
+        req,
+        res,
+        outcome.code === 'NOT_FOUND' ? 'NOT_FOUND' : 'STORE_UNAVAILABLE',
+        outcome.message
+      );
+    }
+    res.json({
+      contactId: outcome.contactId,
+      mailable: outcome.verdict.ok,
+      reason: outcome.verdict.ok ? outcome.verdict.why : outcome.verdict.message,
+    });
   } catch (e: any) { sendCaught(req, res, e); }
 });
 
