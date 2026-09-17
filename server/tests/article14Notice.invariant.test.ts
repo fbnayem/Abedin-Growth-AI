@@ -90,6 +90,7 @@ const LIA: LiaRecord = {
   balancing: 'x'.repeat(200),
   countries: ['GB'],
   sourceKinds: ['SCRAPE'],
+  addressSourceKinds: ['EMPLOYER_WEBSITE'],
   dataCategories: ['work email address', 'job title', 'employer name'],
   dataSources: ['company website contact pages'],
   safeguards: ['suppression on first objection'],
@@ -114,7 +115,7 @@ const SUBJECT = {
   sourceCollectedAt: '2026-09-10T08:00:00.000Z',
 };
 
-const VERDICT = assessmentVerdict(LIA, { country: 'GB', source: SUBJECT.source, now: NOW });
+const VERDICT = assessmentVerdict(LIA, { country: 'GB', source: SUBJECT.source, addressSourceKind: 'EMPLOYER_WEBSITE', now: NOW });
 
 function notice(overrides: Partial<typeof SUBJECT> = {}) {
   return buildArticle14Notice({
@@ -141,6 +142,12 @@ function seedContact(id: string, overrides: Record<string, unknown> = {}) {
     source: 'SCRAPE:analytical.example',
     sourceEvidence: 'https://analytical.example/contact',
     sourceCollectedAt: '2026-09-10T08:00:00.000Z',
+    // How the ADDRESS was obtained, which is a separate fact from how the person was found. A
+    // contact without it is refused by the gate, so a fixture without it would be testing the
+    // refusal rather than the thing each of these tests is about.
+    addressSourceKind: 'EMPLOYER_WEBSITE',
+    addressSourceEvidence: 'https://analytical.example/contact',
+    addressCollectedAt: '2026-09-10T08:00:00.000Z',
     version: 1,
     ...overrides,
   };
@@ -249,7 +256,7 @@ describe('3. it cannot state a basis that does not hold', () => {
       { withdrawnAt: '2026-09-11T00:00:00.000Z' },
       { reviewDueAt: '2026-01-01T00:00:00.000Z' },
     ]) {
-      const verdict = assessmentVerdict({ ...LIA, ...broken } as LiaRecord, { country: 'GB', source: SUBJECT.source, now: NOW });
+      const verdict = assessmentVerdict({ ...LIA, ...broken } as LiaRecord, { country: 'GB', source: SUBJECT.source, addressSourceKind: 'EMPLOYER_WEBSITE', now: NOW });
       const built = buildArticle14Notice({ controller: CONTROLLER, subject: SUBJECT, assessment: verdict, lia: LIA });
       expect(built.ok, JSON.stringify(broken)).toBe(false);
       if (!built.ok) expect(built.code).toBe('ASSESSMENT_NOT_VALID');

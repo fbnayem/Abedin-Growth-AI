@@ -1,7 +1,7 @@
 import { doc, getDoc, store } from '../store';
 import { orgPath } from '../tenancy/orgScope';
 import { createContactIfAbsent } from '../lib/identityStore';
-import { buildContactDocument, type ContactProvenance } from '../domain/contactDocument';
+import { buildContactDocument, type AddressProvenance, type ContactProvenance } from '../domain/contactDocument';
 import { evaluateLawfulBasis, type AddressType, type LawfulBasis } from '../domain/lawfulBasis';
 
 /**
@@ -93,6 +93,7 @@ export function prospectiveDocument(
   record: IngestRecord,
   settings: BasisSettings,
   provenance: ContactProvenance,
+  address: AddressProvenance,
   orgId: string,
   actor: string,
   type: 'LEAD' | 'INVESTOR' | 'PARTNER',
@@ -124,6 +125,7 @@ export function prospectiveDocument(
       status: 'NEW',
       now,
       provenance,
+      address,
       basis: {
         basis: settings.basis,
         addressType: (f.addressType as AddressType | undefined) ?? settings.addressType,
@@ -167,6 +169,7 @@ export async function ingestRecords(
   records: readonly IngestRecord[],
   settings: BasisSettings,
   provenance: ContactProvenance,
+  address: AddressProvenance,
   actor: string,
   options: { mode: IngestMode; type?: 'LEAD' | 'INVESTOR' | 'PARTNER'; now?: Date }
 ): Promise<IngestResult> {
@@ -186,7 +189,7 @@ export async function ingestRecords(
       records.map((r) => r.contactId)
     );
     for (const record of records) {
-      const document = prospectiveDocument(record, settings, provenance, orgId, actor, type, now);
+      const document = prospectiveDocument(record, settings, provenance, address, orgId, actor, type, now);
       const verdict = evaluateLawfulBasis(document);
       const isDuplicate = present.has(record.contactId);
       if (isDuplicate) duplicates++;
@@ -211,7 +214,7 @@ export async function ingestRecords(
   }
 
   for (const record of records) {
-    const document = prospectiveDocument(record, settings, provenance, orgId, actor, type, now);
+    const document = prospectiveDocument(record, settings, provenance, address, orgId, actor, type, now);
     const verdict = evaluateLawfulBasis(document);
     const result = await createContactIfAbsent(orgId, record.email, () => document);
 

@@ -913,6 +913,7 @@ export class ActionGateway {
                   country:
                       typeof contactData.country === 'string' ? contactData.country.trim().toUpperCase() : '',
                   source: contactData.source,
+                  addressSourceKind: contactData.addressSourceKind,
               })
             : undefined;
 

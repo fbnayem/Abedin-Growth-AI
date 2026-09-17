@@ -2124,7 +2124,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:727"
+        "x-source": "server/routes/contacts.routes.ts:752"
       }
     },
     "/api/contacts/{id}/quotes": {
@@ -2215,7 +2215,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:786"
+        "x-source": "server/routes/contacts.routes.ts:811"
       },
       "post": {
         "operationId": "post_api_contacts_id_quotes",
@@ -2365,7 +2365,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:692"
+        "x-source": "server/routes/contacts.routes.ts:717"
       }
     },
     "/api/contacts/{id}/revoke-consent": {
@@ -2479,7 +2479,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:760"
+        "x-source": "server/routes/contacts.routes.ts:785"
       }
     },
     "/api/contacts/{id}/time-zone": {
@@ -2596,7 +2596,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:668"
+        "x-source": "server/routes/contacts.routes.ts:693"
       }
     },
     "/api/contacts/{survivorId}/merge": {
@@ -2688,7 +2688,7 @@
         },
         "x-body": "no-schema",
         "x-body-note": "The handler reads req.body and no schema describes it, so this document cannot either; some of these check fields by hand. Listed by name in openapi.invariant.test.ts; the list may shrink and not grow.",
-        "x-source": "server/routes/contacts.routes.ts:493"
+        "x-source": "server/routes/contacts.routes.ts:518"
       }
     },
     "/api/csp-report": {
@@ -4454,7 +4454,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:796"
+        "x-source": "server/routes/contacts.routes.ts:821"
       },
       "post": {
         "operationId": "post_api_investors",
@@ -4463,6 +4463,22 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "addressSourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "addressSourceKind": {
+                    "enum": [
+                      "SUBJECT_SUPPLIED",
+                      "EMPLOYER_WEBSITE",
+                      "PUBLIC_DIRECTORY",
+                      "PROVIDER",
+                      "INFERRED_PATTERN",
+                      "MANUAL_RESEARCH"
+                    ],
+                    "type": "string"
+                  },
                   "addressType": {
                     "enum": [
                       "PERSONAL",
@@ -4641,7 +4657,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:805"
+        "x-source": "server/routes/contacts.routes.ts:830"
       }
     },
     "/api/investors/batch-generate": {
@@ -4722,7 +4738,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:567"
+        "x-source": "server/routes/contacts.routes.ts:592"
       }
     },
     "/api/knowledge": {
@@ -4999,7 +5015,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:38"
+        "x-source": "server/routes/contacts.routes.ts:43"
       },
       "post": {
         "operationId": "post_api_leads",
@@ -5008,6 +5024,22 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "addressSourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "addressSourceKind": {
+                    "enum": [
+                      "SUBJECT_SUPPLIED",
+                      "EMPLOYER_WEBSITE",
+                      "PUBLIC_DIRECTORY",
+                      "PROVIDER",
+                      "INFERRED_PATTERN",
+                      "MANUAL_RESEARCH"
+                    ],
+                    "type": "string"
+                  },
                   "addressType": {
                     "enum": [
                       "PERSONAL",
@@ -5186,7 +5218,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:199"
+        "x-source": "server/routes/contacts.routes.ts:222"
       }
     },
     "/api/leads/batch-followup": {
@@ -5267,7 +5299,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:624"
+        "x-source": "server/routes/contacts.routes.ts:649"
       }
     },
     "/api/leads/batch-generate": {
@@ -5348,7 +5380,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:542"
+        "x-source": "server/routes/contacts.routes.ts:567"
       }
     },
     "/api/leads/discover": {
@@ -5521,7 +5553,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:383"
+        "x-source": "server/routes/contacts.routes.ts:408"
       }
     },
     "/api/leads/import": {
@@ -5533,6 +5565,22 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "addressSourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "addressSourceKind": {
+                    "enum": [
+                      "SUBJECT_SUPPLIED",
+                      "EMPLOYER_WEBSITE",
+                      "PUBLIC_DIRECTORY",
+                      "PROVIDER",
+                      "INFERRED_PATTERN",
+                      "MANUAL_RESEARCH"
+                    ],
+                    "type": "string"
+                  },
                   "addressType": {
                     "enum": [
                       "PERSONAL",
@@ -5600,7 +5648,9 @@
                   "text",
                   "mode",
                   "basis",
-                  "sourceEvidence"
+                  "sourceEvidence",
+                  "addressSourceKind",
+                  "addressSourceEvidence"
                 ],
                 "type": "object"
               }
@@ -5683,7 +5733,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:218"
+        "x-source": "server/routes/contacts.routes.ts:241"
       }
     },
     "/api/leads/notice-send": {
@@ -5800,7 +5850,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:312"
+        "x-source": "server/routes/contacts.routes.ts:337"
       }
     },
     "/api/leads/notice-sent": {
@@ -5913,7 +5963,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:275"
+        "x-source": "server/routes/contacts.routes.ts:300"
       }
     },
     "/api/leads/research": {
@@ -5994,7 +6044,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:617"
+        "x-source": "server/routes/contacts.routes.ts:642"
       }
     },
     "/api/leads/score": {
@@ -6102,7 +6152,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:353"
+        "x-source": "server/routes/contacts.routes.ts:378"
       }
     },
     "/api/leads/scrape": {
@@ -6252,7 +6302,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:435"
+        "x-source": "server/routes/contacts.routes.ts:460"
       }
     },
     "/api/leads/{id}/email": {
@@ -6343,7 +6393,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:647"
+        "x-source": "server/routes/contacts.routes.ts:672"
       }
     },
     "/api/leads/{id}/score": {
@@ -6434,7 +6484,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:473"
+        "x-source": "server/routes/contacts.routes.ts:498"
       }
     },
     "/api/leads/{id}/simulate-reply": {
@@ -6525,7 +6575,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:640"
+        "x-source": "server/routes/contacts.routes.ts:665"
       }
     },
     "/api/lia": {
@@ -6616,6 +6666,16 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "addressSourceKinds": {
+                    "items": {
+                      "maxLength": 40,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   "balancing": {
                     "maxLength": 20000,
                     "minLength": 1,
@@ -6699,6 +6759,7 @@
                   "balancing",
                   "countries",
                   "sourceKinds",
+                  "addressSourceKinds",
                   "dataCategories",
                   "dataSources",
                   "safeguards",
@@ -6898,6 +6959,16 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "addressSourceKinds": {
+                    "items": {
+                      "maxLength": 40,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 20,
+                    "minItems": 1,
+                    "type": "array"
+                  },
                   "balancing": {
                     "maxLength": 20000,
                     "minLength": 1,
@@ -6981,6 +7052,7 @@
                   "balancing",
                   "countries",
                   "sourceKinds",
+                  "addressSourceKinds",
                   "dataCategories",
                   "dataSources",
                   "safeguards",
@@ -8906,7 +8978,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:811"
+        "x-source": "server/routes/contacts.routes.ts:836"
       },
       "post": {
         "operationId": "post_api_partners",
@@ -8915,6 +8987,22 @@
             "application/json": {
               "schema": {
                 "properties": {
+                  "addressSourceEvidence": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "addressSourceKind": {
+                    "enum": [
+                      "SUBJECT_SUPPLIED",
+                      "EMPLOYER_WEBSITE",
+                      "PUBLIC_DIRECTORY",
+                      "PROVIDER",
+                      "INFERRED_PATTERN",
+                      "MANUAL_RESEARCH"
+                    ],
+                    "type": "string"
+                  },
                   "addressType": {
                     "enum": [
                       "PERSONAL",
@@ -9093,7 +9181,7 @@
           }
         },
         "x-body": "contract",
-        "x-source": "server/routes/contacts.routes.ts:820"
+        "x-source": "server/routes/contacts.routes.ts:845"
       }
     },
     "/api/partners/batch-generate": {
@@ -9174,7 +9262,7 @@
           }
         },
         "x-body": "none",
-        "x-source": "server/routes/contacts.routes.ts:592"
+        "x-source": "server/routes/contacts.routes.ts:617"
       }
     },
     "/api/pipeline": {
@@ -10017,6 +10105,22 @@
               "schema": {
                 "additionalProperties": false,
                 "properties": {
+                  "addressSourceEvidence": {
+                    "maxLength": 500,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "addressSourceKind": {
+                    "enum": [
+                      "SUBJECT_SUPPLIED",
+                      "EMPLOYER_WEBSITE",
+                      "PUBLIC_DIRECTORY",
+                      "PROVIDER",
+                      "INFERRED_PATTERN",
+                      "MANUAL_RESEARCH"
+                    ],
+                    "type": "string"
+                  },
                   "addressType": {
                     "enum": [
                       "PERSONAL",
@@ -10051,11 +10155,6 @@
                     "minLength": 3,
                     "type": "string"
                   },
-                  "emailSource": {
-                    "maxLength": 500,
-                    "minLength": 1,
-                    "type": "string"
-                  },
                   "liaId": {
                     "maxLength": 255,
                     "minLength": 1,
@@ -10072,7 +10171,8 @@
                 "required": [
                   "email",
                   "basis",
-                  "emailSource"
+                  "addressSourceKind",
+                  "addressSourceEvidence"
                 ],
                 "type": "object"
               }

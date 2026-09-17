@@ -44,6 +44,7 @@ than one that admits it has none.
 | **Review due** | Twelve months after signature, unless a shorter date is given at signing |
 | **Countries covered** | `GB` |
 | **Routes covered (`sourceKinds`)** | `LINKEDIN` only |
+| **Address routes covered (`addressSourceKinds`)** | `INFERRED_PATTERN`, `EMPLOYER_WEBSITE`, `MANUAL_RESEARCH` — explicitly **not** `PROVIDER` |
 | **Article 14 handling** | § Article 14 handling, below |
 | **Retention** | § Retention, below |
 | **Objection route** | § How a person objects, below |
@@ -74,7 +75,18 @@ change to make before signing rather than after.
 
 ## Routes of acquisition covered
 
-`LINKEDIN` only.
+**How the person was identified (`sourceKinds`):** `LINKEDIN` only.
+
+**How the address was obtained (`addressSourceKinds`):** `INFERRED_PATTERN`, `EMPLOYER_WEBSITE`,
+`MANUAL_RESEARCH`.
+
+**Not `PROVIDER`.** A purchased address is a different chain of collection with somebody else's
+notice obligation in it, and this document does not make that argument. It is also blocked in
+code: an assessment declaring it is refused at authoring time.
+
+Two lists because they are two different acts. LinkedIn tells us **who**; it does not publish the
+address. Somebody then has to obtain one, and how they did it is the fact the necessity limb below
+turns on.
 
 ## The two facts this assessment must not lose
 
@@ -108,26 +120,30 @@ a known fact rather than an assumption. Note that it is **not** forced to `PERSO
 route: a profile can legitimately lead to a role inbox, and pretending otherwise would put a
 falsehood in the record. What is guaranteed is that somebody stated which it is.
 
-### A gap in fact 1 that is not yet mechanical, and needs a decision before LP4
+### Fact 1 is now mechanical — what used to be a gap here
 
-`sourceKinds` records how the **person** was identified. `emailSource` records how the **address**
-was obtained — and it is free text, so nothing checks it.
+This section used to record an admission: that `sourceKinds` checked how the person was identified
+while `emailSource` recorded how the address was obtained as free text, so a contact identified on
+LinkedIn whose address had been **bought** would still pass under this assessment. The gate could
+not tell it apart from one whose address came from the employer's own site.
 
-That means a contact identified on LinkedIn whose address was **purchased** would still pass under
-this assessment, because its route is `LINKEDIN` and this assessment covers `LINKEDIN`. This
-document says in Limb 2 that it does not cover a purchased address. The gate cannot currently
-tell.
+That is closed. The address route is now a closed vocabulary of its own
+(`server/domain/addressSource.ts`), declared by this document above, stored per contact, and
+checked at the gate alongside the country and the person route. A purchased address on a
+LinkedIn-identified contact is refused by name, with `LIA_ADDRESS_SOURCE_NOT_COVERED`.
 
-It is not reachable in the initial release, because purchased data is blocked outright by policy
-(`UNCOVERABLE_SOURCE_KINDS` in `server/domain/leadSource.ts`). It becomes reachable the moment
-enrichment is built, which is LP4 — so it is a decision to take before LP4 and not after, exactly
-as the route gap was.
+Three things follow, and the third is a limitation worth stating:
 
-The fix has the same shape as the one that closed the route gap: a second closed vocabulary for
-how an address was obtained (derived from a published convention / published for that individual
-/ supplied by a provider / entered by a person), declared by the assessment and checked at the
-gate. It has deliberately **not** been built yet, because it widens the lawful-basis gate again
-and the owner should decide whether this route is worth that before more machinery is added to it.
+- **Limb 2's distinction is enforced rather than promised.** Where it says this assessment covers
+  a derived address and not a purchased one, the software now agrees.
+- **Promotion cannot record an address without saying how it was obtained.** Both the kind and the
+  evidence are required, and the service refuses without them rather than relying on the request
+  contract to have run.
+- **The three dimensions are read as a cross-product.** An assessment declaring two person routes
+  and three address routes is treated as covering all six combinations. This document declares one
+  person route, so the question does not arise here — but if a future assessment needs a
+  particular pairing and not another, the remedy is two documents with one route each, not a
+  cleverer field.
 
 ## Limb 1 — the purpose test: what is the interest, and whose?
 
@@ -166,14 +182,12 @@ done:
   about the organisation rather than about the person. This is the defensible version, and it is
   the only one this system should perform.
 - **Bought from a data provider.** Then the record is a purchased record, and the provider's own
-  collection and notice obligations are in the chain. **This assessment does not cover that.**
-
-  Two things follow, and only one of them is mechanical today. Where the PERSON was found through
-  a provider, the route is `PROVIDER:<name>`, no assessment may cover it (a recorded policy
-  decision, not an omission), and the gate refuses. Where the person was found on LinkedIn and
-  only the ADDRESS was purchased, the route is still `LINKEDIN` and the gate cannot yet tell —
-  see § A gap in fact 1, above. Until that is closed, this limb is a commitment kept by the
-  operator rather than by the software, and it is flagged as such rather than assumed.
+  collection and notice obligations are in the chain. **This assessment does not cover that**, and
+  that exclusion is now enforced in both directions. Where the PERSON was found through a provider
+  the route is `PROVIDER:<name>` and no assessment may cover it; where the person was found on
+  LinkedIn and only the ADDRESS was purchased, the address route is `PROVIDER` and no assessment
+  may cover that either. Both are recorded policy decisions rather than omissions, and both refuse
+  by name.
 
 Could we reach the same end less intrusively? Two alternatives deserve an answer:
 

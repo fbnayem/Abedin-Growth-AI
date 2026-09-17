@@ -13,6 +13,7 @@ import {
 import { companyNameFrom, extractPageFacts, type FoundAddress } from '../domain/pageExtraction';
 import { validateCandidate } from '../domain/leadCandidate';
 import { normaliseCountry, type AddressType, type LawfulBasis } from '../domain/lawfulBasis';
+import type { AddressProvenance } from '../domain/contactDocument';
 import { ingestRecords, type IngestMode, type IngestOutcome, type IngestRecord } from './leadIngest.service';
 import type { ContactProvenance } from '../domain/contactDocument';
 import type { Attribution } from '../domain/operatorAction';
@@ -432,6 +433,16 @@ export async function scrapeSite(
     importBatchId: batchId,
   };
 
+  // A LITERAL, not a setting and not a body field. This worker reads addresses off pages on the
+  // seed host — the employer's own site — so the route is knowable from what the code does,
+  // exactly like the `SCRAPE:<host>` above it. Accepting it from a caller would let them choose
+  // which balancing assessment covers the contacts this run creates.
+  const address: AddressProvenance = {
+    addressSourceKind: 'EMPLOYER_WEBSITE',
+    addressSourceEvidence: `published on ${seed.host}; pages read: ${pages.map((p) => p.url).join(', ')}`,
+    addressCollectedAt: startedAt,
+  };
+
   const result = await ingestRecords(
     orgId,
     records,
@@ -443,6 +454,7 @@ export async function scrapeSite(
       country,
     },
     provenance,
+    address,
     actor,
     { mode: options.mode, type: batch.type ?? 'LEAD', now: options.now }
   );

@@ -47,6 +47,8 @@ const LI_BATCH: ImportBatchSettings = {
   country: 'GB',
   addressType: 'ROLE',
   sourceEvidence: 'partner-list-2026-09.csv, supplied by Northwind Events',
+  addressSourceKind: 'EMPLOYER_WEBSITE',
+  addressSourceEvidence: 'published on the practice contact pages',
 };
 
 const HEADER = 'email,firstName,lastName,companyName,country';
@@ -460,6 +462,8 @@ describe('lead import: the batch settings', () => {
       basis: 'CONSENT',
       country: 'GB',
       sourceEvidence: 'webform export',
+      addressSourceKind: 'EMPLOYER_WEBSITE',
+      addressSourceEvidence: 'published on the practice contact pages',
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('NO_CONSENT_EVIDENCE');
@@ -474,6 +478,8 @@ describe('lead import: the batch settings', () => {
       basis: 'CONSENT',
       country: 'GB',
       sourceEvidence: 'consent platform export 2026-09',
+      addressSourceKind: 'EMPLOYER_WEBSITE',
+      addressSourceEvidence: 'published on the practice contact pages',
     };
     const outcome = await commit(text, batch);
     if (!outcome.ok) throw new Error('refused');
@@ -537,6 +543,37 @@ describe('lead import: a commit names the plan it commits', () => {
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('PLAN_CHANGED');
     expect(memory.docs).toEqual({});
+  });
+
+  /**
+   * A MUTATION SURVIVOR FOUND THIS ONE MISSING, AND IT IS THE SAME ARGUMENT AS THE BASIS.
+   *
+   * The address route decides which balancing assessment can cover every contact this file
+   * creates. Previewing as EMPLOYER_WEBSITE and committing as INFERRED_PATTERN changes what the
+   * import MEANS without changing a byte of the file -- exactly what `PLAN_CHANGED` exists for.
+   * Removing the field from the fingerprint left every other test green.
+   */
+  it('a commit whose ADDRESS ROUTE changed after the preview refuses, though the file is identical', async () => {
+    const approved = planFingerprint(FILE, LI_BATCH);
+    const outcome = await importLeads(
+      ORG,
+      FILE,
+      { ...LI_BATCH, addressSourceKind: 'INFERRED_PATTERN' },
+      OPERATOR,
+      { mode: 'COMMIT', expectedPlanHash: approved, now: NOW }
+    );
+    expect(outcome.ok).toBe(false);
+    if (!outcome.ok) expect(outcome.code).toBe('PLAN_CHANGED');
+    expect(memory.docs).toEqual({});
+  });
+
+  it('and the fingerprint moves for the EVIDENCE too, not only the route', () => {
+    // Both halves are in the hash. The evidence is what a person checks the route against, so a
+    // preview approved against one description must not commit under another.
+    const a = planFingerprint(FILE, LI_BATCH);
+    const b = planFingerprint(FILE, { ...LI_BATCH, addressSourceKind: 'PUBLIC_DIRECTORY' });
+    const c = planFingerprint(FILE, { ...LI_BATCH, addressSourceEvidence: 'somewhere else entirely' });
+    expect(new Set([a, b, c]).size).toBe(3);
   });
 
   it('the hash a preview returns is the hash a commit accepts', async () => {

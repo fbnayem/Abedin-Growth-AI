@@ -54,7 +54,13 @@ const NAMED: Attribution = { kind: 'IDENTIFIED', actor: 'ops@abedin.example' };
  * fixtures below simply omitted it, which is how a document comes to claim something about every
  * record that the data cannot support for any of them.
  */
-const ADDRESS_ORIGIN = 'analytical.example contact page — firstname@ convention';
+const ADDRESS_EVIDENCE = 'analytical.example contact page — firstname@ convention';
+/**
+ * The KIND is what the gate reads; the EVIDENCE is the prose a person checks it against. Two
+ * fields because a gate cannot read prose, and one free-text field meant the LinkedIn assessment
+ * made a claim about every record that the data could not support for any of them.
+ */
+const ADDRESS_KIND = 'INFERRED_PATTERN';
 const NOBODY: Attribution = { kind: 'UNATTRIBUTED', why: 'no verified identity on the request' };
 
 const PROVENANCE: ContactProvenance = {
@@ -523,7 +529,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'PREVIEW',
       now: NOW,
-      emailSource: ADDRESS_ORIGIN,
+      addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE,
     });
     expect(outcome.ok).toBe(true);
     expect(Object.keys(memory.docs).filter((k) => k.includes('/contacts/')).length).toBe(0);
@@ -535,7 +541,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NOBODY, {
       mode: 'COMMIT',
       now: NOW,
-      emailSource: ADDRESS_ORIGIN,
+      addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('ATTRIBUTION_REQUIRED');
@@ -545,7 +551,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, 'pr_nobody', 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
-      emailSource: ADDRESS_ORIGIN,
+      addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('NOT_FOUND');
@@ -556,7 +562,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'not an address', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
-      emailSource: ADDRESS_ORIGIN,
+      addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.message).toContain('UNUSABLE_EMAIL');
@@ -567,7 +573,7 @@ describe('6. promotion: the moment an address is found', () => {
     const id = await seedOne();
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
-      emailSource: 'enrichment provider acme-data',
+      addressSourceKind: ADDRESS_KIND, addressSourceEvidence: 'enrichment provider acme-data',
       now: NOW,
     });
     expect(outcome.ok).toBe(true);
@@ -582,17 +588,34 @@ describe('6. promotion: the moment an address is found', () => {
     expect(storedProspect(id)!.promotedBy).toBe('ops@abedin.example');
   });
 
-  it('THE CONTACT CARRIES THE LINKEDIN PROVENANCE, which is what the notice has to say', async () => {
+  /**
+   * THIS TEST USED TO DEMONSTRATE THE HOLE. IT NOW PROVES IT IS CLOSED.
+   *
+   * It promoted with `emailSource: 'enrichment provider acme-data'` and asserted the contact came
+   * out as LINKEDIN. That was true and it was the defect: a purchased address on a LinkedIn-routed
+   * contact, indistinguishable at the gate from one derived from the employer's own published
+   * convention, while `lia-linkedin-2026.md` says it covers only the second.
+   *
+   * The provider name now lands in a FIELD rather than only in a sentence, so the gate can read
+   * it \u2014 and the assertion at the end is the one that matters: the LinkedIn assessment refuses it.
+   */
+  it('THE CONTACT CARRIES BOTH PROVENANCES, and a bought address is refused by the LinkedIn LIA', async () => {
     const id = await seedOne();
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
-      emailSource: 'enrichment provider acme-data',
+      addressSourceKind: 'PROVIDER',
+      addressSourceEvidence: 'enrichment provider acme-data',
       now: NOW,
     });
     if (!outcome.ok) throw new Error('promotion failed');
     const contact = memory.docs[`organizations/${ORG}/contacts/${outcome.contactId}`] as Record<string, unknown>;
 
     expect(contact.source).toBe('LINKEDIN');
+    // The address route is its own field, not a phrase inside the evidence string.
+    expect(contact.addressSourceKind).toBe('PROVIDER');
+    // And the address is dated NOW, not the prospect's own collection date: the person was
+    // identified then, the address was obtained at promotion.
+    expect(contact.addressCollectedAt).toBe(NOW.toISOString());
     // The profile URL, so the notice can say where we found this person...
     expect(String(contact.sourceEvidence)).toContain('linkedin.com/in/ada-lovelace');
     // ...and the address source, which is a different fact and usually a different party.
@@ -606,7 +629,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
-      emailSource: ADDRESS_ORIGIN,
+      addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE,
     });
     if (!outcome.ok) throw new Error('promotion failed');
     const contact = memory.docs[`organizations/${ORG}/contacts/${outcome.contactId}`] as Record<string, unknown>;
@@ -615,8 +638,8 @@ describe('6. promotion: the moment an address is found', () => {
 
   it('promoting twice with the same address is idempotent', async () => {
     const id = await seedOne();
-    const first = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
-    const second = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
+    const first = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE });
+    const second = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE });
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
     expect(second.alreadyPromoted).toBe(true);
@@ -626,8 +649,8 @@ describe('6. promotion: the moment an address is found', () => {
 
   it('REFUSES a second promotion to a DIFFERENT address, rather than duplicating the person', async () => {
     const id = await seedOne();
-    await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
-    const second = await promoteProspect(ORG, id, 'ada@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
+    await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE });
+    const second = await promoteProspect(ORG, id, 'ada@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE });
     expect(second.ok).toBe(false);
     if (!second.ok) {
       expect(second.code).toBe('ALREADY_PROMOTED');
@@ -640,7 +663,7 @@ describe('6. promotion: the moment an address is found', () => {
     // Promotion does not make anybody contactable. It makes them ADDRESSABLE, which is a
     // different thing, and the gate still wants the notice.
     const id = await seedOne();
-    const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, emailSource: ADDRESS_ORIGIN });
+    const outcome = await promoteProspect(ORG, id, 'info@analytical.example', LI_BASIS, NAMED, { mode: 'COMMIT', now: NOW, addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE });
     expect(outcome.ok).toBe(true);
     if (!outcome.ok) return;
     expect(outcome.mailable).toBe(false);
@@ -655,7 +678,7 @@ describe('6. promotion: the moment an address is found', () => {
     const outcome = await promoteProspect('org-b', id, 'info@analytical.example', LI_BASIS, NAMED, {
       mode: 'COMMIT',
       now: NOW,
-      emailSource: ADDRESS_ORIGIN,
+      addressSourceKind: ADDRESS_KIND, addressSourceEvidence: ADDRESS_EVIDENCE,
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('NOT_FOUND');

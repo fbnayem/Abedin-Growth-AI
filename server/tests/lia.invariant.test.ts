@@ -11,6 +11,7 @@ import {
   type LiaRecord,
 } from '../domain/lia';
 import { LEAD_SOURCE_KINDS } from '../domain/leadSource';
+import { ADDRESS_SOURCE_KINDS } from '../domain/addressSource';
 import {
   amendAssessment,
   createAssessment,
@@ -67,6 +68,14 @@ const LIMB = 'x'.repeat(LIA_MIN_LIMB_CHARS + 20);
 /** A contact source the DRAFT below covers. Its route matters as much as its country. */
 const SOURCE = 'SCRAPE:smilecare.example';
 
+/**
+ * How the ADDRESS was obtained, which is a different fact from how the person was found.
+ *
+ * The DRAFT below covers EMPLOYER_WEBSITE, so this is the matching value. A contact can share a
+ * country and a person-route with another and still differ here, which is the whole point.
+ */
+const ADDRESS_KIND = 'EMPLOYER_WEBSITE';
+
 const DRAFT = {
   title: 'UK B2B dental practices, Q3 2026',
   purpose: LIMB,
@@ -74,6 +83,7 @@ const DRAFT = {
   balancing: LIMB,
   countries: ['GB'],
   sourceKinds: ['SCRAPE'],
+  addressSourceKinds: ['EMPLOYER_WEBSITE'],
   dataCategories: ['work email address', 'job title', 'employer name'],
   dataSources: ['company website contact pages'],
   safeguards: ['suppression on first objection', 'no free-mail addresses'],
@@ -162,7 +172,7 @@ describe('1. a draft has to actually say something', () => {
 
 describe('2. an unsigned assessment supports nothing', () => {
   it('a draft is refused, and says it is a draft rather than that it is missing', () => {
-    const verdict = assessmentVerdict(record({ signedAt: null, signedBy: null }), { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(record({ signedAt: null, signedBy: null }), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (verdict.ok) return;
     expect(verdict.code).toBe('LIA_UNSIGNED');
@@ -170,18 +180,18 @@ describe('2. an unsigned assessment supports nothing', () => {
   });
 
   it('a missing assessment is LIA_NOT_FOUND, not a crash and not a pass', () => {
-    const verdict = assessmentVerdict(null, { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(null, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_NOT_FOUND');
   });
 
   it('a signature with a date and no signer does not count, nor the reverse', () => {
-    expect(assessmentVerdict(record({ signedBy: null }), { country: 'GB', source: SOURCE, now: NOW }).ok).toBe(false);
-    expect(assessmentVerdict(record({ signedAt: null }), { country: 'GB', source: SOURCE, now: NOW }).ok).toBe(false);
+    expect(assessmentVerdict(record({ signedBy: null }), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(false);
+    expect(assessmentVerdict(record({ signedAt: null }), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(false);
   });
 
   it('a signed, in-date, covering assessment is the one thing that passes', () => {
-    const verdict = assessmentVerdict(record(), { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(record(), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(true);
     if (!verdict.ok) return;
     expect(verdict.signedBy).toBe('dpo@abedin.example');
@@ -195,7 +205,7 @@ describe('3. withdrawal and expiry take effect by being true', () => {
     // report the withdrawal, or the operator goes and fixes the wrong thing.
     const verdict = assessmentVerdict(
       record({ withdrawnAt: '2026-09-10T00:00:00.000Z', withdrawnReason: 'basis was wrong' }),
-      { country: 'FR', source: SOURCE, now: NOW }
+      { country: 'FR', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }
     );
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) {
@@ -207,16 +217,16 @@ describe('3. withdrawal and expiry take effect by being true', () => {
   it('an expired assessment refuses on the exact boundary, not a day late', () => {
     const due = '2026-09-15T10:00:00.000Z';
     const justBefore = new Date(Date.parse(due) - 1);
-    expect(assessmentVerdict(record({ reviewDueAt: due }), { country: 'GB', source: SOURCE, now: justBefore }).ok).toBe(true);
-    const onIt = assessmentVerdict(record({ reviewDueAt: due }), { country: 'GB', source: SOURCE, now: new Date(due) });
+    expect(assessmentVerdict(record({ reviewDueAt: due }), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: justBefore }).ok).toBe(true);
+    const onIt = assessmentVerdict(record({ reviewDueAt: due }), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: new Date(due) });
     expect(onIt.ok).toBe(false);
     if (!onIt.ok) expect(onIt.code).toBe('LIA_EXPIRED');
   });
 
   it('withdrawing makes every contact citing it unmailable, with no write to any contact', () => {
     const withdrawn = record({ withdrawnAt: '2026-09-14T00:00:00.000Z', withdrawnReason: 'superseded' });
-    const before = assessmentVerdict(record(), { country: 'GB', source: SOURCE, now: NOW });
-    const after = assessmentVerdict(withdrawn, { country: 'GB', source: SOURCE, now: NOW });
+    const before = assessmentVerdict(record(), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
+    const after = assessmentVerdict(withdrawn, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(before.ok).toBe(true);
     expect(after.ok).toBe(false);
     // The contact record is identical in both cases. Nothing propagated; the answer changed.
@@ -228,13 +238,13 @@ describe('3. withdrawal and expiry take effect by being true', () => {
 
 describe('4. coverage is per country and is not transferable', () => {
   it('an assessment for GB does not support a contact in FR', () => {
-    const verdict = assessmentVerdict(record({ countries: ['GB'] }), { country: 'FR', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(record({ countries: ['GB'] }), { country: 'FR', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_COUNTRY_NOT_COVERED');
   });
 
   it('a contact with no country is not covered by anything', () => {
-    const verdict = assessmentVerdict(record(), { country: '', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(record(), { country: '', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_COUNTRY_NOT_COVERED');
   });
@@ -254,15 +264,15 @@ describe('4. coverage is per country and is not transferable', () => {
    */
   it('a malformed assessment listing an empty country does not thereby cover a stateless contact', () => {
     const malformed = record({ countries: ['', 'GB'] as unknown as string[] });
-    const verdict = assessmentVerdict(malformed, { country: '', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(malformed, { country: '', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_COUNTRY_NOT_COVERED');
     // And it still covers the country it legitimately names.
-    expect(assessmentVerdict(malformed, { country: 'GB', source: SOURCE, now: NOW }).ok).toBe(true);
+    expect(assessmentVerdict(malformed, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(true);
   });
 
   it('case and whitespace do not decide coverage', () => {
-    expect(assessmentVerdict(record({ countries: ['gb'] }), { country: ' gb ', source: SOURCE, now: NOW }).ok).toBe(true);
+    expect(assessmentVerdict(record({ countries: ['gb'] }), { country: ' gb ', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(true);
   });
 });
 
@@ -290,7 +300,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
 
     // Same country, same dates, same signature. The only difference is the route each was
     // written about, and it is the difference that decides.
-    const wrong = assessmentVerdict(scraped, { country: 'GB', source: 'LINKEDIN', now: NOW });
+    const wrong = assessmentVerdict(scraped, { country: 'GB', source: 'LINKEDIN', addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(wrong.ok).toBe(false);
     if (!wrong.ok) {
       expect(wrong.code).toBe('LIA_SOURCE_NOT_COVERED');
@@ -300,34 +310,34 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
       expect(wrong.message).toContain('LINKEDIN');
     }
 
-    expect(assessmentVerdict(linkedin, { country: 'GB', source: 'LINKEDIN', now: NOW }).ok).toBe(true);
-    expect(assessmentVerdict(scraped, { country: 'GB', source: SOURCE, now: NOW }).ok).toBe(true);
+    expect(assessmentVerdict(linkedin, { country: 'GB', source: 'LINKEDIN', addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(true);
+    expect(assessmentVerdict(scraped, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(true);
     // And the mirror image: the LinkedIn assessment does not cover a scraped contact either.
-    expect(assessmentVerdict(linkedin, { country: 'GB', source: SOURCE, now: NOW }).ok).toBe(false);
+    expect(assessmentVerdict(linkedin, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(false);
   });
 
-  it('the verdict reports the route it was reached for, not the assessment\u2019s first', () => {
+  it('the verdict reports the route it was reached for, not the assessment’s first', () => {
     // The Article 14 notice quotes this. An assessment covering both routes must still say
     // which one applies to the person being written to; reporting `sourceKinds[0]` would tell
-    // half of them where we got somebody else\u2019s data.
+    // half of them where we got somebody else’s data.
     const both = record({ sourceKinds: ['SCRAPE', 'LINKEDIN'] });
-    const viaLinkedIn = assessmentVerdict(both, { country: 'GB', source: 'LINKEDIN', now: NOW });
+    const viaLinkedIn = assessmentVerdict(both, { country: 'GB', source: 'LINKEDIN', addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(viaLinkedIn.ok).toBe(true);
     if (viaLinkedIn.ok) expect(viaLinkedIn.sourceKind).toBe('LINKEDIN');
-    const viaScrape = assessmentVerdict(both, { country: 'GB', source: SOURCE, now: NOW });
+    const viaScrape = assessmentVerdict(both, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     if (viaScrape.ok) expect(viaScrape.sourceKind).toBe('SCRAPE');
   });
 
   it('an unrecognised source refuses, and says so differently from an uncovered one', () => {
-    // Two codes because two remedies. UNKNOWN means this contact\u2019s provenance string is a
+    // Two codes because two remedies. UNKNOWN means this contact’s provenance string is a
     // shape nothing here understands, and the fix is to the contact or to the vocabulary.
     // NOT_COVERED means the route is understood and the assessment was not written about it.
-    const unknown = assessmentVerdict(record(), { country: 'GB', source: 'APOLLO', now: NOW });
+    const unknown = assessmentVerdict(record(), { country: 'GB', source: 'APOLLO', addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(unknown.ok).toBe(false);
     if (!unknown.ok) expect(unknown.code).toBe('LIA_SOURCE_UNKNOWN');
 
     for (const bad of ['', '   ', null, undefined, 42, 'SCRAPE:']) {
-      const verdict = assessmentVerdict(record(), { country: 'GB', source: bad, now: NOW });
+      const verdict = assessmentVerdict(record(), { country: 'GB', source: bad, addressSourceKind: ADDRESS_KIND, now: NOW });
       expect(verdict.ok, JSON.stringify(bad)).toBe(false);
       if (!verdict.ok) expect(verdict.code, JSON.stringify(bad)).toBe('LIA_SOURCE_UNKNOWN');
     }
@@ -338,7 +348,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     // declaration is not a claim to cover everything, and it is reported as a malformed document
     // rather than as an uncovered route, because the remedy is to the document.
     const legacy = record({ sourceKinds: undefined as unknown as never });
-    const verdict = assessmentVerdict(legacy, { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(legacy, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_MALFORMED');
   });
@@ -353,7 +363,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
    */
   it('an unrecognised declared route is malformed, and says which value is wrong', () => {
     const junk = record({ sourceKinds: ['EVERYTHING'] as unknown as never });
-    const verdict = assessmentVerdict(junk, { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = assessmentVerdict(junk, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) {
       expect(verdict.code).toBe('LIA_MALFORMED');
@@ -362,7 +372,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     }
     // A mix is no better than all-junk: one bad entry rejects the declaration.
     const mixed = record({ sourceKinds: ['SCRAPE', 'EVERYTHING'] as unknown as never });
-    expect(assessmentVerdict(mixed, { country: 'GB', source: SOURCE, now: NOW }).ok).toBe(false);
+    expect(assessmentVerdict(mixed, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(false);
   });
 
   it('the coverage message lists real routes, because the empty case cannot reach it', () => {
@@ -370,7 +380,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     // unrecognised route, so by the time coverage runs the list is non-empty and every entry is
     // known. There is deliberately no `?? []` fallback in the coverage check: it could not fire.
     const scraped = record({ sourceKinds: ['SCRAPE'] });
-    const verdict = assessmentVerdict(scraped, { country: 'GB', source: 'LINKEDIN', now: NOW });
+    const verdict = assessmentVerdict(scraped, { country: 'GB', source: 'LINKEDIN', addressSourceKind: ADDRESS_KIND, now: NOW });
     if (!verdict.ok) expect(verdict.message).toContain('covers SCRAPE and');
     const code = stripComments(readFileSync('server/domain/lia.ts', 'utf8'));
     const at = code.indexOf('export function assessmentVerdict');
@@ -425,7 +435,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
       email: 'ada@analytical.example',
     };
     const scraped = record({ id: 'lia_scrape', sourceKinds: ['SCRAPE'] });
-    const mismatched = assessmentVerdict(scraped, { country: 'GB', source: 'LINKEDIN', now: NOW });
+    const mismatched = assessmentVerdict(scraped, { country: 'GB', source: 'LINKEDIN', addressSourceKind: ADDRESS_KIND, now: NOW });
     const verdict = evaluateLawfulBasis(contact, {
       requireSignedAssessment: true,
       assessment: mismatched,
@@ -437,7 +447,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     }
 
     // The control: the same contact, the same assessment, resolved for the route it covers.
-    const matched = assessmentVerdict(scraped, { country: 'GB', source: SOURCE, now: NOW });
+    const matched = assessmentVerdict(scraped, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(evaluateLawfulBasis(contact, { requireSignedAssessment: true, assessment: matched }).ok).toBe(true);
   });
 
@@ -460,6 +470,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     const wrong = await resolveAssessmentForContact(ORG, created.record.id, {
       country: 'GB',
       source: 'LINKEDIN',
+      addressSourceKind: ADDRESS_KIND,
       now: NOW,
     });
     expect(wrong.ok).toBe(false);
@@ -469,10 +480,23 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     const right = await resolveAssessmentForContact(ORG, created.record.id, {
       country: 'GB',
       source: SOURCE,
+      addressSourceKind: ADDRESS_KIND,
       now: NOW,
     });
     expect(right.ok).toBe(true);
     if (right.ok) expect(right.sourceKind).toBe('SCRAPE');
+
+    // AND THE SAME FOR THE ADDRESS ROUTE, which a mutant caught this test not proving either:
+    // every resolver test passed a route the assessment covers, so a resolver hard-coding
+    // `EMPLOYER_WEBSITE` satisfied all of them. Third field, same defect.
+    const boughtAddress = await resolveAssessmentForContact(ORG, created.record.id, {
+      country: 'GB',
+      source: SOURCE,
+      addressSourceKind: 'PROVIDER',
+      now: NOW,
+    });
+    expect(boughtAddress.ok).toBe(false);
+    if (!boughtAddress.ok) expect(boughtAddress.code).toBe('LIA_ADDRESS_SOURCE_NOT_COVERED');
 
     // AND THE SAME FOR THE COUNTRY, WHICH A MUTANT CAUGHT THIS TEST NOT PROVING.
     // Every resolver test above passes `country: 'GB'`, so a resolver that read the id and then
@@ -482,6 +506,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     const elsewhere = await resolveAssessmentForContact(ORG, created.record.id, {
       country: 'FR',
       source: SOURCE,
+      addressSourceKind: ADDRESS_KIND,
       now: NOW,
     });
     expect(elsewhere.ok).toBe(false);
@@ -504,7 +529,7 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     expect(signature).not.toContain('source?:');
   });
 
-  it('the gateway passes the CONTACT\u2019s source, not a constant', () => {
+  it('the gateway passes the CONTACT’s source, not a constant', () => {
     // A literal here would make every send look like one route regardless of where the lead came
     // from, and the check would pass for exactly the contacts it exists to stop.
     const code = stripComments(readFileSync('server/gateway/actionGateway.ts', 'utf8'));
@@ -512,6 +537,172 @@ describe("4b. coverage is per ROUTE too, and that is the half this gate did not 
     expect(at).toBeGreaterThan(-1);
     const call = code.slice(at, at + 400);
     expect(call).toContain('source: contactData.source');
+  });
+});
+
+describe("4d. coverage is per ADDRESS ROUTE too, and that is the half that was still missing", () => {
+  /**
+   * THE DEFECT THIS SECTION EXISTS FOR, STATED PLAINLY.
+   *
+   * `sourceKinds` closed the question "how did we find this PERSON". It left open "how did we get
+   * their ADDRESS", which was recorded as `emailSource` — free text, checked by nothing.
+   *
+   * So a contact identified on LinkedIn whose address was BOUGHT had `source: LINKEDIN`, was
+   * covered by the LinkedIn assessment as far as the gate could tell, and that document says in
+   * as many words that it does NOT cover a purchased address. The proof was sitting in the test
+   * suite: `prospect.invariant.test.ts` promoted with `emailSource: 'enrichment provider
+   * acme-data'` and asserted the resulting contact was LINKEDIN.
+   *
+   * The scenario below is that exact case, written as an assertion. Both assessments cover the
+   * same country and the same person-route; they differ in one field.
+   */
+  it('an assessment for guessed addresses does not support a contact whose address was bought', () => {
+    const inferred = record({
+      id: 'lia_inferred',
+      sourceKinds: ['LINKEDIN'],
+      addressSourceKinds: ['INFERRED_PATTERN'],
+    });
+
+    const bought = assessmentVerdict(inferred, {
+      country: 'GB',
+      source: 'LINKEDIN',
+      addressSourceKind: 'PROVIDER',
+      now: NOW,
+    });
+    expect(bought.ok).toBe(false);
+    if (!bought.ok) {
+      expect(bought.code).toBe('LIA_ADDRESS_SOURCE_NOT_COVERED');
+      // Both halves named, or the operator cannot tell which document to go and write.
+      expect(bought.message).toContain('INFERRED_PATTERN');
+      expect(bought.message).toContain('PROVIDER');
+    }
+
+    // Same contact, same country, same person-route. Only the address route differs, and it
+    // decides.
+    expect(
+      assessmentVerdict(inferred, {
+        country: 'GB',
+        source: 'LINKEDIN',
+        addressSourceKind: 'INFERRED_PATTERN',
+        now: NOW,
+      }).ok
+    ).toBe(true);
+  });
+
+  it('the three dimensions are independent: each can refuse while the other two pass', () => {
+    // A contact matching on two dimensions and failing the third must refuse for the THIRD, by
+    // name. If any dimension were ignored, one of these would pass.
+    const covers = record({
+      countries: ['GB'],
+      sourceKinds: ['LINKEDIN'],
+      addressSourceKinds: ['INFERRED_PATTERN'],
+    });
+    const base = { country: 'GB', source: 'LINKEDIN', addressSourceKind: 'INFERRED_PATTERN', now: NOW };
+
+    expect(assessmentVerdict(covers, base).ok).toBe(true);
+
+    const wrongCountry = assessmentVerdict(covers, { ...base, country: 'FR' });
+    if (!wrongCountry.ok) expect(wrongCountry.code).toBe('LIA_COUNTRY_NOT_COVERED');
+    const wrongPerson = assessmentVerdict(covers, { ...base, source: SOURCE });
+    if (!wrongPerson.ok) expect(wrongPerson.code).toBe('LIA_SOURCE_NOT_COVERED');
+    const wrongAddress = assessmentVerdict(covers, { ...base, addressSourceKind: 'PROVIDER' });
+    if (!wrongAddress.ok) expect(wrongAddress.code).toBe('LIA_ADDRESS_SOURCE_NOT_COVERED');
+  });
+
+  it('the verdict reports the address route it was reached for, not the assessment’s first', () => {
+    // The Article 14 notice quotes it. An assessment covering two routes must still say which one
+    // applies to the person being written to.
+    const both = record({ addressSourceKinds: ['EMPLOYER_WEBSITE', 'MANUAL_RESEARCH'] });
+    const viaResearch = assessmentVerdict(both, {
+      country: 'GB',
+      source: SOURCE,
+      addressSourceKind: 'MANUAL_RESEARCH',
+      now: NOW,
+    });
+    expect(viaResearch.ok).toBe(true);
+    if (viaResearch.ok) expect(viaResearch.addressSourceKind).toBe('MANUAL_RESEARCH');
+  });
+
+  it('an unrecognised address route refuses, and says so differently from an uncovered one', () => {
+    // Two codes because two remedies. UNKNOWN means this contact’s address provenance is a shape
+    // nothing here understands; NOT_COVERED means the route is understood and this document was
+    // not written about it.
+    for (const bad of ['', '   ', null, undefined, 42, 'BOUGHT', 'PROVIDER:acme']) {
+      const verdict = assessmentVerdict(record(), {
+        country: 'GB',
+        source: SOURCE,
+        addressSourceKind: bad,
+        now: NOW,
+      });
+      expect(verdict.ok, JSON.stringify(bad)).toBe(false);
+      if (!verdict.ok) expect(verdict.code, JSON.stringify(bad)).toBe('LIA_ADDRESS_SOURCE_UNKNOWN');
+    }
+  });
+
+  it('a stored assessment with no addressSourceKinds supports nothing', () => {
+    // The state every assessment written before this change is in. Malformed rather than
+    // uncovered, because the remedy is to the document.
+    const legacy = record({ addressSourceKinds: undefined as unknown as never });
+    const verdict = assessmentVerdict(legacy, {
+      country: 'GB',
+      source: SOURCE,
+      addressSourceKind: ADDRESS_KIND,
+      now: NOW,
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.code).toBe('LIA_MALFORMED');
+
+    const junk = record({ addressSourceKinds: ['ANYTHING'] as unknown as never });
+    const bad = assessmentVerdict(junk, {
+      country: 'GB',
+      source: SOURCE,
+      addressSourceKind: ADDRESS_KIND,
+      now: NOW,
+    });
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) {
+      expect(bad.code).toBe('LIA_MALFORMED');
+      expect(bad.message).toContain('ANYTHING');
+    }
+  });
+
+  it('a draft must declare its address routes, from the closed list, and not the blocked one', () => {
+    const absent = validateLiaDraft(
+      (({ addressSourceKinds, ...rest }) => rest)({ ...DRAFT }) as Record<string, unknown>
+    );
+    expect(absent.ok).toBe(false);
+    if (!absent.ok) expect(absent.code).toBe('LIA_NO_ADDRESS_SOURCE_KINDS');
+
+    const unknown = validateLiaDraft({ ...DRAFT, addressSourceKinds: ['BOUGHT'] });
+    expect(unknown.ok).toBe(false);
+    if (!unknown.ok) {
+      expect(unknown.code).toBe('LIA_ADDRESS_SOURCE_KIND_UNKNOWN');
+      for (const kind of ADDRESS_SOURCE_KINDS) expect(unknown.message).toContain(kind);
+    }
+
+    const blocked = validateLiaDraft({ ...DRAFT, addressSourceKinds: ['PROVIDER'] });
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) expect(blocked.code).toBe('LIA_ADDRESS_SOURCE_KIND_NOT_PERMITTED');
+  });
+
+  it('the address route is frozen by a signature, like every other substantive field', () => {
+    expect([...LIA_SUBSTANTIVE_FIELDS]).toContain('addressSourceKinds');
+  });
+
+  it('the context type makes the address route required, not optional', () => {
+    const code = stripComments(readFileSync('server/domain/lia.ts', 'utf8'));
+    const at = code.indexOf('export function assessmentVerdict');
+    expect(at).toBeGreaterThan(-1);
+    const signature = code.slice(at, code.indexOf('AssessmentVerdict {', at));
+    expect(signature).toContain('readonly addressSourceKind: unknown');
+    expect(signature).not.toContain('addressSourceKind?:');
+  });
+
+  it('the gateway passes the CONTACT’s address route, not a constant', () => {
+    const code = stripComments(readFileSync('server/gateway/actionGateway.ts', 'utf8'));
+    const at = code.indexOf('resolveAssessmentForContact(');
+    expect(at).toBeGreaterThan(-1);
+    expect(code.slice(at, at + 500)).toContain('addressSourceKind: contactData.addressSourceKind');
   });
 });
 
@@ -544,12 +735,18 @@ describe('4c. liveness is a different question from coverage', () => {
    *
    * Putting it here also keeps `assessmentVerdict` free of a branch that could never run. An
    * earlier draft carried `covered.length === 0 ? 'no country' : ...` in the coverage message,
-   * which after this check is unreachable \u2014 defensive code that reads as protective and cannot
+   * which after this check is unreachable — defensive code that reads as protective and cannot
    * fire, which is the defect LP1's mutation testing found in `normaliseProfileUrl`. It was
    * deleted rather than left in place.
    */
   it('a document declaring no country or no route is malformed, not merely uncovered', () => {
-    for (const gap of [{ countries: [] }, { sourceKinds: [] }, { countries: [], sourceKinds: [] }]) {
+    for (const gap of [
+      { countries: [] },
+      { sourceKinds: [] },
+      { addressSourceKinds: [] },
+      { countries: [], sourceKinds: [] },
+      { sourceKinds: [], addressSourceKinds: [] },
+    ]) {
       const verdict = livenessVerdict(record(gap as Partial<LiaRecord>), NOW);
       expect(verdict.ok, JSON.stringify(gap)).toBe(false);
       if (!verdict.ok) expect(verdict.code).toBe('LIA_MALFORMED');
@@ -559,6 +756,17 @@ describe('4c. liveness is a different question from coverage', () => {
     if (!noRoute.ok) {
       expect(noRoute.message).toContain('no route of acquisition');
       expect(noRoute.message).not.toContain('no jurisdiction');
+      expect(noRoute.message).not.toContain('no address route');
+    }
+    // The third gap names ITSELF rather than being folded into the second. A mutant that dropped
+    // the address clause here left coverage to refuse it later under a different code, which sends
+    // the author to fix a contact when the thing to fix is the document.
+    const noAddress = livenessVerdict(record({ addressSourceKinds: [] }), NOW);
+    expect(noAddress.ok).toBe(false);
+    if (!noAddress.ok) {
+      expect(noAddress.code).toBe('LIA_MALFORMED');
+      expect(noAddress.message).toContain('no address route');
+      expect(noAddress.message).not.toContain('no route of acquisition');
     }
   });
 
@@ -588,7 +796,7 @@ describe('5. the gate refuses an assessment it was told to resolve and did not g
   });
 
   it('a verdict for a DIFFERENT assessment does not satisfy this contact', () => {
-    const other = assessmentVerdict(record({ id: 'lia_other' }), { country: 'GB', source: SOURCE, now: NOW });
+    const other = assessmentVerdict(record({ id: 'lia_other' }), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     const verdict = evaluateLawfulBasis(CONTACT, { requireSignedAssessment: true, assessment: other });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LI_ASSESSMENT_MISMATCH');
@@ -601,7 +809,7 @@ describe('5. the gate refuses an assessment it was told to resolve and did not g
   });
 
   it('an invalid resolved assessment refuses and carries the reason through', () => {
-    const expired = assessmentVerdict(record({ reviewDueAt: '2026-01-01T00:00:00.000Z' }), { country: 'GB', source: SOURCE, now: NOW });
+    const expired = assessmentVerdict(record({ reviewDueAt: '2026-01-01T00:00:00.000Z' }), { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     const verdict = evaluateLawfulBasis(CONTACT, { requireSignedAssessment: true, assessment: expired });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) {
@@ -624,7 +832,7 @@ describe('6. the writer: signing is a one-way door', () => {
     expect(created.signedAt).toBeNull();
     expect(created.signedBy).toBeNull();
     expect(created.reviewDueAt).toBeNull();
-    expect(assessmentVerdict(created, { country: 'GB', source: SOURCE, now: NOW }).ok).toBe(false);
+    expect(assessmentVerdict(created, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(false);
   });
 
   it('refuses an unnamed author, and writes nothing', async () => {
@@ -726,20 +934,20 @@ describe('6. the writer: signing is a one-way door', () => {
   });
 
   it('resolving a contact id that names nothing is NOT_FOUND, not an exception', async () => {
-    const verdict = await resolveAssessmentForContact(ORG, 'lia_missing', { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = await resolveAssessmentForContact(ORG, 'lia_missing', { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_NOT_FOUND');
   });
 
   it('resolving an empty liaId is a refusal rather than a lookup', async () => {
-    expect((await resolveAssessmentForContact(ORG, '   ', { country: 'GB', source: SOURCE, now: NOW })).ok).toBe(false);
-    expect((await resolveAssessmentForContact(ORG, null, { country: 'GB', source: SOURCE, now: NOW })).ok).toBe(false);
+    expect((await resolveAssessmentForContact(ORG, '   ', { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW })).ok).toBe(false);
+    expect((await resolveAssessmentForContact(ORG, null, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW })).ok).toBe(false);
   });
 
   it('a signed assessment resolves end to end, from the id on a contact', async () => {
     const created = await create();
     await signAssessment(ORG, created.id, SECOND, {}, NOW);
-    const verdict = await resolveAssessmentForContact(ORG, created.id, { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = await resolveAssessmentForContact(ORG, created.id, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(true);
     if (verdict.ok) expect(verdict.id).toBe(created.id);
     expect(await getAssessment(ORG, created.id)).not.toBeNull();
@@ -748,7 +956,7 @@ describe('6. the writer: signing is a one-way door', () => {
   it('assessments are tenant-scoped: another organisation cannot resolve this one', async () => {
     const created = await create();
     await signAssessment(ORG, created.id, NAMED, {}, NOW);
-    const verdict = await resolveAssessmentForContact('org-b', created.id, { country: 'GB', source: SOURCE, now: NOW });
+    const verdict = await resolveAssessmentForContact('org-b', created.id, { country: 'GB', source: SOURCE, addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_NOT_FOUND');
   });

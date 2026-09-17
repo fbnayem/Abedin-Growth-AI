@@ -350,16 +350,21 @@ export async function listAssessments(orgId: string): Promise<LiaRecord[]> {
  * record, so the caller cannot accidentally treat "found" as "valid" — which is the mistake the
  * old free-text `liaId` check institutionalised.
  *
- * THE CONTEXT IS AN OBJECT AND NOT TWO POSITIONAL STRINGS, ON PURPOSE. `country` and `source`
- * are both strings, both describe the contact, and sit next to each other; passed positionally,
- * transposing them is a silent error that produces a confident wrong verdict — `GB` would be
- * read as a route and `SCRAPE:x` as a jurisdiction, and both would refuse for reasons naming the
- * wrong field. A named object cannot be transposed.
+ * THE CONTEXT IS AN OBJECT AND NOT THREE POSITIONAL STRINGS, ON PURPOSE. `country`, `source` and
+ * `addressSourceKind` are all strings, all describe the contact, and sit next to each other;
+ * passed positionally, transposing any two is a silent error that produces a confident wrong
+ * verdict — `GB` would be read as a route and `SCRAPE:x` as a jurisdiction, and both would
+ * refuse for reasons naming the wrong field. A named object cannot be transposed.
  */
 export async function resolveAssessmentForContact(
   orgId: string,
   liaId: unknown,
-  context: { readonly country: string; readonly source: unknown; readonly now?: Date }
+  context: {
+    readonly country: string;
+    readonly source: unknown;
+    readonly addressSourceKind: unknown;
+    readonly now?: Date;
+  }
 ): Promise<AssessmentVerdict> {
   const id = trimmed(liaId);
   if (id === null) {
@@ -372,6 +377,7 @@ export async function resolveAssessmentForContact(
   return assessmentVerdict(await getAssessment(orgId, id), {
     country: context.country,
     source: context.source,
+    addressSourceKind: context.addressSourceKind,
     now: context.now ?? new Date(),
   });
 }

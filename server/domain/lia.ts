@@ -55,6 +55,14 @@ import {
   uncoverableReason,
   type LeadSourceKind,
 } from './leadSource';
+import {
+  ADDRESS_SOURCE_KINDS,
+  ADDRESS_SOURCE_KIND_NOTES,
+  classifyAddressSource,
+  normaliseAddressSourceKinds,
+  uncoverableAddressReason,
+  type AddressSourceKind,
+} from './addressSource';
 
 /** How long a signature stands before somebody has to look at the assessment again. */
 export const LIA_DEFAULT_REVIEW_MONTHS = 12;
@@ -82,6 +90,7 @@ export const LIA_SUBSTANTIVE_FIELDS = [
   'balancing',
   'countries',
   'sourceKinds',
+  'addressSourceKinds',
   'dataCategories',
   'dataSources',
   'safeguards',
@@ -108,6 +117,15 @@ export interface LiaDraft {
    * heuristic dressed as a control.
    */
   readonly sourceKinds: readonly LeadSourceKind[];
+  /**
+   * Which routes the ADDRESS may have arrived by, from the closed list in `./addressSource`.
+   *
+   * The third dimension of coverage, and a different question from `sourceKinds`: that one says
+   * how the PERSON was identified, this one how their ADDRESS was obtained. A person found on
+   * LinkedIn whose address was bought and one whose address was derived from their employer's
+   * published convention arrive by the same person-route and are two different arguments.
+   */
+  readonly addressSourceKinds: readonly AddressSourceKind[];
   /** What categories of personal data are processed: "name", "work email", "job title". */
   readonly dataCategories: readonly string[];
   /** Where the data comes from, in prose: "company website contact pages", "a trade directory". */
@@ -144,6 +162,8 @@ export type LiaRefusalCode =
   | 'LIA_COUNTRY_NOT_COVERED'
   | 'LIA_SOURCE_UNKNOWN'
   | 'LIA_SOURCE_NOT_COVERED'
+  | 'LIA_ADDRESS_SOURCE_UNKNOWN'
+  | 'LIA_ADDRESS_SOURCE_NOT_COVERED'
   | 'LIA_MALFORMED';
 
 /**
@@ -166,6 +186,8 @@ export type LivenessVerdict =
        * the guarantee available instead of re-asserting it.
        */
       readonly sourceKinds: readonly LeadSourceKind[];
+      /** The declared address routes, normalised, non-empty, every entry known. Same argument. */
+      readonly addressSourceKinds: readonly AddressSourceKind[];
       readonly id: string;
       readonly title: string;
       readonly signedBy: string;
@@ -191,6 +213,8 @@ export type AssessmentVerdict =
        * would be answering a question they did not ask.
        */
       readonly sourceKind: LeadSourceKind;
+      /** The address route this verdict was reached for. The notice quotes it. */
+      readonly addressSourceKind: AddressSourceKind;
     }
   | { readonly ok: false; readonly code: LiaRefusalCode; readonly message: string };
 
@@ -202,6 +226,9 @@ export type DraftRefusalCode =
   | 'LIA_NO_SOURCE_KINDS'
   | 'LIA_SOURCE_KIND_UNKNOWN'
   | 'LIA_SOURCE_KIND_NOT_PERMITTED'
+  | 'LIA_NO_ADDRESS_SOURCE_KINDS'
+  | 'LIA_ADDRESS_SOURCE_KIND_UNKNOWN'
+  | 'LIA_ADDRESS_SOURCE_KIND_NOT_PERMITTED'
   | 'LIA_LIST_EMPTY'
   | 'LIA_LIST_TOO_LONG'
   | 'LIA_ITEM_TOO_LONG';
@@ -340,6 +367,47 @@ export function validateLiaDraft(raw: Readonly<Record<string, unknown>>): DraftO
     };
   }
 
+  // The same three refusals for the ADDRESS routes, in the same order and for the same reasons.
+  // Absent is not wrong; wrong is not blocked; blocked is a decision with a reason attached.
+  const addressSourceKinds =
+    raw.addressSourceKinds === undefined ? [] : normaliseAddressSourceKinds(raw.addressSourceKinds);
+  if (addressSourceKinds === null) {
+    return {
+      ok: false,
+      code: 'LIA_ADDRESS_SOURCE_KIND_UNKNOWN',
+      message:
+        `addressSourceKinds contains a route this system does not recognise ` +
+        `(${JSON.stringify(raw.addressSourceKinds)}). The recognised routes are ` +
+        `${ADDRESS_SOURCE_KINDS.map((k) => `${k} (${ADDRESS_SOURCE_KIND_NOTES[k]})`).join('; ')}.`,
+    };
+  }
+  for (const kind of addressSourceKinds) {
+    const why = uncoverableAddressReason(kind);
+    if (why !== null) {
+      return {
+        ok: false,
+        code: 'LIA_ADDRESS_SOURCE_KIND_NOT_PERMITTED',
+        message:
+          `An assessment may not declare ${kind} as an address route. ${why} This is a recorded ` +
+          `decision rather than an omission: ${kind} is still a route this system recognises, and ` +
+          `a contact carrying it is refused by name rather than by silence.`,
+      };
+    }
+  }
+
+  if (addressSourceKinds.length === 0) {
+    return {
+      ok: false,
+      code: 'LIA_NO_ADDRESS_SOURCE_KINDS',
+      message:
+        'An assessment must say how the ADDRESS may have been obtained, not only how the person ' +
+        'was identified. Those are different acts with different expectations attached: an ' +
+        'address the employer published to be contacted on, and one constructed from their naming ' +
+        'convention and never published at all, are two different arguments about the same ' +
+        'person. An assessment silent on this covers no contact.',
+    };
+  }
+
   const lists: Record<string, string[]> = {};
   for (const { field, label } of LISTS) {
     const values = list(raw[field]);
@@ -380,6 +448,7 @@ export function validateLiaDraft(raw: Readonly<Record<string, unknown>>): DraftO
       balancing: text(raw.balancing),
       countries: Object.freeze([...new Set(countries)]),
       sourceKinds: Object.freeze(sourceKinds),
+      addressSourceKinds: Object.freeze(addressSourceKinds),
       dataCategories: Object.freeze(lists.dataCategories),
       dataSources: Object.freeze(lists.dataSources),
       safeguards: Object.freeze(lists.safeguards),
@@ -515,16 +584,36 @@ export function livenessVerdict(record: LiaRecord | null, now: Date): LivenessVe
   }
 
 
+  const addressRoutes = normaliseAddressSourceKinds(record.addressSourceKinds);
+  if (addressRoutes === null) {
+    return {
+      ok: false,
+      code: 'LIA_MALFORMED',
+      message:
+        `Assessment ${record.id} declares an address route this system does not recognise ` +
+        `(${JSON.stringify(record.addressSourceKinds)}). The recognised routes are ` +
+        `${ADDRESS_SOURCE_KINDS.join(', ')}. An unrecognised declaration is not a wildcard, and ` +
+        `it is not the same as covering no route: it means this document and this code disagree ` +
+        `about what routes exist.`,
+    };
+  }
+
   const declaresCountry = Array.isArray(record.countries) && record.countries.length > 0;
   const declaresRoute = routes.length > 0;
-  if (!declaresCountry || !declaresRoute) {
+  const declaresAddressRoute = addressRoutes.length > 0;
+  if (!declaresCountry || !declaresRoute || !declaresAddressRoute) {
     return {
       ok: false,
       code: 'LIA_MALFORMED',
       message:
         `Assessment ${record.id} declares ` +
-        `${declaresCountry ? '' : 'no jurisdiction'}${!declaresCountry && !declaresRoute ? ' and ' : ''}` +
-        `${declaresRoute ? '' : 'no route of acquisition'}, so there is no contact it could ` +
+        `${[
+          declaresCountry ? null : 'no jurisdiction',
+          declaresRoute ? null : 'no route of acquisition',
+          declaresAddressRoute ? null : 'no address route',
+        ]
+          .filter((gap): gap is string => gap !== null)
+          .join(' and ')}, so there is no contact it could ` +
         `support. An assessment covering "everywhere, however we got it" covers nothing.`,
     };
   }
@@ -533,6 +622,7 @@ export function livenessVerdict(record: LiaRecord | null, now: Date): LivenessVe
     ok: true,
     record,
     sourceKinds: routes,
+    addressSourceKinds: addressRoutes,
     id: record.id,
     title: text(record.title),
     signedBy,
@@ -566,7 +656,12 @@ export function livenessVerdict(record: LiaRecord | null, now: Date): LivenessVe
  */
 export function assessmentVerdict(
   record: LiaRecord | null,
-  context: { readonly country: string; readonly source: unknown; readonly now: Date }
+  context: {
+    readonly country: string;
+    readonly source: unknown;
+    readonly addressSourceKind: unknown;
+    readonly now: Date;
+  }
 ): AssessmentVerdict {
   const live = livenessVerdict(record, context.now);
   if (!live.ok) return live;
@@ -615,6 +710,38 @@ export function assessmentVerdict(
     };
   }
 
+  // The third dimension. `sourceKinds` said how we found the PERSON; this says how we got their
+  // ADDRESS, and an assessment written about one is not evidence about the other. A person found
+  // on LinkedIn whose address was bought and one whose address was derived from their employer's
+  // published convention are the same on the first two dimensions and differ only here.
+  const addressKind = classifyAddressSource(context.addressSourceKind);
+  if (addressKind === null) {
+    return {
+      ok: false,
+      code: 'LIA_ADDRESS_SOURCE_UNKNOWN',
+      message:
+        `This contact records the origin of its email address as ` +
+        `${JSON.stringify(context.addressSourceKind)}, which is not a route this system ` +
+        `recognises, so no assessment can be shown to cover it. The recognised routes are ` +
+        `${ADDRESS_SOURCE_KINDS.join(', ')}. A record that cannot say where its address came ` +
+        `from cannot be shown to be covered by anything, and the Article 14 notice would have ` +
+        `nothing truthful to tell the person either.`,
+    };
+  }
+  if (!live.addressSourceKinds.includes(addressKind)) {
+    return {
+      ok: false,
+      code: 'LIA_ADDRESS_SOURCE_NOT_COVERED',
+      message:
+        `Assessment ${live.id} covers addresses obtained by ` +
+        `${live.addressSourceKinds.join(', ')} and this contact's address was obtained by ` +
+        `${addressKind} — ${ADDRESS_SOURCE_KIND_NOTES[addressKind]}. How the address was ` +
+        `obtained is a separate question from how the person was identified, and the balancing ` +
+        `test turns on both. Write the assessment that covers ${addressKind}, or correct this ` +
+        `contact's address provenance.`,
+    };
+  }
+
   return {
     ok: true,
     id: live.id,
@@ -623,5 +750,6 @@ export function assessmentVerdict(
     signedAt: live.signedAt,
     reviewDueAt: live.reviewDueAt,
     sourceKind: kind,
+    addressSourceKind: addressKind,
   };
 }

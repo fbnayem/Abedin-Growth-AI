@@ -43,6 +43,7 @@ than one that admits it has none.
 | **Review due** | Twelve months after signature, unless a shorter date is given at signing |
 | **Countries covered** | `GB` |
 | **Routes covered (`sourceKinds`)** | `SCRAPE`, `IMPORT`, `MANUAL` — **not** `LINKEDIN`, **not** `PROVIDER` |
+| **Address routes covered (`addressSourceKinds`)** | `EMPLOYER_WEBSITE`, `PUBLIC_DIRECTORY`, `MANUAL_RESEARCH`, `SUBJECT_SUPPLIED` — **not** `INFERRED_PATTERN`, **not** `PROVIDER` |
 | **Article 14 handling** | § Article 14 handling, below |
 | **Retention** | § Retention, below |
 | **Objection route** | § How a person objects, below |
@@ -70,9 +71,19 @@ considered extension of this one.
 
 ## Routes of acquisition covered
 
-`SCRAPE`, `IMPORT`, `MANUAL`.
-
+**How the person was identified (`sourceKinds`):** `SCRAPE`, `IMPORT`, `MANUAL`.
 **Not** `LINKEDIN`, and **not** `PROVIDER`.
+
+**How the address was obtained (`addressSourceKinds`):** `EMPLOYER_WEBSITE`, `PUBLIC_DIRECTORY`,
+`MANUAL_RESEARCH`, `SUBJECT_SUPPLIED`.
+
+**Not `INFERRED_PATTERN`,** and that exclusion is deliberate rather than an oversight. The
+necessity limb below rests on the address having been **published** — "the address is the point of
+the page". An address constructed from an employer's naming convention was never published at all,
+and it carries an accuracy risk nothing else here carries: it can reach a different person of the
+same name. That is a different argument, and it is made in `lia-linkedin-2026.md`, not this one.
+
+**Not `PROVIDER`.** Purchased addresses are excluded by policy and refused in code.
 
 This is a new field and it is worth saying why it exists, because it looks like a duplicate of
 "data sources" below and is not. `dataSources` is prose, written for you and for a regulator.

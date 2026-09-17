@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ADDRESS_SOURCE_KINDS } from '../domain/addressSource';
 import { timeZoneRejection } from '../../shared/domain/time';
 import type { Request, Response } from 'express';
 import { sendError } from './errors';
@@ -91,6 +92,15 @@ export const createContactSchema = z.object({
   article14NoticeSentAt: z.string().datetime({ offset: true }).optional(),
   /** Where this contact came from. Free text, and required when a basis is claimed. */
   sourceEvidence: z.string().trim().min(1).max(2000).optional(),
+  /**
+   * How the ADDRESS was obtained, optional here alone among the ingest paths.
+   *
+   * A contact created with no lawful basis is not mailable anyway, so demanding it would
+   * refuse a harmless write. When it is absent the route records MANUAL_RESEARCH, which is
+   * the honest answer for a record a person typed in: somebody found the address somewhere.
+   */
+  addressSourceKind: z.enum(ADDRESS_SOURCE_KINDS).optional(),
+  addressSourceEvidence: z.string().trim().min(1).max(2000).optional(),
 });
 
 export const createKnowledgeItemSchema = z.object({

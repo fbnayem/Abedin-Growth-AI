@@ -1,4 +1,5 @@
 import { normalizeEmailKey } from '../lib/emailKey';
+import type { AddressSourceKind } from './addressSource';
 import type { AddressType, LawfulBasis } from './lawfulBasis';
 
 /**
@@ -63,6 +64,31 @@ export interface ContactProvenance {
   readonly importBatchId?: string;
 }
 
+/**
+ * WHERE THE ADDRESS CAME FROM — a sibling of `ContactProvenance`, and deliberately not part of it.
+ *
+ * `ContactProvenance` answers "how did we find this PERSON". This answers "how did we get their
+ * ADDRESS", and the two are different acts with different expectations attached. A person found on
+ * LinkedIn whose address was published by their employer and one whose address was bought share
+ * every field of the first object and differ entirely in this one.
+ *
+ * WHY IT IS A SEPARATE TYPE AND NOT THREE MORE FIELDS ON THE FIRST.
+ * A prospect has no email address at all — that is what the collection is for. Adding these to
+ * `ContactProvenance` would have meant either making them optional, which is how a required check
+ * becomes a skipped one, or inventing a NO_ADDRESS member of the vocabulary, which is a word for
+ * "not applicable" that later becomes a default. Splitting the type states the domain fact
+ * instead: a prospect has person-provenance and no address-provenance, and `createProspects`
+ * therefore does not take one.
+ */
+export interface AddressProvenance {
+  /** From the closed list in `./addressSource`. Decides which assessments can cover this record. */
+  readonly addressSourceKind: AddressSourceKind;
+  /** Enough for a person to check the claim: the page, the provider, the convention inferred. */
+  readonly addressSourceEvidence: string;
+  /** When the ADDRESS was obtained, which is not when the person was identified. */
+  readonly addressCollectedAt: string;
+}
+
 /** The lawful basis a create may record, if any. Absent means the record is not yet mailable. */
 export interface ContactBasisInput {
   readonly basis: LawfulBasis;
@@ -81,6 +107,8 @@ export interface BuildContactOptions {
   readonly status: string;
   readonly now: Date;
   readonly provenance: ContactProvenance;
+  /** Required. See `AddressProvenance` for why it is not folded into `provenance`. */
+  readonly address: AddressProvenance;
   readonly basis?: ContactBasisInput;
 }
 
@@ -127,6 +155,12 @@ export function buildContactDocument(
     sourceEvidence: options.provenance.sourceEvidence,
     sourceCollectedAt: options.provenance.sourceCollectedAt,
     importBatchId: options.provenance.importBatchId ?? null,
+
+    // The address half of the same question. Stored as first-class fields rather than appended to
+    // `sourceEvidence`, because the gate reads the kind and prose cannot be read by a gate.
+    addressSourceKind: options.address.addressSourceKind,
+    addressSourceEvidence: options.address.addressSourceEvidence,
+    addressCollectedAt: options.address.addressCollectedAt,
   };
 
   const basis = options.basis;

@@ -3,7 +3,8 @@ import { orgPath } from '../tenancy/orgScope';
 import { validateProspect, type ProspectRefusalCode } from '../domain/prospect';
 import { validateCandidate } from '../domain/leadCandidate';
 import { ingestRecords, type BasisSettings, type IngestMode } from './leadIngest.service';
-import type { ContactProvenance } from '../domain/contactDocument';
+import type { AddressProvenance, ContactProvenance } from '../domain/contactDocument';
+import { ADDRESS_SOURCE_KINDS, classifyAddressSource } from '../domain/addressSource';
 import type { Attribution } from '../domain/operatorAction';
 
 /**
@@ -46,6 +47,7 @@ export type ProspectWriteRefusal =
   | 'NOT_FOUND'
   | 'NO_SOURCE_EVIDENCE'
   | 'ADDRESS_ORIGIN_NOT_RECORDED'
+  | 'ADDRESS_ORIGIN_KIND_UNRECOGNISED'
   | 'ALREADY_PROMOTED'
   | 'VALIDATION_ERROR';
 
@@ -322,7 +324,12 @@ export async function promoteProspect(
   email: string,
   settings: BasisSettings,
   by: Attribution,
-  options: { mode: IngestMode; emailSource?: string; now?: Date } = { mode: 'PREVIEW' }
+  options: {
+    mode: IngestMode;
+    addressSourceKind?: string;
+    addressSourceEvidence?: string;
+    now?: Date;
+  } = { mode: 'PREVIEW' }
 ): Promise<PromotionOutcome> {
   if (!store) {
     return { ok: false, code: 'STORE_UNAVAILABLE', message: 'The datastore is not available.' };
@@ -342,20 +349,50 @@ export async function promoteProspect(
   // Checked here and not only in the request contract, because a service that trusts its schema
   // to have run is a service whose rule disappears the first time it is called from anywhere
   // else — a script, a job, a future route.
-  const emailSource = trimmed(options.emailSource);
-  if (emailSource === null) {
+  // Checked here and not only in the request contract, because a service that trusts its schema
+  // to have run is a service whose rule disappears the first time it is called from anywhere
+  // else -- a script, a job, a future route.
+  //
+  // TWO FIELDS, NOT ONE. The KIND is what the lawful-basis gate reads, from a closed vocabulary;
+  // the EVIDENCE is the prose a person could check it against. `lia-linkedin-2026.md` covers an
+  // address derived from the employer's published naming convention and does NOT cover one bought
+  // from a provider, so which of the two happened decides whether this contact has a lawful basis
+  // at all. While this was one free-text field, the system recorded that distinction only when
+  // somebody volunteered it, and the document made a claim about every record that the data could
+  // not support for any of them.
+  const addressSourceEvidence = trimmed(options.addressSourceEvidence);
+  if (addressSourceEvidence === null) {
     return {
       ok: false,
       code: 'ADDRESS_ORIGIN_NOT_RECORDED',
       message:
-        `Promoting a prospect needs \`emailSource\`: where this address came from, in a form a ` +
-        `person could check. It is not a detail. The balancing assessment for LinkedIn-sourced ` +
-        `contacts covers an address derived from the employer's published naming convention and ` +
-        `does NOT cover one bought from a data provider, so which of the two happened decides ` +
-        `whether this contact has a lawful basis at all — and the Article 14 notice tells the ` +
-        `person we found their address separately, which is only half an answer without this.`,
+        'Promoting a prospect needs ' + `addressSourceEvidence` + ': where this address came from, in a form ' +
+        'a person could check. The Article 14 notice tells this person we found their address ' +
+        'separately, which is only half an answer without it.',
     };
   }
+
+  const addressSourceKind = classifyAddressSource(options.addressSourceKind);
+  if (addressSourceKind === null) {
+    return {
+      ok: false,
+      code: 'ADDRESS_ORIGIN_KIND_UNRECOGNISED',
+      message:
+        'Promoting a prospect needs ' + `addressSourceKind` + ' from the closed list: ' +
+        ADDRESS_SOURCE_KINDS.join(', ') + '. Received ' +
+        JSON.stringify(options.addressSourceKind) + '. The prose in ' + `addressSourceEvidence` +
+        ' is what a person reads; this is what the gate reads, and a gate cannot read prose.',
+    };
+  }
+
+  const address: AddressProvenance = {
+    addressSourceKind,
+    addressSourceEvidence,
+    // NOW, not the prospect's own date. The person was identified then; the address was obtained
+    // at this moment, by whoever is promoting the record. Two different facts about two different
+    // acts, and collapsing them would date the address to before anyone had looked for it.
+    addressCollectedAt: (options.now ?? new Date()).toISOString(),
+  };
 
   const snap = await getDoc(prospectRef(orgId, prospectId));
   if (!snap.exists()) {
@@ -399,7 +436,7 @@ export async function promoteProspect(
     source: trimmed(prospect.source) ?? 'LINKEDIN',
     sourceEvidence:
       `${trimmed(prospect.sourceEvidence) ?? 'LinkedIn'} — profile ${trimmed(prospect.profileUrl) ?? '(unrecorded)'}` +
-      `; address from ${emailSource}`,
+      `; address from ${addressSourceEvidence}`,
     sourceCollectedAt: trimmed(prospect.sourceCollectedAt) ?? trimmed(prospect.createdAt) ?? now.toISOString(),
     importBatchId: trimmed(prospect.importBatchId) ?? undefined,
   };
@@ -416,6 +453,7 @@ export async function promoteProspect(
     ],
     settings,
     provenance,
+    address,
     actor,
     { mode: options.mode, now }
   );

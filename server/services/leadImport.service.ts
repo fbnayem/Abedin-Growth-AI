@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import type { AddressProvenance } from '../domain/contactDocument';
+import type { AddressSourceKind } from '../domain/addressSource';
 import { store } from '../store';
 import type { ContactProvenance } from '../domain/contactDocument';
 import type { AddressType, LawfulBasis } from '../domain/lawfulBasis';
@@ -64,6 +66,13 @@ export interface ImportBatchSettings {
   readonly addressType?: AddressType;
   /** Where this list came from, in a form a person could check. Required. */
   readonly sourceEvidence: string;
+  /**
+   * How the ADDRESSES in this file were obtained. One decision for the whole file, like `basis`,
+   * and for the same reason: a column an external source controls is a source naming the route
+   * that decides which assessment covers it.
+   */
+  readonly addressSourceKind: AddressSourceKind;
+  readonly addressSourceEvidence: string;
   readonly type?: 'LEAD' | 'INVESTOR' | 'PARTNER';
 }
 
@@ -134,6 +143,13 @@ export function planFingerprint(text: string, batch: ImportBatchSettings): strin
     country: batch.country ?? null,
     addressType: batch.addressType ?? null,
     sourceEvidence: batch.sourceEvidence,
+    // IN THE FINGERPRINT, and this one is easy to miss. `PLAN_CHANGED` exists because changing
+    // the basis from consent to legitimate interest changes what an import MEANS without changing
+    // a byte of the file. The address route now decides which balancing assessment can cover
+    // every contact the file creates, so the same argument applies to it exactly: previewing as
+    // EMPLOYER_WEBSITE and committing as PROVIDER must not match a hash.
+    addressSourceKind: batch.addressSourceKind,
+    addressSourceEvidence: batch.addressSourceEvidence,
     type: batch.type ?? 'LEAD',
   });
   // A NUL byte between the two halves, so no rearrangement of settings and file content can
@@ -259,6 +275,21 @@ export async function importLeads(
     importBatchId: batchId,
   };
 
+  // STATED BY THE OPERATOR, per batch, and never defaulted. An importer genuinely cannot know how
+  // the addresses in a file were obtained; only the person who has the file can. `PUBLIC_DIRECTORY`
+  // would be exactly the plausible-looking default that is a guess, and §14 is explicit that an
+  // unknown must never resolve to a permission.
+  //
+  // Per BATCH and not per row, which has an honest cost: a file mixing published addresses with
+  // guessed ones has to be split. That is the right trade -- the alternative is a column an
+  // external source controls, and a source that can name its own address route is choosing the
+  // assessment that covers it.
+  const address: AddressProvenance = {
+    addressSourceKind: batch.addressSourceKind,
+    addressSourceEvidence: batch.addressSourceEvidence,
+    addressCollectedAt: (options.now ?? new Date()).toISOString(),
+  };
+
   // Every candidate row goes through the one write path, which is also what the discovery
   // provider and the scrape worker use. Dedup, no-overwrite and the basis verdict are
   // properties of that function rather than of this one.
@@ -282,6 +313,7 @@ export async function importLeads(
       addressType: batch.addressType,
     },
     provenance,
+    address,
     actor,
     { mode, type: batch.type ?? 'LEAD', now: options.now }
   );

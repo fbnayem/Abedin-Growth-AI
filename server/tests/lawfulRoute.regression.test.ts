@@ -24,6 +24,9 @@ vi.mock('../store', async () => (await import('./helpers/memoryDocumentStore')).
  *   unknown source                           -> reject
  *   missing source                           -> compile-time / internal validation failure
  *   caller sends `source` to /api/prospects  -> 400
+ *   LINKEDIN + bought address + LinkedIn LIA -> reject
+ *   LINKEDIN + inferred address + same LIA   -> accept
+ *   an assessment covering address PROVIDER  -> cannot be authored
  *
  * If one of these ever has to change, it should be because somebody decided to change it, and
  * the diff should say so.
@@ -34,8 +37,15 @@ const NOW = new Date('2026-09-15T10:00:00.000Z');
 const NAMED: Attribution = { kind: 'IDENTIFIED', actor: 'ops@abedin.example' };
 const LIMB = 'x'.repeat(200);
 
+/** An address route both fixture assessments cover, so only the field under test decides. */
+const ADDRESS_KIND = 'EMPLOYER_WEBSITE';
+
 /** The two assessments as they are actually drafted, reduced to what the gate reads. */
-function assessment(id: string, sourceKinds: readonly string[]): LiaRecord {
+function assessment(
+  id: string,
+  sourceKinds: readonly string[],
+  addressSourceKinds: readonly string[] = ['EMPLOYER_WEBSITE', 'INFERRED_PATTERN']
+): LiaRecord {
   return {
     id,
     organizationId: ORG,
@@ -45,6 +55,7 @@ function assessment(id: string, sourceKinds: readonly string[]): LiaRecord {
     balancing: LIMB,
     countries: ['GB'],
     sourceKinds,
+    addressSourceKinds,
     dataCategories: ['work email address'],
     dataSources: ['see the assessment'],
     safeguards: ['suppression on first objection'],
@@ -75,31 +86,32 @@ beforeEach(() => memory.reset());
 
 describe('the permanent route boundary', () => {
   it('LINKEDIN contact + website LIA = reject', () => {
-    const verdict = assessmentVerdict(WEBSITE_LIA, { country: 'GB', source: 'LINKEDIN', now: NOW });
+    const verdict = assessmentVerdict(WEBSITE_LIA, { country: 'GB', source: 'LINKEDIN', addressSourceKind: ADDRESS_KIND, now: NOW });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) {
       expect(verdict.code).toBe('LIA_SOURCE_NOT_COVERED');
       expect(verdict.message).toContain('LINKEDIN');
     }
     // And the control, so this is a boundary rather than a blanket refusal.
-    expect(assessmentVerdict(LINKEDIN_LIA, { country: 'GB', source: 'LINKEDIN', now: NOW }).ok).toBe(true);
+    expect(assessmentVerdict(LINKEDIN_LIA, { country: 'GB', source: 'LINKEDIN', addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(true);
   });
 
   it('SCRAPE:domain + LinkedIn LIA = reject', () => {
     const verdict = assessmentVerdict(LINKEDIN_LIA, {
       country: 'GB',
       source: 'SCRAPE:smilecare.example',
+      addressSourceKind: ADDRESS_KIND,
       now: NOW,
     });
     expect(verdict.ok).toBe(false);
     if (!verdict.ok) expect(verdict.code).toBe('LIA_SOURCE_NOT_COVERED');
-    expect(assessmentVerdict(WEBSITE_LIA, { country: 'GB', source: 'SCRAPE:smilecare.example', now: NOW }).ok).toBe(true);
+    expect(assessmentVerdict(WEBSITE_LIA, { country: 'GB', source: 'SCRAPE:smilecare.example', addressSourceKind: ADDRESS_KIND, now: NOW }).ok).toBe(true);
   });
 
   it('PROVIDER:* + either current LIA = reject', () => {
     for (const { name, record } of BOTH) {
       for (const source of ['PROVIDER:acme-data', 'PROVIDER:anyone', 'provider:Acme Data']) {
-        const verdict = assessmentVerdict(record, { country: 'GB', source, now: NOW });
+        const verdict = assessmentVerdict(record, { country: 'GB', source, addressSourceKind: ADDRESS_KIND, now: NOW });
         expect(verdict.ok, `${source} under ${name}`).toBe(false);
         if (!verdict.ok) expect(verdict.code).toBe('LIA_SOURCE_NOT_COVERED');
       }
@@ -121,6 +133,7 @@ describe('the permanent route boundary', () => {
       balancing: LIMB,
       countries: ['GB'],
       dataCategories: ['work email address'],
+      addressSourceKinds: ['EMPLOYER_WEBSITE'],
       dataSources: ['a data provider'],
       safeguards: ['suppression on first objection'],
       objectionRoute: 'Reply to any message, or email privacy@abedin.example.',
@@ -145,14 +158,95 @@ describe('the permanent route boundary', () => {
     // contact carrying `PROVIDER:acme` would then refuse as an UNRECOGNISED route, which reads
     // like a data error rather than a decision, and the Article 14 notice would lose its sentence.
     expect(classifyLeadSource('PROVIDER:acme-data')).toBe('PROVIDER');
-    const verdict = assessmentVerdict(WEBSITE_LIA, { country: 'GB', source: 'PROVIDER:acme', now: NOW });
+    const verdict = assessmentVerdict(WEBSITE_LIA, { country: 'GB', source: 'PROVIDER:acme', addressSourceKind: ADDRESS_KIND, now: NOW });
     if (!verdict.ok) expect(verdict.code).not.toBe('LIA_SOURCE_UNKNOWN');
+  });
+
+  /**
+   * THE ADDRESS DIMENSION, WHICH THE ROUTE DIMENSION ALONE DID NOT COVER.
+   *
+   * `sourceKinds` says how the PERSON was found. Two contacts can match on it and on the country
+   * and still be two different arguments, because the ADDRESS arrived differently. This is the
+   * case the owner's list did not yet contain, and the one `lia-linkedin-2026.md` names in its own
+   * Limb 2.
+   */
+  it('LINKEDIN contact + bought address + LinkedIn LIA = reject', () => {
+    const linkedInInferred = assessment('lia_linkedin', ['LINKEDIN'], ['INFERRED_PATTERN']);
+    const verdict = assessmentVerdict(linkedInInferred, {
+      country: 'GB',
+      source: 'LINKEDIN',
+      addressSourceKind: 'PROVIDER',
+      now: NOW,
+    });
+    expect(verdict.ok).toBe(false);
+    if (!verdict.ok) expect(verdict.code).toBe('LIA_ADDRESS_SOURCE_NOT_COVERED');
+  });
+
+  it('LINKEDIN contact + inferred address + LinkedIn LIA = accept', () => {
+    // The control. Without it the line above would be satisfied by a gate that refuses everything.
+    const linkedInInferred = assessment('lia_linkedin', ['LINKEDIN'], ['INFERRED_PATTERN']);
+    expect(
+      assessmentVerdict(linkedInInferred, {
+        country: 'GB',
+        source: 'LINKEDIN',
+        addressSourceKind: 'INFERRED_PATTERN',
+        now: NOW,
+      }).ok
+    ).toBe(true);
+  });
+
+  it('no assessment may be authored covering a PURCHASED ADDRESS either', () => {
+    // Blocking a purchased PERSON and not a purchased ADDRESS left the policy circumventable in
+    // one step: identify on LinkedIn (permitted), buy the address (previously invisible), send.
+    const draft = {
+      title: 'LinkedIn with bought addresses, 2026',
+      purpose: LIMB,
+      necessity: LIMB,
+      balancing: LIMB,
+      countries: ['GB'],
+      sourceKinds: ['LINKEDIN'],
+      dataCategories: ['work email address'],
+      dataSources: ['LinkedIn profiles'],
+      safeguards: ['suppression on first objection'],
+      objectionRoute: 'Reply to any message, or email privacy@abedin.example.',
+    };
+    const blocked = validateLiaDraft({ ...draft, addressSourceKinds: ['PROVIDER'] });
+    expect(blocked.ok).toBe(false);
+    if (!blocked.ok) expect(blocked.code).toBe('LIA_ADDRESS_SOURCE_KIND_NOT_PERMITTED');
+
+    // The routes that ARE permitted still author fine — a policy, not a freeze.
+    expect(validateLiaDraft({ ...draft, addressSourceKinds: ['INFERRED_PATTERN'] }).ok).toBe(true);
+  });
+
+  it('unknown address route = reject', () => {
+    // Each assessment is asked about a person-route IT COVERS, so the only thing left to refuse is
+    // the address route. Asking the LinkedIn assessment about a scraped contact would refuse on
+    // the person dimension first and this test would pass without exercising the address one --
+    // the right answer by the wrong route.
+    const cases = [
+      { name: 'the website assessment', record: WEBSITE_LIA, source: 'SCRAPE:smilecare.example' },
+      { name: 'the LinkedIn assessment', record: LINKEDIN_LIA, source: 'LINKEDIN' },
+    ];
+    for (const { name, record, source } of cases) {
+      for (const bad of ['', 'BOUGHT', 'PROVIDER:acme', null, undefined, 42]) {
+        const verdict = assessmentVerdict(record, {
+          country: 'GB',
+          source,
+          addressSourceKind: bad,
+          now: NOW,
+        });
+        expect(verdict.ok, `${JSON.stringify(bad)} under ${name}`).toBe(false);
+        if (!verdict.ok) {
+          expect(verdict.code, `${JSON.stringify(bad)} under ${name}`).toBe('LIA_ADDRESS_SOURCE_UNKNOWN');
+        }
+      }
+    }
   });
 
   it('unknown source = reject', () => {
     for (const { name, record } of BOTH) {
       for (const source of ['APOLLO', 'crm', 'bought', 'SCRAPE:', 'MANUAL:x', '']) {
-        const verdict = assessmentVerdict(record, { country: 'GB', source, now: NOW });
+        const verdict = assessmentVerdict(record, { country: 'GB', source, addressSourceKind: ADDRESS_KIND, now: NOW });
         expect(verdict.ok, `${JSON.stringify(source)} under ${name}`).toBe(false);
         if (!verdict.ok) expect(verdict.code).toBe('LIA_SOURCE_UNKNOWN');
       }
@@ -177,7 +271,7 @@ describe('the permanent route boundary', () => {
     // And for a caller reaching this from untyped data — a document read out of the datastore —
     // the value is `unknown` and an absent one refuses rather than passing.
     for (const source of [undefined, null, 42, {}, []]) {
-      const verdict = assessmentVerdict(WEBSITE_LIA, { country: 'GB', source, now: NOW });
+      const verdict = assessmentVerdict(WEBSITE_LIA, { country: 'GB', source, addressSourceKind: ADDRESS_KIND, now: NOW });
       expect(verdict.ok, JSON.stringify(source)).toBe(false);
       if (!verdict.ok) expect(verdict.code).toBe('LIA_SOURCE_UNKNOWN');
     }
@@ -215,6 +309,15 @@ describe('the permanent route boundary', () => {
     });
     expect(outcome.ok).toBe(false);
     if (!outcome.ok) expect(outcome.code).toBe('ADDRESS_ORIGIN_NOT_RECORDED');
+
+    // Evidence without a kind is refused too, and by its own code: prose a person can read is not
+    // a route a gate can read, and accepting one for the other is the defect this unit closes.
+    const noKind = await promoteProspect(ORG, 'pr_x', 'ada@analytical.example', {} as never, NAMED, {
+      mode: 'PREVIEW',
+      addressSourceEvidence: 'found it somewhere',
+    });
+    expect(noKind.ok).toBe(false);
+    if (!noKind.ok) expect(noKind.code).toBe('ADDRESS_ORIGIN_KIND_UNRECOGNISED');
     // Refused before the datastore is touched: an incomplete request is a property of the
     // request, and there is no reason to go and read a document to find that out.
     expect(Object.keys(memory.docs).length).toBe(0);
@@ -229,13 +332,21 @@ describe('the permanent route boundary', () => {
     const complete = {
       email: 'ada@analytical.example',
       basis: 'LEGITIMATE_INTEREST' as const,
-      emailSource: 'analytical.example contact page — firstname@ convention',
+      addressSourceKind: 'INFERRED_PATTERN' as const,
+      addressSourceEvidence: 'analytical.example contact page — firstname@ convention',
     };
     expect(promoteProspectSchema.safeParse(complete).success).toBe(true);
 
-    const { emailSource: _omitted, ...withoutOrigin } = complete;
-    expect(promoteProspectSchema.safeParse(withoutOrigin).success).toBe(false);
+    // BOTH halves are required, and each is asserted by omitting only itself from an otherwise
+    // complete body. One block omitting both would be satisfied by a single error and would keep
+    // passing if either were made optional again.
+    const { addressSourceEvidence: _noEvidence, ...withoutEvidence } = complete;
+    expect(promoteProspectSchema.safeParse(withoutEvidence).success).toBe(false);
+    const { addressSourceKind: _noKind, ...withoutKind } = complete;
+    expect(promoteProspectSchema.safeParse(withoutKind).success).toBe(false);
     // An empty one is not a recorded origin either, or the requirement is satisfied by a space.
-    expect(promoteProspectSchema.safeParse({ ...complete, emailSource: '   ' }).success).toBe(false);
+    expect(promoteProspectSchema.safeParse({ ...complete, addressSourceEvidence: '   ' }).success).toBe(false);
+    // And the kind must be from the closed list, not any string the caller likes.
+    expect(promoteProspectSchema.safeParse({ ...complete, addressSourceKind: 'BOUGHT' }).success).toBe(false);
   });
 });

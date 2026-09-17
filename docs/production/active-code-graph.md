@@ -13,10 +13,10 @@ Capability ownership is reported as *which live modules import the provider*, an
 
 | Entrypoint | Live modules reached |
 |---|---|
-| `server.ts` | 170 |
+| `server.ts` | 171 |
 | `src/main.tsx` | 64 |
 
-Live modules in total: **227**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
+Live modules in total: **228**. Dead files: **0**. Operational-only modules: **1**. Script invocations: **40**. Scripts reached by nothing: **0**.
 
 ## 3. Capability providers and their live importers
 
@@ -115,6 +115,7 @@ The server's dependency surface by importer: every package a live module outside
 |---|---|---|
 | `server/domain/abstention.ts` | 5 | server.ts |
 | `server/domain/actionAudit.ts` | 1 | server.ts |
+| `server/domain/addressSource.ts` | 7 | server.ts |
 | `server/domain/adjudication.ts` | 4 | server.ts |
 | `server/domain/apiContracts.ts` | 3 | server.ts |
 | `server/domain/article14Notice.ts` | 2 | server.ts |

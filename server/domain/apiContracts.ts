@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ADDRESS_SOURCE_KINDS } from './addressSource';
 import { ADDRESS_TYPES, LAWFUL_BASES } from './lawfulBasis';
 import { CAMPAIGN, OPPORTUNITY, legalStates } from './stateMachines';
 import { timeZoneRejection } from '../../shared/domain/time';
@@ -324,6 +325,13 @@ export const leadImportSchema = z
       .optional(),
     addressType: z.enum(ADDRESS_TYPES).optional(),
     sourceEvidence: z.string().trim().min(1).max(2000),
+    /**
+     * How the addresses in THIS FILE were obtained. Required, and never defaulted: an importer
+     * cannot know, and a plausible-looking default would be a guess standing in for the fact that
+     * decides which balancing assessment covers every contact the file creates.
+     */
+    addressSourceKind: z.enum(ADDRESS_SOURCE_KINDS),
+    addressSourceEvidence: z.string().trim().min(1).max(2000),
     type: z.enum(['LEAD', 'INVESTOR', 'PARTNER']).optional(),
   })
   .strict();
@@ -409,12 +417,14 @@ export const promoteProspectSchema = z
     /**
      * Where the ADDRESS came from, which is usually not where the person came from.
      *
-     * REQUIRED. The LinkedIn balancing assessment covers an address derived from the employer's
-     * published naming convention and not one purchased from a provider, so this field is what
-     * decides which document applies — and the Article 14 notice tells the person their address
-     * was found separately, which is half an answer on its own.
+     * BOTH REQUIRED, and they are different jobs. The KIND is what the lawful-basis gate reads,
+     * from the closed list in `server/domain/addressSource.ts`; the EVIDENCE is the prose a
+     * person could check it against. The LinkedIn assessment covers an address derived from the
+     * employer's published naming convention and not one purchased from a provider, so the kind
+     * is what decides which document applies — and a gate cannot read prose.
      */
-    emailSource: z.string().trim().min(1).max(500),
+    addressSourceKind: z.enum(ADDRESS_SOURCE_KINDS),
+    addressSourceEvidence: z.string().trim().min(1).max(500),
     mode: z.enum(['PREVIEW', 'COMMIT']).optional(),
   })
   .strict();
@@ -436,6 +446,7 @@ export const liaDraftSchema = z
     balancing: z.string().trim().min(1).max(20000),
     countries: z.array(z.string().trim().min(2).max(2)).min(1).max(50),
     sourceKinds: z.array(z.string().trim().min(1).max(40)).min(1).max(20),
+    addressSourceKinds: z.array(z.string().trim().min(1).max(40)).min(1).max(20),
     dataCategories: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
     dataSources: z.array(z.string().trim().min(1).max(300)).min(1).max(50),
     safeguards: z.array(z.string().trim().min(1).max(300)).min(1).max(50),

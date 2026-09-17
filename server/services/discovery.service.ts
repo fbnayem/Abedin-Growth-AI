@@ -2,6 +2,7 @@ import { store } from '../store';
 import { isRealActionEnabled } from '../config/safeMode';
 import { normaliseCountry, type AddressType, type LawfulBasis } from '../domain/lawfulBasis';
 import { validateCandidate } from '../domain/leadCandidate';
+import type { AddressProvenance } from '../domain/contactDocument';
 import { ingestRecords, type IngestMode, type IngestRecord, type IngestOutcome } from './leadIngest.service';
 import { recordTenantSpend, tenantSpendGate } from './tenantSpend.service';
 import { KIND_DISPOSITION, classifyThrown } from '../lib/providerError';
@@ -341,6 +342,17 @@ export async function discoverLeads(
     importBatchId: batchId,
   };
 
+  // A LITERAL, for the same reason as the scrape worker's: a provider adapter that could name its
+  // own address route would be choosing the assessment that covers what it sells. Combined with
+  // the PROVIDER policy in `server/domain/addressSource.ts`, every discovered contact now refuses
+  // at the gate BY NAME rather than by silence — the state this route was already in through
+  // `source: PROVIDER:<name>`, now said out loud about the address as well.
+  const address: AddressProvenance = {
+    addressSourceKind: 'PROVIDER',
+    addressSourceEvidence: `supplied by ${provider.providerName} in query ${output.queryId}`,
+    addressCollectedAt: now.toISOString(),
+  };
+
   const result = await ingestRecords(
     orgId,
     records,
@@ -353,6 +365,7 @@ export async function discoverLeads(
       addressType: batch.addressType,
     },
     provenance,
+    address,
     actor,
     { mode: options.mode, type: batch.type ?? 'LEAD', now }
   );

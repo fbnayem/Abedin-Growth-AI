@@ -101,7 +101,11 @@ prospectsRouter.post('/:id/promote', async (req: Request, res: Response) => {
         addressType: body.addressType,
       },
       gate.attribution,
-      { mode: body.mode ?? 'PREVIEW', emailSource: body.emailSource }
+      {
+        mode: body.mode ?? 'PREVIEW',
+        addressSourceKind: body.addressSourceKind,
+        addressSourceEvidence: body.addressSourceEvidence,
+      }
     );
     if (outcome.ok === false) {
       return sendError(

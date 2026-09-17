@@ -15,7 +15,12 @@ import { previewScore, scoreContacts } from '../services/leadScore.service';
 import { discoverLeads } from '../services/discovery.service';
 import { scrapeSite } from '../services/scrapeWorker.service';
 import { sendArticle14Notices } from '../services/article14Send.service';
-import { buildContactDocument, type ContactProvenance } from '../domain/contactDocument';
+import {
+  buildContactDocument,
+  type AddressProvenance,
+  type ContactProvenance,
+} from '../domain/contactDocument';
+import { classifyAddressSource } from '../domain/addressSource';
 import { attributionFor, operatorGate } from '../domain/operatorAction';
 import { isProduction } from '../config/environment';
 
@@ -74,6 +79,23 @@ function contactDocumentFor(
       (recordedBy === null ? 'Entered through the API.' : `Entered by ${recordedBy}.`),
     sourceCollectedAt: new Date().toISOString(),
   };
+
+  // MANUAL_RESEARCH unless the operator says otherwise, and that default is defensible here where
+  // it would not be anywhere else: a person is typing this record in, so a person did find the
+  // address somewhere. The other paths get literals because the CODE knows the route; this one
+  // gets a default because the ACT is known even when the particular is not.
+  //
+  // `addressSourceEvidence` falls back to the same sentence `sourceEvidence` does, so the record
+  // never claims evidence it does not have -- it says plainly that somebody entered it.
+  const address: AddressProvenance = {
+    addressSourceKind: classifyAddressSource(input.addressSourceKind) ?? 'MANUAL_RESEARCH',
+    addressSourceEvidence:
+      input.addressSourceEvidence ??
+      input.sourceEvidence ??
+      (recordedBy === null ? 'Entered through the API.' : `Entered by ${recordedBy}.`),
+    addressCollectedAt: new Date().toISOString(),
+  };
+
   return buildContactDocument(input, {
     id,
     organizationId,
@@ -81,6 +103,7 @@ function contactDocumentFor(
     status,
     now: new Date(),
     provenance,
+    address,
     basis:
       input.lawfulBasis !== undefined && recordedBy !== null
         ? {
@@ -243,6 +266,8 @@ contactsRouter.post('/leads/import', async (req: Request, res: Response) => {
         country: body.country,
         addressType: body.addressType,
         sourceEvidence: body.sourceEvidence,
+        addressSourceKind: body.addressSourceKind,
+        addressSourceEvidence: body.addressSourceEvidence,
         type: body.type,
       },
       gate.attribution,

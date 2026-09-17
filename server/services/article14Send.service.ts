@@ -240,7 +240,12 @@ export async function sendArticle14Notices(
     // than anywhere else: the notice's first substantive paragraph tells the person WHERE WE GOT
     // THEIR DETAILS, so sending it under an assessment written about a different route would put
     // a statement about one acquisition next to a signature given for another.
-    const verdict = assessmentVerdict(record, { country, source: contact.source, now });
+    const verdict = assessmentVerdict(record, {
+      country,
+      source: contact.source,
+      addressSourceKind: contact.addressSourceKind,
+      now,
+    });
     if (!verdict.ok) {
       outcomes.push(refuse(contactId, 'ASSESSMENT_INVALID', `${verdict.code}: ${verdict.message}`));
       continue;
