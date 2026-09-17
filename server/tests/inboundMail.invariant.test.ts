@@ -630,6 +630,15 @@ describe('the pipeline acts on all of it', () => {
     expect(gateway).toContain("contactData.hardBounced === true ? 'HARD_BOUNCE' : null");
   });
 
+  it('and it dates the bounce the way every other contact date is written', () => {
+    // It was `hardBouncedAt: new Date()` -- a Date object where every other date on a contact is
+    // an ISO string. One special case a reader has to know about, and a retention sweep computing
+    // an age from it would read `[object Object]` and get NaN. An age no one can compute is the
+    // shape of defect that surfaces as a record nobody deletes.
+    expect(pipeline).toContain('hardBouncedAt: new Date().toISOString()');
+    expect(pipeline).not.toContain('hardBouncedAt: new Date(),');
+  });
+
   it('a failed suppression write is loud rather than silent', () => {
     expect(pipeline).toContain('FAILED to suppress a hard-bounced recipient');
   });

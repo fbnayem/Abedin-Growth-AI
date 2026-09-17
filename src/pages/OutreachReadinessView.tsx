@@ -72,7 +72,7 @@ const STATUS_STYLE: Record<CheckStatus, { icon: typeof CheckCircle2; tone: strin
   WARN: { icon: AlertTriangle, tone: "text-amber-400", label: "Worth knowing" },
 };
 
-function CheckRow({ check }: { check: PreflightCheck }) {
+function CheckRow({ check, children }: { check: PreflightCheck; children?: React.ReactNode }) {
   const style = STATUS_STYLE[check.status];
   const Icon = style.icon;
   return (
@@ -87,6 +87,221 @@ function CheckRow({ check }: { check: PreflightCheck }) {
         {check.remedy !== null && (
           <p className="text-xs text-sky-300/80 mt-1.5 leading-relaxed">{check.remedy}</p>
         )}
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * THE CONTROLLER IDENTITY, WHICH THE PAGE REPORTED AND COULD NOT FIX.
+ *
+ * `readControllerIdentity` reads these seven out of the settings document, and until this form
+ * existed nothing in the repository wrote them — `settingsSchema` is `.strict()` and named none of
+ * them, so the only write path refused all seven. The preflight's own remedy line said "POST the
+ * missing fields to /api/settings", which was an instruction to use a door with no handle.
+ *
+ * The form lives here rather than on the settings page for a reason beyond convenience: the
+ * settings page posts to `/api/settings/autopilot`, which is a deliberate NOT_IMPLEMENTED refusal,
+ * and never touches `/api/settings` at all. Putting the fields where the gap is REPORTED means the
+ * operator reads what is missing and fixes it without changing screens — and the check turning
+ * green on the reload IS the confirmation, so there is no success banner here that could be wrong.
+ */
+const CONTROLLER_FIELDS: readonly {
+  key: string;
+  label: string;
+  hint: string;
+  placeholder: string;
+  long?: true;
+}[] = [
+  {
+    key: "controllerName",
+    label: "Controller name",
+    hint: "The legal entity that decides why this data is processed — not a trading name, if they differ.",
+    placeholder: "Abedin Ltd",
+  },
+  {
+    key: "controllerPostalAddress",
+    label: "Postal address",
+    hint: "A real address. Article 14 asks for it and CAN-SPAM requires one in every commercial message.",
+    placeholder: "1 Example Street, London, EC1A 1AA, United Kingdom",
+    long: true,
+  },
+  {
+    key: "controllerContactEmail",
+    label: "Contact email",
+    hint: "Where a person can reach a human about their data. Monitored by someone.",
+    placeholder: "privacy@abedin.example",
+  },
+  {
+    key: "privacyPolicyUrl",
+    label: "Privacy policy URL",
+    hint: "Quoted in the notice, so it must resolve. A malformed one is refused here rather than sent to a stranger.",
+    placeholder: "https://abedin.example/privacy",
+  },
+  {
+    key: "retentionPolicy",
+    label: "How long records are kept",
+    hint: "Quoted verbatim to the recipient. Nothing enforces it yet — it is a promise kept by hand until the retention sweep exists.",
+    placeholder: "Twelve months from last contact, then deleted.",
+    long: true,
+  },
+  {
+    key: "supervisoryAuthority",
+    label: "Supervisory authority",
+    hint: "Which regulator a person may complain to, and how to reach them.",
+    placeholder: "The Information Commissioner's Office — ico.org.uk/make-a-complaint",
+    long: true,
+  },
+  {
+    key: "dpoContact",
+    label: "Data protection contact",
+    hint: "Required even with no DPO appointed. Absent and “none appointed” are different facts, and only one of them is a configured system — so write the sentence rather than leaving it blank.",
+    placeholder: "No data protection officer is appointed. Contact privacy@abedin.example.",
+    long: true,
+  },
+];
+
+function ControllerIdentityForm({ onSaved }: { onSaved: () => Promise<void> | void }) {
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+  const [version, setVersion] = useState<number>(0);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  // Read the current document before offering to edit it. A form that opened empty would invite
+  // an operator to blank a field they never meant to touch — and this route merges, so a field
+  // they leave out is kept rather than cleared.
+  const open_ = useCallback(async () => {
+    setOpen(true);
+    setProblem(null);
+    try {
+      const res = await apiFetch("/api/settings");
+      if (!res.ok) {
+        setProblem("The current settings could not be read, so this form will not guess at them.");
+        return;
+      }
+      const body = await res.json();
+      const next: Record<string, string> = {};
+      for (const f of CONTROLLER_FIELDS) {
+        next[f.key] = typeof body?.[f.key] === "string" ? body[f.key] : "";
+      }
+      setValues(next);
+      setVersion(typeof body?.version === "number" ? body.version : 0);
+    } catch {
+      setProblem("The current settings could not be read, so this form will not guess at them.");
+    }
+  }, []);
+
+  const save = useCallback(async () => {
+    if (values === null) return;
+    setSaving(true);
+    setProblem(null);
+    try {
+      // Only non-empty fields are sent. The route merges, so omitting a field leaves the stored
+      // value alone; sending "" would fail `.min(1)` and refuse the whole save because of a box
+      // the operator had not got to yet.
+      const payload: Record<string, string> = {};
+      for (const f of CONTROLLER_FIELDS) {
+        const v = (values[f.key] ?? "").trim();
+        if (v !== "") payload[f.key] = v;
+      }
+      if (Object.keys(payload).length === 0) {
+        setProblem("Nothing to save yet.");
+        return;
+      }
+      const res = await apiFetch("/api/settings", {
+        method: "POST",
+        // P1.3 — the version travels with the write, or a concurrent edit is discarded silently.
+        headers: { "Content-Type": "application/json", "If-Match": String(version) },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null);
+        setProblem(body?.error?.message ?? "The save was refused and the reason could not be read.");
+        return;
+      }
+      // No success message. The check above re-renders from live state, and a partial save is
+      // progress rather than completion — saying "saved" would invite reading it as "done".
+      await onSaved();
+      setOpen(false);
+      setValues(null);
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "The save failed.");
+    } finally {
+      setSaving(false);
+    }
+  }, [values, version, onSaved]);
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => void open_()}
+        className="mt-2.5 text-xs font-medium text-sky-300 hover:text-sky-200 underline underline-offset-2"
+      >
+        Configure these here
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3 bg-slate-950/50 border border-slate-700/60 rounded-xl p-4">
+      <p className="text-[11px] text-slate-400 leading-relaxed mb-3">
+        Saved fields are merged, so you can fill in what you know now and come back. The check above
+        stays blocking until all seven are present — it will name whatever is still missing.
+      </p>
+      {values === null && problem === null && (
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Reading current settings…
+        </div>
+      )}
+      {values !== null && (
+        <div className="space-y-3">
+          {CONTROLLER_FIELDS.map((f) => (
+            <div key={f.key}>
+              <label className="block text-[11px] font-medium text-slate-200">{f.label}</label>
+              <p className="text-[10px] text-slate-500 leading-relaxed mt-0.5 mb-1">{f.hint}</p>
+              {f.long === true ? (
+                <textarea
+                  rows={2}
+                  value={values[f.key] ?? ""}
+                  placeholder={f.placeholder}
+                  onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-600"
+                />
+              ) : (
+                <input
+                  value={values[f.key] ?? ""}
+                  placeholder={f.placeholder}
+                  onChange={(e) => setValues({ ...values, [f.key]: e.target.value })}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-600"
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {problem !== null && (
+        <p className="text-xs text-rose-300 mt-3 leading-relaxed">{problem}</p>
+      )}
+      <div className="flex items-center gap-2 mt-4">
+        <button
+          onClick={() => void save()}
+          disabled={saving || values === null}
+          className="text-xs font-medium bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white rounded-lg px-3 py-1.5"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          onClick={() => {
+            setOpen(false);
+            setValues(null);
+            setProblem(null);
+          }}
+          className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1.5"
+        >
+          Cancel
+        </button>
       </div>
     </div>
   );
@@ -188,7 +403,11 @@ export default function OutreachReadinessView() {
             <h2 className="text-sm font-semibold text-white mb-1">The checks</h2>
             <div className="mt-2">
               {preflight.checks.map((check) => (
-                <CheckRow key={check.id} check={check} />
+                <CheckRow key={check.id} check={check}>
+                  {check.id === "controller-identity" && check.status !== "PASS" && (
+                    <ControllerIdentityForm onSaved={load} />
+                  )}
+                </CheckRow>
               ))}
             </div>
           </div>

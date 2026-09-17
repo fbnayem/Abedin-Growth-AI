@@ -308,13 +308,30 @@ export interface TickReport {
 
 type Patch = Partial<RecipientDoc>;
 
-/** Move a recipient, asking the map inside the transaction. Returns the verdict the map gave. */
+/**
+ * Move a recipient, asking the map inside the transaction. Returns the verdict the map gave.
+ *
+ * `alsoContacted` writes `lastContactedAt` onto the CONTACT in the same transaction, and is passed
+ * only where a send has actually been confirmed by the outbox.
+ *
+ * WHY IT IS THE SAME TRANSACTION. These are two records of one event. If the recipient's `sentAt`
+ * grows and the contact's `lastContactedAt` does not, the frequency cap under-counts this person's
+ * mail and a retention sweep ages them from a date that predates a message they were sent. Two
+ * writes that can diverge would be a slow, invisible divergence rather than a visible failure.
+ *
+ * WHY THE FIELD NEEDED A WRITER AT ALL. `lastContactMs` has read `contact.lastContactedAt` since
+ * the frequency guard was written, and a repository-wide search found no writer — only that read,
+ * a comment, and one test fixture. So `sendsInWindow` and `msSinceLastSend` have been computed
+ * from recipient rows alone, and the guard was partly evaluating a field that was always
+ * undefined.
+ */
 async function transition(
   orgId: string,
   id: string,
   to: string,
   patch: Patch,
-  now: number
+  now: number,
+  alsoContacted?: { readonly contactId: string; readonly at: number }
 ): Promise<{ ok: true; changed: boolean } | { ok: false; message: string }> {
   const ref = recipientRef(orgId, id);
   return runTransaction(store, async (tx) => {
@@ -323,6 +340,24 @@ async function transition(
     const current = readRecipient(snap.data());
     const verdict = assertTransition(CAMPAIGN_RECIPIENT, current.status, to);
     if (verdict.ok === false) return { ok: false as const, message: verdict.message };
+
+    // Read before the write, and inside the transaction, like every other contact patch here. A
+    // contact deleted between the tick's read and this moment is an ordinary answer: the
+    // recipient still transitions, because the send did happen.
+    if (alsoContacted !== undefined) {
+      const contactRef = doc(store, orgPath(orgId, 'contacts'), alsoContacted.contactId);
+      const fresh = await tx.get(contactRef);
+      if (fresh.exists()) {
+        const contact = fresh.data() as Record<string, unknown>;
+        tx.set(contactRef, {
+          ...contact,
+          lastContactedAt: new Date(alsoContacted.at).toISOString(),
+          version: (typeof contact.version === 'number' ? contact.version : 0) + 1,
+          updatedAt: new Date(alsoContacted.at).toISOString(),
+        });
+      }
+    }
+
     const next: RecipientDoc = {
       ...current,
       ...patch,
@@ -565,7 +600,10 @@ export async function runCampaignTick(
         r.id,
         to,
         { stepsDone: done, sentAt: [...r.sentAt, sentAtMs], nextStepDueAt: due === null ? null : due.getTime(), outboxJobId: null, lastRefusal: null },
-        nowMs
+        nowMs,
+        // The outbox confirmed this one. `sentAtMs` and not `nowMs`: the contact was contacted
+        // when the message went, not when this tick happened to notice.
+        { contactId: r.contactId, at: sentAtMs }
       );
       if (!verdict.ok) report.errors.push({ recipientId: r.id, message: verdict.message });
       else if (to === 'COMPLETED') report.reconciled.completed++;

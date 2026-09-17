@@ -3,10 +3,12 @@ import { readFileSync } from 'node:fs';
 import { memory } from './helpers/memoryDocumentStore';
 import {
   CONTROLLER_FIELDS,
+  MAX_CONTROLLER_FIELD,
   buildArticle14Notice,
   escapeHtml,
   readControllerIdentity,
 } from '../domain/article14Notice';
+import { settingsSchema } from '../domain/apiContracts';
 import { assessmentVerdict, type LiaRecord } from '../domain/lia';
 import type { Attribution } from '../domain/operatorAction';
 
@@ -575,5 +577,95 @@ describe('7. the source says what the tests say', () => {
     const flagGate = gateway.slice(gateway.indexOf('private checkFeatureFlag'), gateway.indexOf('private checkFeatureFlag') + 700);
     expect(flagGate).toContain('PRIVACY_NOTICE_SEND');
     expect(flagGate).not.toMatch(/PRIVACY_NOTICE_SEND:\s*\n?\s*return isRealActionEnabled\('REAL_(?!EMAIL_SEND)/);
+  });
+});
+
+describe('8. the read path and the write path agree about controller identity', () => {
+  /**
+   * THE DEFECT THIS SECTION EXISTS FOR.
+   *
+   * `readControllerIdentity` required seven fields out of the settings document, and
+   * `settingsSchema` — which is `.strict()`, and is the contract for the ONLY route that writes
+   * that document — named none of them. So `POST /api/settings` refused all seven, no other
+   * script, migration, seed or UI wrote them, and the Article 14 notice could not be sent through
+   * any path in the codebase. Every legitimate-interest send stayed blocked on
+   * `LI_NOTICE_NOT_SENT`, permanently.
+   *
+   * The system said so in its own words: the preflight's remedy line read "POST the missing
+   * fields to /api/settings" — an instruction to use a door with no handle.
+   *
+   * Two modules disagreeing about which fields exist is not a thing a reviewer reliably catches,
+   * because each is correct on its own. So it is asserted here rather than remembered.
+   */
+  it('THE INVARIANT — every CONTROLLER_FIELD can be written through the settings contract', () => {
+    const shape = Object.keys((settingsSchema as unknown as { shape: Record<string, unknown> }).shape);
+    for (const field of CONTROLLER_FIELDS) {
+      expect(shape, `${field} is read by the notice and must be writable`).toContain(field);
+    }
+  });
+
+  it('and what the contract accepts is what the notice reads — end to end', () => {
+    // Not a key-name comparison: the values go through the real schema and out the other side
+    // into the real reader. A schema that accepted the names and mangled the values would pass
+    // the assertion above and fail here.
+    const filled: Record<string, string> = {};
+    for (const field of CONTROLLER_FIELDS) {
+      filled[field] =
+        field === 'controllerContactEmail'
+          ? 'privacy@abedin.example'
+          : field === 'privacyPolicyUrl'
+            ? 'https://abedin.example/privacy'
+            : `a stated value for ${field}`;
+    }
+    const parsed = settingsSchema.safeParse(filled);
+    expect(parsed.success, JSON.stringify(parsed.success ? {} : parsed.error.issues)).toBe(true);
+    if (!parsed.success) return;
+
+    const outcome = readControllerIdentity(parsed.data as Record<string, unknown>);
+    expect(outcome.ok).toBe(true);
+  });
+
+  it('a partial save is progress and not completion', () => {
+    // The route merges, so an operator may fill four fields today and three tomorrow. The schema
+    // must accept the partial write; the DOMAIN is what refuses until all seven are present, and
+    // it must still name every one that is missing rather than the first.
+    const partial = { controllerName: 'Abedin Ltd', controllerContactEmail: 'privacy@abedin.example' };
+    expect(settingsSchema.safeParse(partial).success).toBe(true);
+
+    const outcome = readControllerIdentity(partial);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.code).toBe('CONTROLLER_NOT_CONFIGURED');
+    expect([...outcome.missing].sort()).toEqual(
+      CONTROLLER_FIELDS.filter((f) => f !== 'controllerName' && f !== 'controllerContactEmail')
+        .slice()
+        .sort()
+    );
+  });
+
+  it('the schema is not looser than the reader about length', () => {
+    // MAX_CONTROLLER_FIELD is the domain's bound. A schema that accepted more would take a value
+    // at the door and refuse it at use with CONTROLLER_FIELD_TOO_LONG — a write the system
+    // accepted and then would not read, which is the split this repository removes everywhere.
+    const tooLong = 'x'.repeat(MAX_CONTROLLER_FIELD + 1);
+    expect(settingsSchema.safeParse({ controllerName: tooLong }).success).toBe(false);
+    expect(settingsSchema.safeParse({ controllerName: 'x'.repeat(MAX_CONTROLLER_FIELD) }).success).toBe(true);
+  });
+
+  it('refuses a malformed email or URL at the door, because both reach a stranger', () => {
+    // Tighter than the domain on purpose: these two are quoted into a legal notice sent to
+    // someone who never asked for it, and a broken link there is not a cosmetic problem.
+    expect(settingsSchema.safeParse({ controllerContactEmail: 'not-an-address' }).success).toBe(false);
+    expect(settingsSchema.safeParse({ privacyPolicyUrl: 'privacy.html' }).success).toBe(false);
+    expect(settingsSchema.safeParse({ privacyPolicyUrl: 'https://abedin.example/privacy' }).success).toBe(true);
+  });
+
+  it('an empty string is not a stated value', () => {
+    // `readControllerIdentity` trims and treats '' as missing. If the schema accepted '' the two
+    // would disagree: the write would succeed and the field would still be reported missing, with
+    // nothing to tell the operator why their save did not help.
+    for (const field of CONTROLLER_FIELDS) {
+      expect(settingsSchema.safeParse({ [field]: '   ' }).success, field).toBe(false);
+    }
   });
 });

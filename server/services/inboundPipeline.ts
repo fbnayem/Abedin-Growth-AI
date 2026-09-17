@@ -345,7 +345,10 @@ export class InboundPipeline {
       await updateDoc(doc(store, orgPath(organizationId, 'contacts'), contactId), {
         hardBounced: true,
         emailStatus: 'BOUNCED',
-        hardBouncedAt: new Date(),
+        // An ISO string, like every other date on a contact. It was a `Date` object, which is the
+        // one date in this collection a reader has to special-case — and a retention sweep
+        // computing an age from it would read `[object Object]` and get NaN.
+        hardBouncedAt: new Date().toISOString(),
         hardBounceReason: `${automation.dsnStatus ?? 'unknown'}: ${automation.reason}`,
       });
       console.warn(

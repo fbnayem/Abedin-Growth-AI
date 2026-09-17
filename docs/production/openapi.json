@@ -10855,15 +10855,46 @@
                     "maxLength": 200,
                     "type": "string"
                   },
+                  "controllerContactEmail": {
+                    "format": "email",
+                    "maxLength": 320,
+                    "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                    "type": "string"
+                  },
+                  "controllerName": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "controllerPostalAddress": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
                   "dailySendLimit": {
                     "maximum": 10000,
                     "minimum": 0,
                     "type": "integer"
                   },
+                  "dpoContact": {
+                    "maxLength": 2000,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "privacyPolicyUrl": {
+                    "format": "uri",
+                    "maxLength": 2000,
+                    "type": "string"
+                  },
                   "replyToEmail": {
                     "format": "email",
                     "maxLength": 320,
                     "pattern": "^(?!\\.)(?!.*\\.\\.)([A-Za-z0-9_'+\\-\\.]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                    "type": "string"
+                  },
+                  "retentionPolicy": {
+                    "maxLength": 2000,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "senderEmail": {
@@ -10878,6 +10909,11 @@
                   },
                   "signatureHtml": {
                     "maxLength": 5000,
+                    "type": "string"
+                  },
+                  "supervisoryAuthority": {
+                    "maxLength": 2000,
+                    "minLength": 1,
                     "type": "string"
                   },
                   "timezone": {

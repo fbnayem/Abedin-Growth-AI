@@ -125,6 +125,40 @@ export const settingsSchema = z
     workingHoursEnd: z.number().int().min(0).max(23).optional(),
     dailySendLimit: z.number().int().min(0).max(10_000).optional(),
     signatureHtml: z.string().max(5000).optional(),
+
+    /**
+     * THE CONTROLLER IDENTITY, WHICH HAD NO WRITE PATH AT ALL.
+     *
+     * `readControllerIdentity` (server/domain/article14Notice.ts) reads these seven out of
+     * `organizations/<org>/settings/main`, and until now NOTHING in this repository wrote them.
+     * This schema is `.strict()` and did not name one of them, so the only writer — `POST
+     * /api/settings`, which persists the parsed body — was structurally incapable of carrying
+     * them. The Article 14 notice therefore could not be sent through any path in the codebase,
+     * and every legitimate-interest send stayed blocked on `LI_NOTICE_NOT_SENT`.
+     *
+     * The system said so itself. `outreachPreflight.ts` tells the operator, by way of remedy:
+     * "POST the missing fields to /api/settings" — the one route that refused all seven.
+     *
+     * EACH IS OPTIONAL HERE AND ALL SEVEN ARE REQUIRED BY THE DOMAIN. That is not a
+     * contradiction. This route is a merge-patch (`mergeSingletonBody` spreads over the current
+     * document), so optional is what lets an operator save four fields today and three tomorrow.
+     * `readControllerIdentity` is the gate: it reports every still-missing field by name and the
+     * preflight stays BLOCK until none are left. A partial save is progress, never completion.
+     *
+     * The bounds are the domain's bounds. 2000 is `MAX_CONTROLLER_FIELD`, matched exactly —
+     * anything looser would accept a value at the door that is refused at use with
+     * CONTROLLER_FIELD_TOO_LONG, which is the write/read split this repository removes everywhere
+     * else. Email and URL are tightened beyond the domain on purpose: a malformed one of either
+     * reaches a stranger's inbox inside a legal notice.
+     */
+    controllerName: z.string().trim().min(1).max(2000).optional(),
+    controllerPostalAddress: z.string().trim().min(1).max(2000).optional(),
+    controllerContactEmail: z.string().trim().email().max(320).optional(),
+    privacyPolicyUrl: z.string().trim().url().max(2000).optional(),
+    retentionPolicy: z.string().trim().min(1).max(2000).optional(),
+    supervisoryAuthority: z.string().trim().min(1).max(2000).optional(),
+    dpoContact: z.string().trim().min(1).max(2000).optional(),
+
     updatedAt: z.string().max(100).optional(),
   })
   .strict();

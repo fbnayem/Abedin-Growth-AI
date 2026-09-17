@@ -213,6 +213,34 @@ describe('3. reconciliation advances on what the outbox reports, never on what w
     expect(r.outboxJobId).toBeNull();
   });
 
+  /**
+   * THE CONTACT LEARNS IT WAS CONTACTED, IN THE SAME TRANSACTION.
+   *
+   * `lastContactMs` has read `contact.lastContactedAt` since the frequency guard was written, and
+   * a repository-wide search found no writer at all -- only that read, a comment, and one test
+   * fixture. So the cap was partly evaluating a field that was always undefined.
+   *
+   * Two records of one event: if the recipient's `sentAt` grows and the contact's
+   * `lastContactedAt` does not, the cap under-counts this person's mail and a retention sweep
+   * ages them from a date earlier than a message they were actually sent. Same transaction, so
+   * they cannot diverge.
+   */
+  it('a confirmed send writes lastContactedAt onto the CONTACT, at the send time', async () => {
+    const jobId = await dispatchStepOne();
+    const processedAt = NOW.getTime() + 5 * 60_000;
+    const before = memory.docs[`organizations/${ORG}/contacts/ada`] as Record<string, unknown>;
+    expect(before.lastContactedAt).toBeUndefined();
+
+    await processAt(jobId, processedAt);
+    // Deliberately ticked a minute LATER than the send: the contact was contacted when the
+    // message went, not when this tick happened to notice.
+    await runCampaignTick(ORG, deps, new Date(processedAt + 60_000), 'test');
+
+    const after = memory.docs[`organizations/${ORG}/contacts/ada`] as Record<string, unknown>;
+    expect(after.lastContactedAt).toBe(new Date(processedAt).toISOString());
+    expect(recipient('c1', 'ada').sentAt).toEqual([processedAt]);
+  });
+
   it('the second step is dispatched when due, the LINKEDIN_TASK step is skipped as not performed, and the sequence completes', async () => {
     const jobId = await dispatchStepOne();
     const sentAt = NOW.getTime() + 5 * 60_000;

@@ -306,6 +306,10 @@ export async function sendArticle14Notices(
           article14NoticeMessageId: providerMessageId ?? null,
           // Cleared: the send resolved, so a previous ambiguity is no longer pending.
           article14NoticeAmbiguousAt: null,
+          // A notice IS a contact — we put a message in this person's inbox. The frequency cap
+          // reads this field and the retention schedule ages from it, so a send that did not
+          // write it would leave both reasoning about a person we had in fact just emailed.
+          lastContactedAt: now.toISOString(),
           version: (typeof current.version === 'number' ? current.version : 0) + 1,
           updatedAt: now.toISOString(),
         });
